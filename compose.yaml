@@ -16,6 +16,15 @@ services:
       interval: 5s
       retries: 10
 
+  # Applies database migrations, then exits. The API starts only once it has succeeded.
+  migrate:
+    build: services/api
+    command: ["python", "-m", "swayambhu_api.migrate", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
+    depends_on:
+      db: { condition: service_healthy }
+
   api:
     build: services/api
     environment:
@@ -23,7 +32,7 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
     ports: ["8000:8080"]
     depends_on:
-      db: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
   worker:
     build: services/worker

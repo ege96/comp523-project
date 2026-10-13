@@ -3,8 +3,11 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-import psycopg
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 
+from swayambhu_api.models import AdminRow
 from swayambhu_api.tokens import Identity
 
 
@@ -46,47 +49,54 @@ def find_admin(store: AdminStore, identity: Identity) -> Admin | None:
     return store.get_by_identity(identity.provider, identity.subject)
 
 
-class PostgresAdminStore:
-    def __init__(self, database_url: str, connect_timeout: int) -> None:
-        self._database_url = database_url
-        self._connect_timeout = connect_timeout
+class SqlAlchemyAdminStore:
+    """AdminStore on the request's database session. Each write commits on its own."""
 
-    def _connect(self) -> psycopg.Connection[tuple[int, str]]:
-        return psycopg.connect(self._database_url, connect_timeout=self._connect_timeout)
+    def __init__(self, session: Session) -> None:
+        self._session = session
 
     def get_by_identity(self, provider: str, subject: str) -> Admin | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT id, email FROM admins WHERE auth_provider = %s AND auth_subject = %s",
-                (provider, subject),
-            ).fetchone()
-        return Admin(*row) if row else None
+        row = self._session.scalars(
+            select(AdminRow).where(
+                AdminRow.auth_provider == provider, AdminRow.auth_subject == subject
+            )
+        ).one_or_none()
+        return _admin(row)
 
     def claim_by_email(self, email: str, provider: str, subject: str) -> Admin | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "UPDATE admins SET auth_provider = %s, auth_subject = %s"
-                " WHERE lower(email) = lower(%s) AND auth_subject IS NULL"
-                " RETURNING id, email",
-                (provider, subject, email),
-            ).fetchone()
-        return Admin(*row) if row else None
+        # One conditional UPDATE, so two concurrent first sign-ins can't both claim the invite.
+        row = self._session.scalars(
+            update(AdminRow)
+            .where(func.lower(AdminRow.email) == func.lower(email), AdminRow.auth_subject.is_(None))
+            .values(auth_provider=provider, auth_subject=subject)
+            .returning(AdminRow)
+        ).one_or_none()
+        self._session.commit()
+        return _admin(row)
 
     def add(self, email: str) -> Admin | None:
-        with self._connect() as conn:
-            row = conn.execute(
-                "INSERT INTO admins (email) VALUES (%s)"
-                " ON CONFLICT ((lower(email))) DO NOTHING RETURNING id, email",
-                (email,),
-            ).fetchone()
-        return Admin(*row) if row else None
+        row = self._session.scalars(
+            insert(AdminRow)
+            .values(email=email)
+            .on_conflict_do_nothing(index_elements=[func.lower(AdminRow.email)])
+            .returning(AdminRow)
+        ).one_or_none()
+        self._session.commit()
+        return _admin(row)
 
     def remove(self, email: str) -> bool:
-        with self._connect() as conn:
-            cur = conn.execute("DELETE FROM admins WHERE lower(email) = lower(%s)", (email,))
-            return cur.rowcount > 0
+        removed = self._session.scalars(
+            delete(AdminRow)
+            .where(func.lower(AdminRow.email) == func.lower(email))
+            .returning(AdminRow.id)
+        ).one_or_none()
+        self._session.commit()
+        return removed is not None
 
     def list(self) -> list[Admin]:
-        with self._connect() as conn:
-            rows = conn.execute("SELECT id, email FROM admins ORDER BY id").fetchall()
-        return [Admin(*row) for row in rows]
+        rows = self._session.scalars(select(AdminRow).order_by(AdminRow.id))
+        return [Admin(row.id, row.email) for row in rows]
+
+
+def _admin(row: AdminRow | None) -> Admin | None:
+    return Admin(row.id, row.email) if row else None
