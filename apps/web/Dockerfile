@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # ---- build: compile the SPA ----
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app
 # Dependencies only. This layer is reused until the lockfile changes,
 # and the cache mount keeps npm's download cache between builds.
