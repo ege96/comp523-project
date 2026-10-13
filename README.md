@@ -87,6 +87,10 @@ docker compose run --rm api python -m swayambhu_api.manage_admins remove you@exa
 
 On CloudApps, run the same command with `oc exec deploy/<api deployment> -- python -m swayambhu_api.manage_admins ...`.
 
+## Logs and request IDs
+
+The API writes one JSON object per line to stdout (`LOG_FORMAT=json`, the default), which OpenShift collects. Set `LOG_FORMAT=text` for readable local output and `LOG_LEVEL` to change the level. Every response carries an `X-Request-ID`: the caller's own if it is a short token of letters, digits, `.`, `_` or `-`, otherwise a new one. Every log line written during that request includes it. Each request gets one access line with the method, path (no query string), status, duration and client IP. Headers, tokens and search terms are never logged. An unhandled error is logged with its stack and returns `500 {"detail": "Internal error", "request_id": "..."}`, so a reported ID leads straight to the trace.
+
 ## Database and migrations
 
 The API talks to Postgres through SQLAlchemy 2 (ORM models in `services/api/src/swayambhu_api/models.py`), with one connection pool per process and one session per request (`DbSession` in `db.py`). Tables are created and changed only by Alembic migrations in `swayambhu_api/migrations/versions`. `db/init` only enables the `vector` extension, which needs a database superuser.
