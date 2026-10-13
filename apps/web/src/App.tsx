@@ -4,18 +4,24 @@ import { useEffect, useState } from "react";
 import { fetchReadiness, type ReadinessStatus } from "./api";
 
 type State =
-  | { kind: "loading" }
-  | { kind: "loaded"; readiness: ReadinessStatus }
-  | { kind: "error" };
+  { kind: "loading" } | { kind: "loaded"; readiness: ReadinessStatus } | { kind: "error" };
 
-export function App({ loadReadiness = fetchReadiness }: { loadReadiness?: () => Promise<ReadinessStatus> }) {
+export function App({
+  loadReadiness = fetchReadiness,
+}: {
+  loadReadiness?: () => Promise<ReadinessStatus>;
+}) {
   const [state, setState] = useState<State>({ kind: "loading" });
 
   useEffect(() => {
     let cancelled = false;
     loadReadiness()
-      .then((readiness) => !cancelled && setState({ kind: "loaded", readiness }))
-      .catch(() => !cancelled && setState({ kind: "error" }));
+      .then((readiness) => {
+        if (!cancelled) setState({ kind: "loaded", readiness });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ kind: "error" });
+      });
     return () => {
       cancelled = true;
     };
@@ -33,7 +39,8 @@ export function App({ loadReadiness = fetchReadiness }: { loadReadiness?: () => 
           <Alert severity="success">API, database, and pgvector are ready.</Alert>
         ) : (
           <Alert severity="warning">
-            API is up, but {state.readiness.database ? "pgvector is missing" : "the database is unreachable"}.
+            API is up, but{" "}
+            {state.readiness.database ? "pgvector is missing" : "the database is unreachable"}.
           </Alert>
         ))}
     </Container>

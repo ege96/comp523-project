@@ -39,13 +39,31 @@ cd services/worker && uv sync && uv run python -m swayambhu_worker
 
 ## Checks
 
+CI runs on every PR. Treat these as required checks when you set up branch protection:
+
+| Job | What it runs |
+|---|---|
+| `api`, `worker` | ruff lint and format, mypy `--strict`, pytest with at least 80% coverage. The API job also runs an integration test against Postgres + pgvector. |
+| `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with at least 80% coverage, Vite build |
+| `pre-commit` | Every hook in `.pre-commit-config.yaml`, including private-key and large-file checks |
+| `docker` | Builds all three images without pushing them |
+
+To run the same checks before you commit:
+
 ```sh
-cd services/api    && uv run ruff check . && uv run mypy && uv run pytest
-cd services/worker && uv run ruff check . && uv run mypy && uv run pytest
-cd apps/web        && npm run typecheck && npm test
+uv tool install pre-commit && pre-commit install   # once
+pre-commit run --all-files
 ```
 
-CI runs all of these, plus an integration test against a real Postgres with pgvector.
+To run them by hand:
+
+```sh
+cd services/api    && uv run ruff check . && uv run mypy && uv run pytest --cov
+cd services/worker && uv run ruff check . && uv run mypy && uv run pytest --cov
+cd apps/web        && npm run lint && npm run typecheck && npm run test:coverage
+```
+
+Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 
 ## Health endpoints
 

@@ -7,13 +7,21 @@ afterEach(cleanup);
 
 describe("App readiness banner", () => {
   it("reports ready when API, database and pgvector are up", async () => {
-    render(<App loadReadiness={async () => ({ status: "ok", database: true, pgvector: true })} />);
+    render(
+      <App
+        loadReadiness={() => Promise.resolve({ status: "ok", database: true, pgvector: true })}
+      />,
+    );
     expect(await screen.findByText(/pgvector are ready/)).toBeTruthy();
   });
 
   it("says pgvector is missing when the database is up without it", async () => {
     render(
-      <App loadReadiness={async () => ({ status: "unavailable", database: true, pgvector: false })} />,
+      <App
+        loadReadiness={() =>
+          Promise.resolve({ status: "unavailable", database: true, pgvector: false })
+        }
+      />,
     );
     expect(await screen.findByText(/pgvector is missing/)).toBeTruthy();
   });
