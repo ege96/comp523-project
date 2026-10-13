@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Image tags are written out in full (no ARGs) so Dependabot can read and bump them.
-FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.0 AS uv
 
 # ---- build: resolve and install dependencies into /opt/venv ----
 FROM python:3.12-slim AS build
