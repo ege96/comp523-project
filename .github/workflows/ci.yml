@@ -132,7 +132,8 @@ jobs:
           - name: api
             context: services/api
             smoke: |
-              docker run -d --name app --user 1000680000:0 -p 8080:8080 "$IMAGE"
+              # No database here, so skip the startup migration.
+              docker run -d --name app --user 1000680000:0 -e RUN_MIGRATIONS=0 -p 8080:8080 "$IMAGE"
               for i in $(seq 20); do curl -fsS localhost:8080/api/health && break; sleep 1; done
               curl -fsS localhost:8080/api/health | grep -q '"ok"'
           - name: worker
