@@ -1,0 +1,52 @@
+# Install once: `uv tool install pre-commit && pre-commit install`
+# Hooks reuse each project's locked tool versions, so local results match CI.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files  # media belongs in storage, not git
+      - id: detect-private-key
+      - id: check-merge-conflict
+
+  - repo: local
+    hooks:
+      - id: ruff-api
+        name: ruff (api)
+        entry: uv run --directory services/api ruff check --fix
+        language: system
+        files: ^services/api/.*\.py$
+        pass_filenames: false
+      - id: ruff-format-api
+        name: ruff format (api)
+        entry: uv run --directory services/api ruff format
+        language: system
+        files: ^services/api/.*\.py$
+        pass_filenames: false
+      - id: ruff-worker
+        name: ruff (worker)
+        entry: uv run --directory services/worker ruff check --fix
+        language: system
+        files: ^services/worker/.*\.py$
+        pass_filenames: false
+      - id: ruff-format-worker
+        name: ruff format (worker)
+        entry: uv run --directory services/worker ruff format
+        language: system
+        files: ^services/worker/.*\.py$
+        pass_filenames: false
+      - id: prettier-web
+        name: prettier (web)
+        entry: npm --prefix apps/web run format
+        language: system
+        files: ^apps/web/
+        pass_filenames: false
+      - id: eslint-web
+        name: eslint (web)
+        entry: npm --prefix apps/web run lint
+        language: system
+        files: ^apps/web/.*\.(ts|tsx|js)$
+        pass_filenames: false
