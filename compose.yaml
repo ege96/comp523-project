@@ -20,7 +20,7 @@ services:
     build: services/api
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
-      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
     ports: ["8000:8080"]
     depends_on:
       db: { condition: service_healthy }
