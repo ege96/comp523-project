@@ -46,7 +46,7 @@ CI runs on every PR. Treat these as required checks when you set up branch prote
 | `api`, `worker` | ruff lint and format, mypy `--strict`, pytest with at least 80% coverage. The API job also runs an integration test against Postgres + pgvector. |
 | `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with at least 80% coverage, Vite build |
 | `pre-commit` | Every hook in `.pre-commit-config.yaml`, including private-key and large-file checks |
-| `docker` | Builds all three images without pushing them |
+| `docker` | Runs hadolint on each Dockerfile, builds the image with a layer cache, runs it as an arbitrary non-root UID (like OpenShift does), and writes the image size to the job summary |
 
 To run the same checks before you commit:
 

@@ -92,15 +92,57 @@ jobs:
       - run: uvx pre-commit run --all-files --show-diff-on-failure
 
   docker:
-    # Builds each image (no push) so a broken Dockerfile fails the PR, not the deploy.
+    # Builds each image (no push), checks it runs as an arbitrary non-root UID the way
+    # OpenShift starts containers, and reports its size. Layers are cached between runs.
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        service: [apps/web, services/api, services/worker]
+        include:
+          - name: web
+            context: apps/web
+            smoke: |
+              docker run -d --name app --user 1000680000:0 -p 8080:8080 "$IMAGE"
+              for i in $(seq 20); do curl -fsS localhost:8080/ >/dev/null && break; sleep 1; done
+              curl -fsS localhost:8080/ | grep -q '<div id="root">'
+          - name: api
+            context: services/api
+            smoke: |
+              docker run -d --name app --user 1000680000:0 -p 8080:8080 "$IMAGE"
+              for i in $(seq 20); do curl -fsS localhost:8080/api/health && break; sleep 1; done
+              curl -fsS localhost:8080/api/health | grep -q '"ok"'
+          - name: worker
+            context: services/worker
+            smoke: |
+              docker run --rm --user 1000680000:0 "$IMAGE" python -c "import swayambhu_worker.__main__"
+              docker run --rm --user 1000680000:0 "$IMAGE" ffmpeg -hide_banner -version
+              docker run --rm --user 1000680000:0 "$IMAGE" ffprobe -hide_banner -version
+    name: docker (${{ matrix.context }})
+    env:
+      IMAGE: swayambhu-${{ matrix.name }}:ci
     steps:
       - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.context }}/Dockerfile
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.service }}
+          context: ${{ matrix.context }}
           push: false
+          load: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,scope=${{ matrix.name }},mode=max
+      - name: Smoke test as an arbitrary UID
+        run: ${{ matrix.smoke }}
+      - name: Report image size
+        if: always()
+        run: |
+          size=$(docker image inspect "$IMAGE" --format '{{.Size}}' | numfmt --to=iec)
+          {
+            echo "### ${{ matrix.name }} image: $size"
+            echo '```'
+            docker history --format 'table {{.Size}}\t{{.CreatedBy}}' "$IMAGE" | head -20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

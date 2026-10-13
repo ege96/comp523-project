@@ -1,16 +1,35 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1.7
+ARG PYTHON_VERSION=3.12
 
-COPY --from=ghcr.io/astral-sh/uv:0.11 /uv /usr/local/bin/uv
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PROJECT_ENVIRONMENT=/opt/venv PATH=/opt/venv/bin:$PATH
-
+# ---- build: resolve and install dependencies into /opt/venv ----
+FROM python:${PYTHON_VERSION}-slim AS build
+COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-COPY src ./src
-RUN uv sync --frozen --no-dev
 
-# OpenShift runs containers as an arbitrary UID in group 0.
-RUN chgrp -R 0 /app /opt/venv && chmod -R g=u /app /opt/venv
+# Dependencies only. This layer is reused until pyproject.toml or uv.lock changes,
+# and the cache mount keeps downloaded wheels between builds.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    uv sync --frozen --no-dev --no-install-project
+
+# Then the app itself, installed non-editable so the runtime image needs no source tree.
+COPY pyproject.toml uv.lock ./
+COPY src ./src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-editable
+
+# ---- runtime: just Python and the venv (no uv, no build files) ----
+FROM python:${PYTHON_VERSION}-slim
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONUNBUFFERED=1
+# Files are world-readable, so OpenShift's arbitrary UID (group 0) can run them.
+# No chmod/chgrp pass: that would copy the whole venv into a second layer.
+COPY --from=build /opt/venv /opt/venv
 USER 1001
 EXPOSE 8080
 CMD ["uvicorn", "swayambhu_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
