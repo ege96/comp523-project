@@ -24,7 +24,7 @@ docker compose up --build
 curl localhost:8000/api/health/ready   # {"status":"ok","database":true,"pgvector":true}
 ```
 
-Web app (proxies `/api` to `localhost:8000`):
+Web app (Node 24, see `apps/web/.nvmrc`; proxies `/api` to `localhost:8000`):
 
 ```sh
 cd apps/web && npm install && npm run dev
