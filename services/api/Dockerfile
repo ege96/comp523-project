@@ -31,8 +31,10 @@ ENV PATH=/opt/venv/bin:$PATH \
 # Files are world-readable, so OpenShift's arbitrary UID (group 0) can run them.
 # No chmod/chgrp pass: that would copy the whole venv into a second layer.
 COPY --from=build /opt/venv /opt/venv
+# Only the OpenShift router (via the Service) can reach the pod, so trust its
+# X-Forwarded-For for client IPs. Override per environment if that ever changes.
+ENV FORWARDED_ALLOW_IPS="*"
+COPY start.sh /opt/start.sh
 USER 1001
 EXPOSE 8080
-# Client IPs come from X-Forwarded-For only when the peer is in FORWARDED_ALLOW_IPS
-# (uvicorn's own setting; default 127.0.0.1). On CloudApps set it to the router's range.
-CMD ["uvicorn", "swayambhu_api.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+CMD ["sh", "/opt/start.sh"]
