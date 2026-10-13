@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,6 +15,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "development"
+    # json: one JSON object per line, for OpenShift's log collection. text: easier to read locally.
+    log_format: Literal["json", "text"] = "json"
+    log_level: str = "INFO"
     # libpq connection string, e.g. postgresql://user:pass@host:5432/swayambhu
     database_url: str = "postgresql://swayambhu@localhost:5432/swayambhu"
     db_connect_timeout_seconds: int = 3
