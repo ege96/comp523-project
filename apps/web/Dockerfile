@@ -12,7 +12,8 @@ COPY . .
 RUN npm run build
 
 # ---- runtime: static files on unprivileged nginx (runs as non-root on 8080) ----
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.30-alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY security-headers.inc /etc/nginx/conf.d/security-headers.inc
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080

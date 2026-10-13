@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
-ARG PYTHON_VERSION=3.12
+# Image tags are written out in full (no ARGs) so Dependabot can read and bump them.
+FROM ghcr.io/astral-sh/uv:0.11.32 AS uv
 
 # ---- build: resolve and install dependencies into /opt/venv ----
-FROM python:${PYTHON_VERSION}-slim AS build
-COPY --from=ghcr.io/astral-sh/uv:0.11.32 /uv /usr/local/bin/uv
+FROM python:3.12-slim AS build
+COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
@@ -24,7 +25,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
 # ---- runtime: just Python and the venv (no uv, no build files) ----
-FROM python:${PYTHON_VERSION}-slim
+FROM python:3.12-slim
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1
 # Files are world-readable, so OpenShift's arbitrary UID (group 0) can run them.
@@ -32,4 +33,6 @@ ENV PATH=/opt/venv/bin:$PATH \
 COPY --from=build /opt/venv /opt/venv
 USER 1001
 EXPOSE 8080
-CMD ["uvicorn", "swayambhu_api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Client IPs come from X-Forwarded-For only when the peer is in FORWARDED_ALLOW_IPS
+# (uvicorn's own setting; default 127.0.0.1). On CloudApps set it to the router's range.
+CMD ["uvicorn", "swayambhu_api.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]

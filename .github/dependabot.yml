@@ -12,6 +12,31 @@ updates:
     directory: /apps/web
     schedule: { interval: weekly }
     groups: { npm: { patterns: ["*"] } }
+    ignore:
+      # typescript-eslint supports TypeScript < 6.1 only. Lift once it supports newer.
+      - dependency-name: typescript
+        versions: [">=6.1"]
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+
+  # Base images. Python minor versions and nginx minor versions (odd = mainline) are moved by
+  # hand, since requires-python and CI change with Python, and nginx should stay on stable.
+  - package-ecosystem: docker
+    directories: [/apps/web, /services/api, /services/worker]
+    schedule: { interval: weekly }
+    groups: { images: { patterns: ["*"] } }
+    ignore:
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: nginxinc/nginx-unprivileged
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  # Local dev database. A Postgres major upgrade (pg16 -> pg17) needs a dump and restore, so
+  # it is never automatic. CI's service container (.github/workflows/ci.yml) uses the same
+  # image and isn't covered by Dependabot: keep the two in step by hand.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule: { interval: weekly }
+    ignore:
+      - dependency-name: pgvector/pgvector
+        update-types: ["version-update:semver-major"]
