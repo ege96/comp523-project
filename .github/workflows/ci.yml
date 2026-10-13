@@ -140,6 +140,7 @@ jobs:
         if: always()
         run: |
           size=$(docker image inspect "$IMAGE" --format '{{.Size}}' | numfmt --to=iec)
+          echo "::notice title=${{ matrix.name }} image size::$size"
           {
             echo "### ${{ matrix.name }} image: $size"
             echo '```'
