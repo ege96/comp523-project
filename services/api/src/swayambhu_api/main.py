@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Response, status
@@ -6,8 +8,18 @@ from pydantic import BaseModel
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
+from swayambhu_api.logging_setup import install_request_context, setup_logging
 
-app = FastAPI(title="Swayambhu Stories API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    settings = get_settings()
+    setup_logging(settings.log_format, settings.log_level)
+    yield
+
+
+app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
+install_request_context(app)
 
 
 class LivenessResponse(BaseModel):
