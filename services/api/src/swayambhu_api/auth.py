@@ -12,8 +12,9 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from swayambhu_api.admins import Admin, AdminStore, PostgresAdminStore, find_admin
+from swayambhu_api.admins import Admin, AdminStore, SqlAlchemyAdminStore, find_admin
 from swayambhu_api.config import Settings, get_settings
+from swayambhu_api.db import DbSession
 from swayambhu_api.tokens import (
     FirebaseTokenVerifier,
     Identity,
@@ -50,8 +51,8 @@ def get_token_verifier(
     return _firebase_verifier(settings.firebase_project_id, settings.firebase_jwks_url)
 
 
-def get_admin_store(settings: Annotated[Settings, Depends(get_settings)]) -> AdminStore:
-    return PostgresAdminStore(settings.database_url, settings.db_connect_timeout_seconds)
+def get_admin_store(session: DbSession) -> AdminStore:
+    return SqlAlchemyAdminStore(session)
 
 
 def _unauthorized(detail: str) -> HTTPException:
