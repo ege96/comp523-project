@@ -9,6 +9,8 @@ dependencies = [
     "pydantic-settings>=2.4",
     "psycopg[binary]>=3.2",
     "pyjwt[crypto]>=2.9",
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
 ]
 
 [dependency-groups]

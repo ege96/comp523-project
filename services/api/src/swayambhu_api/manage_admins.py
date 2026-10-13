@@ -13,8 +13,9 @@ import sys
 from collections.abc import Sequence
 from typing import TextIO
 
-from swayambhu_api.admins import AdminStore, PostgresAdminStore
+from swayambhu_api.admins import AdminStore, SqlAlchemyAdminStore
 from swayambhu_api.config import get_settings
+from swayambhu_api.db import session_factory
 
 
 def run(argv: Sequence[str], store: AdminStore, out: TextIO = sys.stdout) -> int:
@@ -47,9 +48,8 @@ def run(argv: Sequence[str], store: AdminStore, out: TextIO = sys.stdout) -> int
 
 
 def main() -> int:  # pragma: no cover - thin wrapper around run()
-    settings = get_settings()
-    store = PostgresAdminStore(settings.database_url, settings.db_connect_timeout_seconds)
-    return run(sys.argv[1:], store)
+    with session_factory(get_settings())() as session:
+        return run(sys.argv[1:], SqlAlchemyAdminStore(session))
 
 
 if __name__ == "__main__":  # pragma: no cover
