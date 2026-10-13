@@ -42,7 +42,7 @@ jobs:
       - run: uv run pytest --cov
       - name: Integration test against Postgres + pgvector
         run: |
-          psql "$DATABASE_URL" -f ../../db/init/001_extensions.sql
+          for f in ../../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
           uv run pytest -m integration
 
   worker:
