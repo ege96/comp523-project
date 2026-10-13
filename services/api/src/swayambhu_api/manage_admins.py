@@ -15,7 +15,7 @@ from typing import TextIO
 
 from swayambhu_api.admins import AdminStore, SqlAlchemyAdminStore
 from swayambhu_api.config import get_settings
-from swayambhu_api.db import session_factory
+from swayambhu_api.db import new_session
 
 
 def run(argv: Sequence[str], store: AdminStore, out: TextIO = sys.stdout) -> int:
@@ -48,7 +48,7 @@ def run(argv: Sequence[str], store: AdminStore, out: TextIO = sys.stdout) -> int
 
 
 def main() -> int:  # pragma: no cover - thin wrapper around run()
-    with session_factory(get_settings())() as session:
+    with new_session(get_settings()) as session:
         return run(sys.argv[1:], SqlAlchemyAdminStore(session))
 
 

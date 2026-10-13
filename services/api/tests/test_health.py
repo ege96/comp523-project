@@ -3,9 +3,8 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from swayambhu_api.config import Settings
 from swayambhu_api.db import DatabaseStatus
-from swayambhu_api.main import app, get_database_checker
+from swayambhu_api.main import app, get_database_status
 
 
 @pytest.fixture
@@ -15,10 +14,7 @@ def client() -> Iterator[TestClient]:
 
 
 def use_status(db: DatabaseStatus) -> None:
-    def checker(_: Settings) -> DatabaseStatus:
-        return db
-
-    app.dependency_overrides[get_database_checker] = lambda: checker
+    app.dependency_overrides[get_database_status] = lambda: db
 
 
 def test_liveness_does_not_need_database(client: TestClient) -> None:

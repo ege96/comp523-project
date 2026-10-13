@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Response, status
@@ -26,11 +25,8 @@ class AdminResponse(BaseModel):
     email: str
 
 
-DatabaseChecker = Callable[[Settings], DatabaseStatus]
-
-
-def get_database_checker() -> DatabaseChecker:
-    return check_database
+def get_database_status(settings: Annotated[Settings, Depends(get_settings)]) -> DatabaseStatus:
+    return check_database(settings)
 
 
 @app.get("/api/health", response_model=LivenessResponse)
@@ -42,11 +38,9 @@ def health() -> LivenessResponse:
 @app.get("/api/health/ready", response_model=ReadinessResponse)
 def ready(
     response: Response,
-    settings: Annotated[Settings, Depends(get_settings)],
-    checker: Annotated[DatabaseChecker, Depends(get_database_checker)],
+    db: Annotated[DatabaseStatus, Depends(get_database_status)],
 ) -> ReadinessResponse:
     """Readiness: Postgres is reachable and pgvector is installed. 503 otherwise."""
-    db = checker(settings)
     ok = db.reachable and db.pgvector_version is not None
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

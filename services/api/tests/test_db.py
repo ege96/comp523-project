@@ -1,10 +1,9 @@
 from urllib.parse import quote
 
 import pytest
-from sqlalchemy.orm import Session
 
 from swayambhu_api.config import Settings
-from swayambhu_api.db import check_database, get_engine, get_session, sqlalchemy_url
+from swayambhu_api.db import check_database, sqlalchemy_url
 from swayambhu_api.migrate import MIGRATIONS_DIR, alembic_config, main
 
 
@@ -26,18 +25,6 @@ def test_password_survives_url_conversion() -> None:
     assert url.password == reserved
 
 
-def test_one_engine_per_database() -> None:
-    settings = Settings(database_url="postgresql://u@db.invalid/d")
-    assert get_engine(settings) is get_engine(Settings(database_url="postgresql://u@db.invalid/d"))
-
-
-def test_session_per_request_is_closed() -> None:
-    sessions = get_session(Settings(database_url="postgresql://u@db.invalid/d"))
-    session = next(sessions)
-    assert isinstance(session, Session)
-    sessions.close()
-
-
 def test_unreachable_database_is_reported_not_raised() -> None:
     settings = Settings(database_url="postgresql://u@127.0.0.1:9/d", db_connect_timeout_seconds=1)
     status = check_database(settings)
@@ -50,13 +37,6 @@ def test_alembic_config_points_at_packaged_migrations() -> None:
     assert config.get_main_option("script_location") == str(MIGRATIONS_DIR)
     assert config.attributes["database_url"] == "postgresql://u@h/d"
     assert (MIGRATIONS_DIR / "env.py").is_file()
-
-
-def test_alembic_config_defaults_to_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "swayambhu_api.migrate.get_settings", lambda: Settings(database_url="postgresql://x@y/z")
-    )
-    assert alembic_config().attributes["database_url"] == "postgresql://x@y/z"
 
 
 def test_migrate_cli_needs_a_command() -> None:

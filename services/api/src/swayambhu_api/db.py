@@ -13,7 +13,7 @@ from fastapi import Depends
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 from swayambhu_api.config import Settings, get_settings
 
@@ -40,19 +40,14 @@ def get_engine(settings: Settings) -> Engine:
     return _engine(settings.database_url, settings.db_connect_timeout_seconds)
 
 
-@lru_cache
-def _sessions(engine: Engine) -> sessionmaker[Session]:
+def new_session(settings: Settings) -> Session:
     # Objects stay readable after commit, so a store can return what it just wrote.
-    return sessionmaker(engine, expire_on_commit=False)
-
-
-def session_factory(settings: Settings) -> sessionmaker[Session]:
-    return _sessions(get_engine(settings))
+    return Session(get_engine(settings), expire_on_commit=False)
 
 
 def get_session(settings: Annotated[Settings, Depends(get_settings)]) -> Iterator[Session]:
     """One session per request. Writes must commit; anything uncommitted is rolled back."""
-    with session_factory(settings)() as session:
+    with new_session(settings) as session:
         yield session
 
 

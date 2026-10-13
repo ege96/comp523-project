@@ -6,7 +6,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from swayambhu_api.config import Settings
-from swayambhu_api.db import session_factory
+from swayambhu_api.db import new_session
 from swayambhu_api.migrate import alembic_config
 
 
@@ -34,5 +34,5 @@ def database_url(integration_settings: Settings) -> str:
 
 @pytest.fixture
 def db_session(integration_settings: Settings, database_url: str) -> Iterator[Session]:
-    with session_factory(integration_settings)() as session:
+    with new_session(integration_settings) as session:
         yield session
