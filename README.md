@@ -70,6 +70,25 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 - `GET /api/health`: the process is up. Doesn't touch the database.
 - `GET /api/health/ready`: Postgres is reachable and the `vector` extension is installed. Returns 503 otherwise.
 
+## Sign-in and admins
+
+Public visitors don't sign in. Admins sign in with Firebase Authentication, and the web app sends the Firebase ID token as `Authorization: Bearer <token>`. The API checks the token's signature against Google's published keys and that it was issued for `FIREBASE_PROJECT_ID`. Firebase only says who someone is. Whether they are an admin is decided by the `admins` table in Postgres.
+
+- `GET /api/auth/me` returns the signed-in admin. It returns 401 with no token or a bad one, 403 for a valid sign-in that isn't an admin, and 503 if `FIREBASE_PROJECT_ID` isn't set.
+- In code, admin-only routes take `CurrentAdmin`. Routes that serve both the public and admins take `CurrentViewer` and must filter out Private content when `viewer.is_admin` is false. A test fails if any route outside the public list answers an anonymous request.
+
+Admins are added by email from the command line. The person becomes an admin the first time they sign in with that email, as long as Firebase reports the email as verified. After that, their Firebase account is what identifies them.
+
+```sh
+docker compose run --rm api python -m swayambhu_api.manage_admins add you@example.org
+docker compose run --rm api python -m swayambhu_api.manage_admins list
+docker compose run --rm api python -m swayambhu_api.manage_admins remove you@example.org
+```
+
+On CloudApps, run the same command with `oc exec deploy/<api deployment> -- python -m swayambhu_api.manage_admins ...`.
+
+`db/init` scripts only run when the local database volume is first created. If you already have one, apply the new table with `docker compose exec -T db psql -U swayambhu swayambhu < db/init/002_admins.sql`, or reset it with `docker compose down -v`.
+
 ## Deployment
 
 The target is UNC Carolina CloudApps (OpenShift). Every image runs as a non-root, arbitrary UID and listens on 8080. OpenShift manifests aren't written yet. The plan is to serve the web app and API on one host, with `/api` routed to the API.
