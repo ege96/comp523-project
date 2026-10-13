@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+
 import pytest
 from alembic import command
 from sqlalchemy import create_engine, inspect, text
@@ -57,3 +61,23 @@ def test_adopts_database_created_by_old_init_sql(database_url: str) -> None:
             conn.commit()
     finally:
         engine.dispose()
+
+
+def test_concurrent_upgrades_take_turns(database_url: str) -> None:
+    """Each API pod runs `upgrade head` on startup; the advisory lock makes them take turns.
+
+    Separate processes, like separate pods: Alembic's context is process-global.
+    """
+    config = alembic_config(database_url)
+    command.downgrade(config, "base")
+    cmd = [sys.executable, "-m", "swayambhu_api.migrate", "upgrade", "head"]
+    env = {**os.environ, "DATABASE_URL": database_url}
+    # Fixed argv, no shell.
+    procs = [
+        subprocess.Popen(cmd, env=env, stderr=subprocess.PIPE, text=True)  # noqa: S603
+        for _ in range(3)
+    ]
+    for proc in procs:
+        _, stderr = proc.communicate(timeout=60)
+        assert proc.returncode == 0, stderr
+    command.check(config)
