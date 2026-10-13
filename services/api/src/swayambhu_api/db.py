@@ -19,7 +19,7 @@ from swayambhu_api.config import Settings, get_settings
 
 
 def sqlalchemy_url(database_url: str) -> URL:
-    """DATABASE_URL stays a plain libpq URL (P-004); tell SQLAlchemy to use psycopg 3 with it."""
+    """DATABASE_URL stays a plain libpq URL (P-003); tell SQLAlchemy to use psycopg 3 with it."""
     url = make_url(database_url)
     if url.drivername in ("postgresql", "postgres"):
         url = url.set(drivername="postgresql+psycopg")
