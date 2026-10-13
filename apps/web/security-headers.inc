@@ -9,3 +9,7 @@ add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 # No includeSubDomains/preload: the host sits under UNC's shared apps.cloudapps.unc.edu.
 add_header Strict-Transport-Security "max-age=31536000" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+# Keeps other windows from scripting this page. allow-popups leaves room for Firebase's
+# sign-in popup (signInWithPopup) once sign-in lands.
+add_header Cross-Origin-Opener-Policy "same-origin-allow-popups" always;
+add_header Cross-Origin-Resource-Policy "same-origin" always;
