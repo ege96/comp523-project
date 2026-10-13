@@ -93,4 +93,8 @@ On CloudApps, run the same command with `oc exec deploy/<api deployment> -- pyth
 
 The target is UNC Carolina CloudApps (OpenShift). Every image runs as a non-root, arbitrary UID and listens on 8080. OpenShift manifests aren't written yet. The plan is to serve the web app and API on one host, with `/api` routed to the API.
 
+- **Web:** nginx sends a Content-Security-Policy, `nosniff`, Referrer-Policy, HSTS and Permissions-Policy on every response (`apps/web/security-headers.inc`). Hashed files under `/assets/` are cached for a year, and `index.html` is revalidated on every load. A new external host (Firebase sign-in, the media store) has to be added to the CSP, or the browser blocks it.
+- **API behind the router:** uvicorn takes the client IP from `X-Forwarded-For` only when the request comes from an address in `FORWARDED_ALLOW_IPS` (default `127.0.0.1`). On CloudApps, set it on the api Deployment to the router's address range.
+- **Base images** are updated by Dependabot. Python and nginx minor versions and Postgres major versions are moved by hand.
+
 Project decisions are recorded in `decisions_log.md` in the team's handoff bundle.

@@ -20,6 +20,7 @@ jobs:
         working-directory: services/api
     services:
       db:
+        # Same image as compose.yaml; Dependabot doesn't update this line, so bump both together.
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: swayambhu
@@ -105,6 +106,17 @@ jobs:
               docker run -d --name app --user 1000680000:0 -p 8080:8080 "$IMAGE"
               for i in $(seq 20); do curl -fsS localhost:8080/ >/dev/null && break; sleep 1; done
               curl -fsS localhost:8080/ | grep -q '<div id="root">'
+              # Security headers and cache rules (apps/web/nginx.conf, security-headers.inc).
+              headers=$(curl -fsSI localhost:8080/)
+              for h in "content-security-policy: default-src 'self'" "x-content-type-options: nosniff" \
+                       "referrer-policy:" "strict-transport-security:" "cache-control: no-cache"; do
+                grep -qi "^$h" <<<"$headers" || { echo "missing on /: $h"; exit 1; }
+              done
+              asset=$(curl -fsS localhost:8080/ | grep -o '/assets/[^"]*\.js' | head -1)
+              curl -fsSI -H 'Accept-Encoding: gzip' "localhost:8080$asset" > asset-headers
+              grep -qi '^cache-control: public, max-age=31536000, immutable' asset-headers
+              grep -qi '^content-encoding: gzip' asset-headers
+              grep -qi '^x-content-type-options: nosniff' asset-headers
           - name: api
             context: services/api
             smoke: |
