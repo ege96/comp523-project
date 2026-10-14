@@ -17,6 +17,10 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # pgvector's types are used from 0002 on. db/init creates the extension for Docker and CI,
+    # but a fresh CloudApps database has nothing to run it, so the migrations do it too.
+    # Needs a role allowed to create extensions (the pgvector image's user is).
+    op.execute("CREATE EXTENSION IF NOT EXISTS vector")
     # Databases set up before Alembic already have this table from db/init/002_admins.sql,
     # with the same columns and constraint names. Adopt it as-is instead of failing.
     if not context.is_offline_mode() and sa.inspect(op.get_bind()).has_table("admins"):
