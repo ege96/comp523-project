@@ -118,7 +118,7 @@ def transcribe(
     rows: list[SegmentRow] = []
     with store.local_copy(media.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
         total_ms = audio.duration_ms(source)
-        for index, piece in enumerate(audio.plan_pieces(total_ms, audio.silences(source))):
+        for index, piece in enumerate(audio.plan_pieces(total_ms, audio.loudness(source))):
             clip_path = Path(tmp) / f"piece-{index:05d}.flac"
             audio.cut(source, piece, clip_path)
             clip = AudioClip(clip_path, piece.end_ms - piece.start_ms)
