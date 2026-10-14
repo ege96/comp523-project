@@ -2,8 +2,10 @@
 # that sets its own. Not named *.conf, so conf.d doesn't load it a second time.
 #
 # style-src needs 'unsafe-inline' because MUI (Emotion) injects <style> tags. Scripts stay 'self'.
-# Firebase sign-in and the media host get added to connect-src/frame-src/media-src when they land.
-add_header Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+# Firebase sign-in (popup): its helper script, the auth iframe on the project's authDomain, and
+# the token endpoints. A different VITE_FIREBASE_AUTH_DOMAIN must replace the frame-src host.
+# Media is served by the API on the same origin, so media-src stays 'self' via default-src.
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://apis.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; frame-src https://comp523.firebaseapp.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 # No includeSubDomains/preload: the host sits under UNC's shared apps.cloudapps.unc.edu.
