@@ -5,12 +5,15 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Response, status
 from pydantic import BaseModel
 
+from swayambhu_api.admin_interviews import router as admin_interviews_router
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
 from swayambhu_api.interviews import router as interviews_router
 from swayambhu_api.logging_setup import install_request_context, setup_logging
 from swayambhu_api.search import router as search_router
+from swayambhu_api.uploads import require_upload_admin
+from swayambhu_api.uploads import router as uploads_router
 
 
 @asynccontextmanager
@@ -24,6 +27,10 @@ app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
 install_request_context(app)
 app.include_router(interviews_router)
 app.include_router(search_router)
+app.include_router(admin_interviews_router)
+# Router-level, so the admin check runs before tuspyserver's PATCH dependency starts reading
+# the body; its own `auth` dependency runs after that one.
+app.include_router(uploads_router, dependencies=[Depends(require_upload_admin)])
 
 
 class LivenessResponse(BaseModel):

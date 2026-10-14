@@ -45,7 +45,8 @@ jobs:
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
-      # Unit and integration tests together: the database code is only covered against Postgres.
+      # Unit and integration tests together, so coverage counts the routes that only make
+      # sense against Postgres (interviews, uploads).
       - name: Test against Postgres + pgvector
         run: |
           for f in ../../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done

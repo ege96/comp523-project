@@ -151,9 +151,13 @@ def list_interviews(
     viewer: CurrentViewer,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    status_filter: Annotated[Status | None, Query(alias="status")] = None,
 ) -> InterviewList:
-    """Interviews the viewer may see, most recently added first."""
+    """Interviews the viewer may see, most recently added first, optionally only those with
+    one status (for the admin's processing queue)."""
     query = summary_query(viewer)
+    if status_filter is not None:
+        query = query.where(InterviewRow.status == status_filter)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = session.execute(
         query.order_by(InterviewRow.created_at.desc(), InterviewRow.id).limit(limit).offset(offset)
