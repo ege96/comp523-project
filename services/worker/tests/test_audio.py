@@ -6,39 +6,56 @@ from audio_helpers import SPEECH_AND_PAUSES, make_audio
 from swayambhu_worker import audio
 from swayambhu_worker.audio import AudioError, Span, plan_pieces
 
+# Loud speech over constant background noise (never silent), dipping at 12 s and 27 s.
+SPEECH_OVER_NOISE = (
+    "0.05*sin(2*PI*90*t)+if(lt(abs(t-12),0.25)+lt(abs(t-27),0.25),0,0.5*sin(2*PI*440*t))"
+)
 
-def test_finds_the_pauses_and_cuts_inside_them(tmp_path: Path) -> None:
+
+def test_cuts_inside_pauses(tmp_path: Path) -> None:
     source = make_audio(tmp_path / "talk.wav", SPEECH_AND_PAUSES, 40)
     assert audio.duration_ms(source) == 40_000
 
-    pauses = audio.silences(source)
-    assert [(round(p.start_ms, -2), round(p.end_ms, -2)) for p in pauses][:3] == [
-        (8000, 10000),
-        (18000, 20000),
-        (28000, 30000),
-    ]
-    pieces = plan_pieces(40_000, pauses)
-    assert pieces[0].start_ms == 0
-    assert pieces[-1].end_ms == 40_000
-    for piece in pieces[:-1]:
-        assert any(p.start_ms <= piece.end_ms <= p.end_ms for p in pauses)
+    levels = audio.loudness(source)
+    assert len(levels) == 400
+    pieces = plan_pieces(40_000, levels)
+    assert (pieces[0].start_ms, pieces[-1].end_ms) == (0, 40_000)
+    # Tone for 8 s, silence for 2 s: every cut lands in a silent stretch.
+    assert all(piece.end_ms % 10_000 >= 8_000 for piece in pieces[:-1])
 
     clip = tmp_path / "piece.flac"
     audio.cut(source, pieces[0], clip)
     assert abs(audio.duration_ms(clip) - (pieces[0].end_ms - pieces[0].start_ms)) < 50
 
 
-def test_plan_prefers_the_longest_pause_in_the_window() -> None:
-    pauses = [Span(6_000, 6_400), Span(12_000, 13_000), Span(17_000, 17_300)]
-    assert plan_pieces(30_000, pauses)[0] == Span(0, 12_500)
+def test_cuts_at_dips_when_background_noise_never_stops(tmp_path: Path) -> None:
+    source = make_audio(tmp_path / "noisy.wav", SPEECH_OVER_NOISE, 35)
+    assert min(audio.loudness(source)) > audio.SILENT_DB  # never silent
+    pieces = plan_pieces(35_000, audio.loudness(source))
+    cuts = [piece.end_ms for piece in pieces[:-1]]
+    assert len(cuts) == 2
+    assert abs(cuts[0] - 12_000) <= 200
+    assert abs(cuts[1] - 27_000) <= 200
 
 
-def test_plan_cuts_at_the_maximum_when_nobody_pauses() -> None:
+def quiet_at(*frames: int, length: int = 300) -> list[float]:
+    return [-60.0 if i in frames else -20.0 for i in range(length)]
+
+
+def test_plan_picks_the_quietest_moment_in_the_window() -> None:
+    assert plan_pieces(30_000, quiet_at(70, 125, 180))[0] == Span(0, 18_050)
+    levels = quiet_at(70, 125, 180)
+    levels[125] = -90.0
+    assert plan_pieces(30_000, levels)[0] == Span(0, 12_550)
+
+
+def test_plan_ignores_quiet_moments_too_early_to_cut() -> None:
+    pieces = plan_pieces(25_000, quiet_at(10, length=250))
+    assert pieces[0].end_ms >= 5_000
+
+
+def test_plan_cuts_at_the_maximum_without_loudness() -> None:
     assert plan_pieces(45_000, []) == [Span(0, 20_000), Span(20_000, 40_000), Span(40_000, 45_000)]
-
-
-def test_plan_ignores_pauses_too_early_to_cut() -> None:
-    assert plan_pieces(25_000, [Span(1_000, 2_000)]) == [Span(0, 20_000), Span(20_000, 25_000)]
 
 
 def test_short_recordings_are_one_piece() -> None:
@@ -51,3 +68,5 @@ def test_unreadable_audio_is_an_audio_error(tmp_path: Path) -> None:
     junk.write_bytes(b"not audio")
     with pytest.raises(AudioError):
         audio.duration_ms(junk)
+    with pytest.raises(AudioError):
+        audio.loudness(junk)
