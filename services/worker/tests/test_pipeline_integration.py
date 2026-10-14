@@ -13,6 +13,7 @@ from swayambhu_core.models import (
     InterviewLanguageRow,
     InterviewRow,
     JobRow,
+    MediaFileRow,
     SearchChunkRow,
     SegmentRow,
 )
@@ -123,7 +124,7 @@ def test_a_recording_becomes_segments_translations_and_embeddings(
     interview_id = add_interview(new_session, store, tmp_path, None)
     runner = make_runner(new_session, store)
 
-    assert drain(runner) == 3  # transcribe, translate, index
+    assert drain(runner) == 4  # transcribe, playback, translate, index
 
     with new_session() as session:
         interview = session.get(InterviewRow, interview_id)
@@ -154,8 +155,16 @@ def test_a_recording_becomes_segments_translations_and_embeddings(
             ["english", "original"] * len(chunks)
         )
         assert {e.model for e in embeddings} == {"fake:hash@8"}
-        assert session.scalar(select(func.count()).select_from(JobRow)) == 3
+        assert session.scalar(select(func.count()).select_from(JobRow)) == 4
         assert set(session.scalars(select(JobRow.state))) == {"done"}
+
+        playback = session.scalars(
+            select(MediaFileRow).where(MediaFileRow.kind == "playback")
+        ).one()
+        assert playback.content_type == "audio/mp4"
+        assert playback.storage_key == f"interviews/{interview_id}/playback.m4a"
+        with store.local_copy(playback.storage_key) as copy:
+            assert copy.stat().st_size == playback.size_bytes
 
 
 def test_a_confirmed_language_is_passed_to_the_transcriber_and_english_is_not_translated(
@@ -217,7 +226,7 @@ def test_a_translator_outage_is_retried(
     interview_id = add_interview(new_session, store, tmp_path, None)
     runner = make_runner(new_session, store, FlakyTranslator(1, retryable=True))
 
-    assert drain(runner) == 2  # transcribe, then translate fails and waits for its retry
+    assert drain(runner) == 3  # transcribe, playback, then translate fails and waits
     with new_session() as session:
         job = session.scalars(select(JobRow).where(JobRow.kind == "translate")).one()
         assert (job.state, job.attempts, job.last_error) == ("queued", 1, "translator down")
@@ -236,7 +245,7 @@ def test_a_permanent_translation_failure_still_indexes_the_original(
     interview_id = add_interview(new_session, store, tmp_path, None)
     runner = make_runner(new_session, store, FlakyTranslator(1, retryable=False))
 
-    assert drain(runner) == 3
+    assert drain(runner) == 4
     with new_session() as session:
         interview = session.get(InterviewRow, interview_id)
         assert interview is not None
@@ -282,10 +291,10 @@ def test_unreadable_media_fails_without_retrying(
         interview_id = ingest(session, store, junk, "Broken", None)
         session.commit()
 
-    assert drain(make_runner(new_session, store)) == 1
+    assert drain(make_runner(new_session, store)) == 2  # transcribe and playback
     with new_session() as session:
         interview = session.get(InterviewRow, interview_id)
-        job = session.scalars(select(JobRow)).one()
+        job = session.scalars(select(JobRow).where(JobRow.kind == "transcribe")).one()
         assert interview is not None
         assert interview.status == "failed"
         assert (job.state, job.attempts) == ("failed", 1)
@@ -314,7 +323,7 @@ def test_a_job_whose_worker_vanished_is_taken_over_then_given_up(
         session.commit()
 
     # Out of attempts, so translation is given up and indexing runs without English.
-    assert drain(runner) == 1
+    assert drain(runner) == 2  # the stale playback job, then index
     with new_session() as session:
         interview = session.get(InterviewRow, interview_id)
         assert interview is not None
@@ -338,6 +347,6 @@ def test_the_ingest_command_queues_a_file(
     with new_session() as session:
         interview = session.scalars(select(InterviewRow)).one()
         assert (interview.title, interview.language_confirmed) == ("From the CLI", "new")
-        assert session.scalars(select(JobRow.kind)).all() == ["transcribe"]
+        assert session.scalars(select(JobRow.kind)).all() == ["transcribe", "playback"]
     assert capsys.readouterr().out == f"Queued interview {interview.id}\n"
     assert (tmp_path / "media" / "interviews" / str(interview.id) / "original.mp3").is_file()

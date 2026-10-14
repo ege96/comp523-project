@@ -8,6 +8,7 @@ tuned on the sample Nepali audio.
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,11 +30,22 @@ class Span:
     end_ms: int
 
 
-def _run(args: list[str]) -> str:
-    result = subprocess.run(args, capture_output=True, text=True, check=False)  # noqa: S603
-    if result.returncode != 0:
-        raise AudioError(f"{args[0]} failed: {result.stderr.strip()[-500:]}")
-    return result.stdout + result.stderr
+def _run(args: list[str], heartbeat: Callable[[], None] | None = None) -> str:
+    """Run FFmpeg or FFprobe. Long runs call `heartbeat` every minute so the job keeps its
+    lease."""
+    with subprocess.Popen(  # noqa: S603
+        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    ) as proc:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=60)
+                break
+            except subprocess.TimeoutExpired:
+                if heartbeat:
+                    heartbeat()
+    if proc.returncode != 0:
+        raise AudioError(f"{args[0]} failed: {stderr.strip()[-500:]}")
+    return stdout + stderr
 
 
 def duration_ms(path: Path) -> int:
@@ -122,3 +134,41 @@ def cut(source: Path, piece: Span, target: Path) -> None:
             "-i", str(source), "-vn", "-ac", "1", "-ar", "16000", "-c:a", "flac", str(target),
         ]
     )  # fmt: skip
+
+
+def has_video(path: Path) -> bool:
+    out = _run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+            "stream=codec_type,disposition", "-of", "json", str(path),
+        ]
+    )  # fmt: skip
+    # Cover art in an MP3 or M4A shows up as a one-frame "attached picture" video stream.
+    streams = json.loads(out).get("streams", [])
+    return any(not s.get("disposition", {}).get("attached_pic") for s in streams)
+
+
+def make_playback(
+    source: Path, target_stem: Path, heartbeat: Callable[[], None] | None = None
+) -> tuple[Path, str]:
+    """A copy every browser plays and can seek in while streaming (NF5): H.264/AAC MP4 at
+    up to 720p for video, AAC M4A for audio. `+faststart` puts the index first, so playback
+    starts before the whole file arrives. Returns the file and its content type."""
+    common = ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-map_metadata", "-1"]
+    if has_video(source):
+        target = target_stem.with_suffix(".mp4")
+        video = [
+            "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast",
+            "-crf", "26", "-vf", "scale=-2:'min(720,ih)'", "-pix_fmt", "yuv420p",
+        ]  # fmt: skip
+        content_type = "video/mp4"
+    else:
+        target = target_stem.with_suffix(".m4a")
+        video = ["-map", "0:a:0", "-vn"]
+        content_type = "audio/mp4"
+    _run(
+        ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+         *video, *common, str(target)],
+        heartbeat,
+    )  # fmt: skip
+    return target, content_type

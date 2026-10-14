@@ -78,7 +78,7 @@ TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")
 REPRESENTATIONS = ("original", "english")
-JOB_KINDS = ("transcribe", "translate", "index")
+JOB_KINDS = ("transcribe", "translate", "index", "playback")
 JOB_STATES = ("queued", "running", "done", "failed")
 
 
@@ -332,7 +332,8 @@ class JobRow(Base):
 
     Workers claim queued jobs with `FOR UPDATE SKIP LOCKED`, so several can run at once.
     A running job whose `heartbeat_at` is older than the worker's lease is reclaimed, which
-    covers a pod killed mid-job. Each kind enqueues the next: transcribe, translate, index.
+    covers a pod killed mid-job. Each kind enqueues the next: transcribe, translate, index;
+    `playback` (the browser-playable copy) runs alongside them.
     See `swayambhu_core.jobs`.
     """
 
