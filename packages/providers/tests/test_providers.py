@@ -5,7 +5,7 @@ import httpx2 as httpx
 import pytest
 from pydantic import SecretStr
 
-from swayambhu_providers import AudioClip, ProviderError
+from swayambhu_providers import AudioClip, ProviderError, Translation
 from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber
 from swayambhu_providers.factory import (
     ProviderConfigError,
@@ -127,16 +127,20 @@ def test_google_translator_sends_key_in_header_and_keeps_order() -> None:
         return httpx.Response(200, json={"data": {"translations": translations}})
 
     translator = GoogleNmtTranslator(client(handler), "secret", url="https://example.test/t")
-    assert translator.translate_to_english(["a", "b"], "new") == ["A", "B"]
+    assert translator.translate_to_english(["a", "b"], "new") == [
+        Translation("A"),
+        Translation("B"),
+    ]
 
 
 def test_google_translator_lets_google_detect_an_unknown_language() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert "source" not in json.loads(request.read())
-        return httpx.Response(200, json={"data": {"translations": [{"translatedText": "hi"}]}})
+        translations = [{"translatedText": "hi", "detectedSourceLanguage": "ne"}]
+        return httpx.Response(200, json={"data": {"translations": translations}})
 
     translator = GoogleNmtTranslator(client(handler), "k", url="https://example.test/t")
-    assert translator.translate_to_english(["नमस्ते"], None) == ["hi"]
+    assert translator.translate_to_english(["नमस्ते"], None) == [Translation("hi", "ne")]
 
 
 def test_google_translator_rejects_a_short_response() -> None:

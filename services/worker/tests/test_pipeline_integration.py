@@ -17,7 +17,7 @@ from swayambhu_core.models import (
     SegmentRow,
 )
 from swayambhu_core.storage import LocalMediaStore
-from swayambhu_providers import AudioClip, ProviderError, TranscribedSegment
+from swayambhu_providers import AudioClip, ProviderError, TranscribedSegment, Translation
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranslator
 
 from swayambhu_worker.ingest import ingest
@@ -42,12 +42,39 @@ class ScriptedTranscriber:
         return [TranscribedSegment(0, clip.duration_ms, f"टुक्रा {clip.path.stem}", "nep")]
 
 
+class SilentTranscriber(ScriptedTranscriber):
+    """Reports no language, like OpenAI's transcription models."""
+
+    def transcribe(
+        self, clip: AudioClip, language_hints: Sequence[str]
+    ) -> list[TranscribedSegment]:
+        self.hints.append(language_hints)
+        english = clip.path.stem.endswith("1")  # the second piece is English
+        text = f"piece {clip.path.stem}" if english else f"टुक्रा {clip.path.stem}"
+        return [TranscribedSegment(0, clip.duration_ms, text, None)]
+
+
+class DetectingTranslator(FakeTranslator):
+    """Detects Devanagari as Nepali ("ne") and anything else as English, like Google."""
+
+    def __init__(self) -> None:
+        self.sources: list[str | None] = []
+
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
+        self.sources.append(source_language)
+        return [Translation(f"[en] {t}", "ne" if t.startswith("टुक्रा") else "en") for t in texts]
+
+
 class FlakyTranslator(FakeTranslator):
     def __init__(self, failures: int, *, retryable: bool) -> None:
         self.failures = failures
         self.retryable = retryable
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
         if self.failures:
             self.failures -= 1
             raise ProviderError("translator down", retryable=self.retryable)
@@ -55,9 +82,14 @@ class FlakyTranslator(FakeTranslator):
 
 
 def make_runner(
-    new_session: SessionFactory, store: LocalMediaStore, translator: FakeTranslator | None = None
+    new_session: SessionFactory,
+    store: LocalMediaStore,
+    translator: FakeTranslator | None = None,
+    transcriber: ScriptedTranscriber | None = None,
 ) -> JobRunner:
-    providers = Providers(ScriptedTranscriber(), translator or FakeTranslator(), FakeEmbedder(8))
+    providers = Providers(
+        transcriber or ScriptedTranscriber(), translator or FakeTranslator(), FakeEmbedder(8)
+    )
     return JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
 
 
@@ -142,6 +174,41 @@ def test_a_confirmed_language_is_passed_to_the_transcriber_and_english_is_not_tr
         assert interview is not None
         assert interview.translation_status == "done"  # segments still reported Nepali
         assert interview.primary_language == "en"
+
+
+def test_the_translator_detects_languages_the_transcriber_did_not_report(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id = add_interview(new_session, store, tmp_path, None)
+    translator = DetectingTranslator()
+    drain(make_runner(new_session, store, translator, SilentTranscriber()))
+
+    assert translator.sources == [None]  # one call, Google detects
+    with new_session() as session:
+        segments = session.scalars(select(SegmentRow).order_by(SegmentRow.seq)).all()
+        assert [s.language for s in segments][:3] == ["ne", "en", "ne"]
+        english_segment = segments[1]
+        assert (english_segment.english_machine, english_segment.english_text) == (None, None)
+        assert segments[0].english_text == f"[en] {segments[0].original_text}"
+
+        interview = session.get(InterviewRow, interview_id)
+        assert interview is not None
+        assert interview.language_detected == "ne"
+        assert 0.5 < (interview.language_detected_confidence or 0) < 1
+        languages = session.scalars(select(InterviewLanguageRow.language_code)).all()
+        assert sorted(languages) == ["en", "ne"]
+
+
+def test_a_confirmed_language_is_used_instead_of_detection(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    add_interview(new_session, store, tmp_path, "new")
+    translator = DetectingTranslator()
+    drain(make_runner(new_session, store, translator, SilentTranscriber()))
+
+    assert translator.sources == ["new"]
+    with new_session() as session:
+        assert set(session.scalars(select(SegmentRow.language))) == {None}
 
 
 def test_a_translator_outage_is_retried(
