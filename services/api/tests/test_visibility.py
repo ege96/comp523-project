@@ -1,8 +1,8 @@
 from sqlalchemy import select
 from sqlalchemy.dialects import postgresql
+from swayambhu_core.models import InterviewRow
 
 from swayambhu_api.admins import Admin
-from swayambhu_api.models import InterviewRow
 from swayambhu_api.visibility import visible_to
 
 

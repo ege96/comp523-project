@@ -3,9 +3,9 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
+from swayambhu_core.models import AdminRow
 
 from swayambhu_api.admins import SqlAlchemyAdminStore, find_admin
-from swayambhu_api.models import AdminRow
 from swayambhu_api.tokens import Identity
 
 pytestmark = pytest.mark.integration

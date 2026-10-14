@@ -5,6 +5,7 @@ description = "Background media-processing worker for the Swayambhu Stories arch
 requires-python = ">=3.12"
 dependencies = [
     "pydantic-settings>=2.4",
+    "swayambhu-core",
     "swayambhu-providers",
 ]
 
@@ -25,6 +26,8 @@ packages = ["src/swayambhu_worker"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: needs a real Postgres with pgvector (set DATABASE_URL)"]
+addopts = "-m 'not integration'"
 
 [tool.mypy]
 strict = true
@@ -42,7 +45,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "N"]
 "tests/**" = ["S101"]  # assert is how pytest works
 
 [tool.coverage.run]
-source = ["swayambhu_worker"]
+source = ["swayambhu_worker", "swayambhu_core.jobs"]
 branch = true
 
 [tool.coverage.report]
@@ -50,4 +53,5 @@ fail_under = 80
 show_missing = true
 
 [tool.uv.sources]
+swayambhu-core = { path = "../../packages/core", editable = true }
 swayambhu-providers = { path = "../../packages/providers", editable = true }

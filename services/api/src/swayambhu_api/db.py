@@ -10,30 +10,19 @@ from functools import lru_cache
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy import Engine, create_engine, text
-from sqlalchemy.engine import URL, make_url
+from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from swayambhu_core.db import make_engine, sqlalchemy_url
 
 from swayambhu_api.config import Settings, get_settings
 
-
-def sqlalchemy_url(database_url: str) -> URL:
-    """DATABASE_URL stays a plain libpq URL (P-003); tell SQLAlchemy to use psycopg 3 with it."""
-    url = make_url(database_url)
-    if url.drivername in ("postgresql", "postgres"):
-        url = url.set(drivername="postgresql+psycopg")
-    return url
+__all__ = ["DbSession", "check_database", "get_engine", "new_session", "sqlalchemy_url"]
 
 
 @lru_cache
 def _engine(database_url: str, connect_timeout: int) -> Engine:
-    return create_engine(
-        sqlalchemy_url(database_url),
-        # Drop connections the database closed (restarts, idle timeouts) instead of failing.
-        pool_pre_ping=True,
-        connect_args={"connect_timeout": connect_timeout},
-    )
+    return make_engine(database_url, connect_timeout)
 
 
 def get_engine(settings: Settings) -> Engine:

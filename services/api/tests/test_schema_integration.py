@@ -7,9 +7,7 @@ import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
-from swayambhu_api.admins import Admin
-from swayambhu_api.models import (
+from swayambhu_core.models import (
     ChunkEmbeddingRow,
     InterviewLanguageRow,
     InterviewRow,
@@ -18,6 +16,8 @@ from swayambhu_api.models import (
     SearchChunkRow,
     SegmentRow,
 )
+
+from swayambhu_api.admins import Admin
 from swayambhu_api.visibility import visible_to
 
 pytestmark = pytest.mark.integration
