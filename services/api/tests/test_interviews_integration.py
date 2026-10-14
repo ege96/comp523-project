@@ -94,130 +94,80 @@ def client(settings: Settings) -> Iterator[TestClient]:
     app.dependency_overrides.clear()
 
 
-def as_viewer(client: TestClient, admin: Admin | None) -> TestClient:
+def as_viewer(client: TestClient, admin: Admin | None = None) -> TestClient:
     """Requests from `client` now come from `admin`, or an anonymous visitor."""
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
     return client
 
 
-@pytest.fixture
-def anonymous(client: TestClient) -> TestClient:
-    return as_viewer(client, None)
+ADMIN = Admin(1, "lead@example.org")
 
 
-@pytest.fixture
-def admin(client: TestClient) -> TestClient:
-    return as_viewer(client, Admin(1, "lead@example.org"))
-
-
-def test_visitors_list_only_public_interviews(
-    anonymous: TestClient, interviews: dict[str, InterviewRow]
+def test_listing_shows_visitors_public_interviews_and_admins_all_newest_first(
+    client: TestClient, interviews: dict[str, InterviewRow]
 ) -> None:
-    body = anonymous.get("/api/interviews").json()
-    assert body["total"] == 1
-    [item] = body["items"]
-    assert item["id"] == str(interviews["public"].id)
-    assert item["interviewee"] == "Maya Shakya"
-    assert item["primary_language"] == {"code": "ne", "name": "Nepali"}
+    public, private = str(interviews["public"].id), str(interviews["private"].id)
+    body = as_viewer(client).get("/api/interviews").json()
+    assert ([i["id"] for i in body["items"]], body["total"]) == ([public], 1)
+    assert body["items"][0]["interviewee"] == "Maya Shakya"
+    assert body["items"][0]["primary_language"] == {"code": "ne", "name": "Nepali"}
 
-
-def test_admins_list_everything_newest_first(
-    admin: TestClient, interviews: dict[str, InterviewRow]
-) -> None:
-    body = admin.get("/api/interviews", params={"limit": 1}).json()
-    assert body["total"] == 2
-    assert [i["id"] for i in body["items"]] == [str(interviews["private"].id)]
-    body = admin.get("/api/interviews", params={"limit": 1, "offset": 1}).json()
-    assert [i["id"] for i in body["items"]] == [str(interviews["public"].id)]
+    pages = [as_viewer(client, ADMIN).get(f"/api/interviews?limit=1&offset={n}") for n in (0, 1)]
+    assert [(p.json()["items"][0]["id"], p.json()["total"]) for p in pages] == [
+        (private, 2), (public, 2),
+    ]  # fmt: skip
 
 
 @pytest.mark.parametrize("suffix", ["", "/segments"])
 def test_private_and_unknown_interviews_are_404_for_visitors(
-    anonymous: TestClient, interviews: dict[str, InterviewRow], suffix: str
+    client: TestClient, interviews: dict[str, InterviewRow], suffix: str
 ) -> None:
     for interview_id in (interviews["private"].id, uuid.uuid4()):
-        res = anonymous.get(f"/api/interviews/{interview_id}{suffix}")
-        assert res.status_code == 404
-        assert res.json() == {"detail": "Interview not found"}
+        res = as_viewer(client).get(f"/api/interviews/{interview_id}{suffix}")
+        assert (res.status_code, res.json()) == (404, {"detail": "Interview not found"})
 
 
-def test_detail_hides_status_detail_from_visitors(
+def test_detail_and_transcript_of_a_public_interview(
     client: TestClient, interviews: dict[str, InterviewRow]
 ) -> None:
     path = f"/api/interviews/{interviews['public'].id}"
-    visitor = as_viewer(client, None).get(path).json()
-    assert visitor["status_detail"] is None
-    assert visitor["languages"] == [{"code": "ne", "name": "Nepali"}]
-    assert visitor["media"]["content_type"] == "audio/mp4"
-    admin = as_viewer(client, Admin(1, "lead@example.org"))
-    assert admin.get(path).json()["status_detail"] == "Translating"
+    detail = as_viewer(client).get(path).json()
+    assert detail["status_detail"] is None  # admins only
+    assert detail["languages"] == [{"code": "ne", "name": "Nepali"}]
+    assert detail["media"]["content_type"] == "audio/mp4"
+    assert as_viewer(client, ADMIN).get(path).json()["status_detail"] == "Translating"
+
+    segments = as_viewer(client).get(f"{path}/segments").json()["items"]
+    assert [
+        (s["seq"], s["original_text"], s["english_text"], s["original_edited"], s["english_edited"])
+        for s in segments
+    ] == [(0, "पहिलो", "First", False, False), (1, "दोस्रो", "Second, edited", False, True)]
 
 
-def test_segments_are_in_order_with_edits_marked(
-    anonymous: TestClient, interviews: dict[str, InterviewRow]
+def test_media_links_stream_with_ranges_and_refuse_tampering(
+    client: TestClient, interviews: dict[str, InterviewRow], settings: Settings
 ) -> None:
-    items = anonymous.get(f"/api/interviews/{interviews['public'].id}/segments").json()["items"]
-    assert [(s["seq"], s["original_text"], s["english_text"]) for s in items] == [
-        (0, "पहिलो", "First"),
-        (1, "दोस्रो", "Second, edited"),
-    ]
-    assert [(s["original_edited"], s["english_edited"]) for s in items] == [
-        (False, False),
-        (False, True),
-    ]
-
-
-def media_url(client: TestClient, interview: InterviewRow) -> str:
-    url: str = client.get(f"/api/interviews/{interview.id}").json()["media"]["url"]
-    return url
-
-
-def test_signed_media_link_streams_with_range_support(
-    anonymous: TestClient, interviews: dict[str, InterviewRow]
-) -> None:
-    url = media_url(anonymous, interviews["public"])
+    anonymous = as_viewer(client)
+    url = anonymous.get(f"/api/interviews/{interviews['public'].id}").json()["media"]["url"]
     res = anonymous.get(url)
-    assert res.status_code == 200
-    assert res.content == PLAYBACK
-    assert res.headers["content-type"] == "audio/mp4"
-    assert res.headers["accept-ranges"] == "bytes"
-
+    assert (res.status_code, res.content) == (200, PLAYBACK)
+    assert (res.headers["content-type"], res.headers["accept-ranges"]) == ("audio/mp4", "bytes")
     res = anonymous.get(url, headers={"Range": "bytes=10-19"})
-    assert res.status_code == 206
-    assert res.content == PLAYBACK[10:20]
+    assert (res.status_code, res.content) == (206, PLAYBACK[10:20])
 
-
-def test_tampered_or_expired_media_links_are_refused(
-    anonymous: TestClient, interviews: dict[str, InterviewRow], settings: Settings
-) -> None:
-    url = media_url(anonymous, interviews["public"])
-    query = parse_qs(urlsplit(url).query)
     media_id = int(urlsplit(url).path.rsplit("/", 1)[1])
-    expires, sig = int(query["expires"][0]), query["sig"][0]
+    expires, sig = (v[0] for v in parse_qs(urlsplit(url).query).values())
 
-    def get(media: int, exp: int, signature: str) -> int:
-        res = anonymous.get(f"/api/media/{media}", params={"expires": exp, "sig": signature})
-        return res.status_code
+    def status(media: int, exp: int | str, signature: str | None = None) -> int:
+        signature = signature or media_urls._signature(settings, media, int(exp))
+        return anonymous.get(f"/api/media/{media}?expires={exp}&sig={signature}").status_code
 
-    assert get(media_id, expires, sig) == 200
-    assert get(media_id + 1, expires, sig) == 403  # another file
-    assert get(media_id, expires + 3600, sig) == 403  # a later expiry
-    assert get(media_id, expires, "0" * 64) == 403
+    assert status(media_id + 1, expires, sig) == 403  # another file
+    assert status(media_id, int(expires) + 3600, sig) == 403  # a later expiry
+    assert status(media_id, expires, "0" * 64) == 403
+    assert status(media_id, media_urls.signed_url(settings, media_id, now=0)[1]) == 403  # expired
+    assert status(media_id + 10**6, expires) == 404  # no such media
     assert anonymous.get(f"/api/media/{media_id}").status_code == 422
-
-    assert (
-        get(media_id + 10**6, expires, media_urls._signature(settings, media_id + 10**6, expires))
-        == 404
-    )
-
-    _, past = media_urls.signed_url(settings, media_id, now=0)
-    assert get(media_id, past, media_urls._signature(settings, media_id, past)) == 403
-
-
-def test_media_link_to_a_missing_file_is_404(
-    anonymous: TestClient, interviews: dict[str, InterviewRow], settings: Settings
-) -> None:
-    url = media_url(anonymous, interviews["public"])
     for path in settings.media_root.rglob("*.m4a"):
         path.unlink()
-    assert anonymous.get(url).status_code == 404
+    assert anonymous.get(url).status_code == 404  # file gone from the volume
