@@ -1,5 +1,5 @@
 # Build context for the api and worker images is the repo root, so both can install
-# packages/providers. Send only what those images need. (apps/web builds from its own
+# the shared packages. Send only what those images need. (apps/web builds from its own
 # folder and uses apps/web/.dockerignore.)
 *
 !services/api/pyproject.toml
@@ -9,6 +9,8 @@
 !services/worker/pyproject.toml
 !services/worker/uv.lock
 !services/worker/src
+!packages/core/pyproject.toml
+!packages/core/src
 !packages/providers/pyproject.toml
 !packages/providers/src
 **/__pycache__

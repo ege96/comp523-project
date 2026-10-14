@@ -6,8 +6,8 @@ from typing import Protocol
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
+from swayambhu_core.models import AdminRow
 
-from swayambhu_api.models import AdminRow
 from swayambhu_api.tokens import Identity
 
 

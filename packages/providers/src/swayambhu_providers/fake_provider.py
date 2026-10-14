@@ -27,8 +27,8 @@ class FakeTranscriber:
 class FakeTranslator:
     name = "fake:translator"
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str) -> list[str]:
-        return [f"[fake {source_language}->en] {text}" for text in texts]
+    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
+        return [f"[fake {source_language or 'auto'}->en] {text}" for text in texts]
 
 
 class FakeEmbedder:

@@ -9,7 +9,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
-# Build context is the repo root (so packages/providers is reachable); see .dockerignore.
+# Build context is the repo root (so packages/ is reachable); see .dockerignore.
 WORKDIR /app/services/api
 
 # Third-party dependencies only. This layer is reused until pyproject.toml or uv.lock
@@ -19,8 +19,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=services/api/uv.lock,target=uv.lock \
     uv sync --frozen --no-dev --no-install-project --no-install-local
 
-# Then the shared providers package and the app, installed non-editable so the runtime
+# Then the shared packages and the app, installed non-editable so the runtime
 # image needs no source tree.
+COPY packages/core /app/packages/core
 COPY packages/providers /app/packages/providers
 COPY services/api/pyproject.toml services/api/uv.lock ./
 COPY services/api/src ./src

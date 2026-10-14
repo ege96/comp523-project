@@ -2,9 +2,9 @@
 
 from alembic import context
 from sqlalchemy import create_engine, pool, text
+from swayambhu_core.models import Base
 
 from swayambhu_api.db import sqlalchemy_url
-from swayambhu_api.models import Base
 
 # Any fixed number works; it only has to match between API pods. Each pod runs
 # `upgrade head` on startup, so two pods starting together queue on this lock instead of
