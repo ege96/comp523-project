@@ -36,6 +36,15 @@ class Settings(ProviderSettings):
     # only works with one API pod; set the same value on every pod before scaling out.
     media_url_secret: SecretStr | None = None
     media_url_ttl_seconds: int = 6 * 3600
+    # Search (Proposal P-025/P-026): starting points for the evaluation harness to tune.
+    # How long a search waits to embed the query before answering with keyword hits only.
+    search_embedding_timeout_seconds: float = 5.0
+    # Hits taken from each of keyword and semantic search before fusing; also the deepest page.
+    search_candidates: int = 100
+    # Reciprocal rank fusion constant: larger flattens the gap between top and lower ranks.
+    search_rrf_k: int = 60
+    # Roughly how much transcript a result's excerpt shows.
+    search_excerpt_ms: int = 30_000
     # Largest recording an admin may upload. Q-19 sets no hard cap; this guards the volume.
     max_upload_bytes: int = 10 * 1024**3
     # Largest single tus PATCH. The server holds one in memory, so this bounds a pod's RAM per

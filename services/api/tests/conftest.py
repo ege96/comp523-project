@@ -1,12 +1,15 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from alembic import command
+from fastapi.testclient import TestClient
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
-from swayambhu_api.config import Settings
+from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import new_session
+from swayambhu_api.main import app
 from swayambhu_api.migrate import alembic_config
 
 
@@ -36,3 +39,17 @@ def database_url(integration_settings: Settings) -> str:
 def db_session(integration_settings: Settings, database_url: str) -> Iterator[Session]:
     with new_session(integration_settings) as session:
         yield session
+
+
+@pytest.fixture
+def settings(integration_settings: Settings, tmp_path: Path) -> Settings:
+    return integration_settings.model_copy(
+        update={"media_root": tmp_path, "media_url_secret": None}
+    )
+
+
+@pytest.fixture
+def client(settings: Settings) -> Iterator[TestClient]:
+    app.dependency_overrides[get_settings] = lambda: settings
+    yield TestClient(app)
+    app.dependency_overrides.clear()

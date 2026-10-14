@@ -1,9 +1,10 @@
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from starlette.routing import BaseRoute
 
 from swayambhu_api.auth import (
     CurrentViewer,
@@ -16,18 +17,35 @@ from swayambhu_api.main import app
 from swayambhu_api.tokens import TokenVerifier
 from tests.fakes import FakeAdminStore, Row, TokenSigner
 
+Route = tuple[str, str]  # method, path
+
 # Routes anyone may call. Every other route must turn away anonymous requests;
 # test_anonymous_cannot_reach_any_other_route enforces that for routes added later.
-# Open to anonymous visitors. The interview routes filter by `visible_to` instead (tested in
-# test_interviews_integration.py); the media route checks a signed link.
+# The interview and search routes filter by `visible_to` instead (tested in
+# test_interviews_integration.py and test_search_integration.py); the media route checks a
+# signed link.
 PUBLIC_ROUTES = {
-    "/api/health",
-    "/api/health/ready",
-    "/api/interviews",
-    "/api/interviews/{interview_id}",
-    "/api/interviews/{interview_id}/segments",
-    "/api/media/{media_id}",
+    ("GET", "/api/health"),
+    ("GET", "/api/health/ready"),
+    ("GET", "/api/interviews"),
+    ("GET", "/api/interviews/{interview_id}"),
+    ("GET", "/api/interviews/{interview_id}/segments"),
+    ("GET", "/api/media/{media_id}"),
+    ("GET", "/api/search"),
+    ("GET", "/api/search/filters"),
 }
+
+
+def registered_routes(routes: Iterable[BaseRoute] = app.routes, prefix: str = "") -> set[Route]:
+    """Every API route the app serves, hidden ones included. `app.routes` holds a router added
+    with include_router as one wrapper, so walk into it."""
+    found: set[Route] = set()
+    for route in routes:
+        if isinstance(route, APIRoute):
+            found |= {(m, prefix + route.path) for m in route.methods}
+        elif included := getattr(route, "original_router", None):
+            found |= registered_routes(included.routes, prefix + route.include_context.prefix)
+    return found
 
 
 @pytest.fixture
@@ -59,17 +77,14 @@ def test_anonymous_cannot_reach_admin_endpoint(client: TestClient) -> None:
     assert res.headers["WWW-Authenticate"] == "Bearer"
 
 
-def admin_only_routes() -> list[tuple[str, str]]:
-    return [
-        (method, route.path)
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path not in PUBLIC_ROUTES
-        for method in sorted(route.methods)
-    ]
+def admin_only_routes() -> list[Route]:
+    return sorted(registered_routes() - PUBLIC_ROUTES)
 
 
-def test_there_are_admin_only_routes_to_check() -> None:
-    assert ("GET", "/api/auth/me") in admin_only_routes()
+def test_every_route_is_checked() -> None:
+    schema = {(m.upper(), p) for p, ops in app.openapi()["paths"].items() for m in ops}
+    assert registered_routes() >= schema | PUBLIC_ROUTES  # the walk misses nothing
+    assert ("PATCH", "/api/interviews/{interview_id}") in admin_only_routes()
 
 
 @pytest.mark.parametrize(("method", "path"), admin_only_routes())
