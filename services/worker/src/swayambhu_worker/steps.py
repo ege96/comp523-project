@@ -1,6 +1,8 @@
 """The three pipeline steps, one job kind each: transcribe, then translate, then index.
 
 Steps commit early, and the runner commits at the end; sessions use expire_on_commit=False.
+Languages come from the transcriber when it reports them, else from the translator's
+detection (from text, so Nepal Bhasa may read as Nepali: admins confirm it, D-004).
 Each step reads what the previous one stored, so a failed step is retried on its own
 without redoing (and re-paying for) the earlier ones. Each step replaces its own output,
 so running it twice is harmless.
@@ -85,6 +87,34 @@ def _segments(session: Session, interview_id: uuid.UUID) -> list[SegmentRow]:
     )
 
 
+def _record_languages(
+    session: Session, interview: InterviewRow, segments: list[SegmentRow]
+) -> None:
+    """Detected language: the one heard longest. Confidence is its share of the speech whose
+    language is known. Every language heard goes into interview_languages for the filters."""
+    heard: Counter[str] = Counter()
+    for segment in segments:
+        if segment.language:
+            heard[segment.language] += segment.end_ms - segment.start_ms
+    interview.language_detected = interview.language_detected_confidence = None
+    if heard:
+        language, ms = heard.most_common(1)[0]
+        interview.language_detected = language
+        interview.language_detected_confidence = round(ms / sum(heard.values()), 3)
+    languages = set(heard) | (
+        {interview.language_confirmed} if interview.language_confirmed else set()
+    )
+    session.execute(
+        delete(InterviewLanguageRow).where(InterviewLanguageRow.interview_id == interview.id)
+    )
+    if languages:
+        session.execute(
+            insert(InterviewLanguageRow)
+            .values([{"interview_id": interview.id, "language_code": c} for c in languages])
+            .on_conflict_do_nothing()
+        )
+
+
 def transcribe(
     session: Session,
     interview_id: uuid.UUID,
@@ -146,28 +176,7 @@ def transcribe(
     session.execute(delete(SegmentRow).where(SegmentRow.interview_id == interview_id))
     session.add_all(rows)
 
-    # Detected language: the one heard longest. Confidence is its share of the speech.
-    heard: Counter[str] = Counter()
-    for row in rows:
-        if row.language:
-            heard[row.language] += row.end_ms - row.start_ms
-    interview.language_detected = interview.language_detected_confidence = None
-    if heard:
-        language, ms = heard.most_common(1)[0]
-        interview.language_detected = language
-        interview.language_detected_confidence = round(ms / sum(heard.values()), 3)
-    languages = set(heard) | (
-        {interview.language_confirmed} if interview.language_confirmed else set()
-    )
-    session.execute(
-        delete(InterviewLanguageRow).where(InterviewLanguageRow.interview_id == interview_id)
-    )
-    if languages:
-        session.execute(
-            insert(InterviewLanguageRow)
-            .values([{"interview_id": interview_id, "language_code": c} for c in languages])
-            .on_conflict_do_nothing()
-        )
+    _record_languages(session, interview, rows)
 
     interview.duration_ms = total_ms
     interview.transcribed_by = providers.transcriber.name
@@ -190,22 +199,31 @@ def translate(
     interview = _interview(session, interview_id)
     interview.status_detail = "Translating"
     session.commit()
+    known = set(session.scalars(select(LanguageRow.code)))
+    segments = _segments(session, interview_id)
     by_language: dict[str | None, list[SegmentRow]] = {}
-    for segment in _segments(session, interview_id):
-        source = _source_language(segment, interview)
+    for segment in segments:
+        # Unknown (None) when the transcriber didn't say and no admin has confirmed it.
+        source = segment.language or interview.language_confirmed
         if source == "en":
             segment.english_machine = None  # English speech: english_text stays NULL
         else:
             by_language.setdefault(source, []).append(segment)
 
-    for source, segments in by_language.items():
-        # None lets the translator detect the language itself.
-        english = providers.translator.translate_to_english(
-            [s.original_text for s in segments], source
+    for source, group in by_language.items():
+        # None lets the translator detect the language, which also fills in the segment's.
+        translations = providers.translator.translate_to_english(
+            [s.original_text for s in group], source
         )
-        for segment, text in zip(segments, english, strict=True):
-            segment.english_machine = text.strip() or None
+        for segment, translation in zip(group, translations, strict=True):
+            segment.english_machine = translation.text.strip() or None
+            if source is None:
+                segment.language = _known_language(known, translation.detected_language)
+                if segment.language == "en":
+                    segment.english_machine = None
         heartbeat()
+    if None in by_language:
+        _record_languages(session, interview, segments)
 
     if by_language:
         interview.translation_status = "done"
