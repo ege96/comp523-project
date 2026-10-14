@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from fastapi import Depends, FastAPI, Response, status
 from pydantic import BaseModel
 
+from swayambhu_api.admin_interviews import router as admin_interviews_router
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
@@ -22,6 +23,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
 install_request_context(app)
 app.include_router(interviews_router)
+app.include_router(admin_interviews_router)
 
 
 class LivenessResponse(BaseModel):

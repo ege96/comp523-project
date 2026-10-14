@@ -1,7 +1,7 @@
 """Add a recording from the command line and queue it for processing.
 
-Stands in for the admin upload page until it exists. Run it where the worker runs, so the
-file lands in the worker's media directory:
+Does what the upload route (`POST /api/interviews`) does, for bulk loads and testing. Run it
+where the worker runs, so the file lands in the worker's media directory:
 
     python -m swayambhu_worker.ingest interview.mp3 --title "Interview with ..." --language ne
 """
@@ -12,8 +12,8 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
-from swayambhu_core.models import InterviewRow, MediaFileRow
+from swayambhu_core.models import InterviewRow
+from swayambhu_core.recordings import add_original, original_key
 from swayambhu_core.storage import LocalMediaStore, MediaStore, file_sha256
 
 from swayambhu_worker.config import WorkerSettings
@@ -27,20 +27,16 @@ def ingest(
     interview = InterviewRow(title=title, language_confirmed=language)
     session.add(interview)
     session.flush()
-    key = f"interviews/{interview.id}/original{path.suffix.lower()}"
+    key = original_key(interview.id, path.suffix)
     store.put(key, path)
-    session.add(
-        MediaFileRow(
-            interview_id=interview.id,
-            kind="original",
-            storage_key=key,
-            content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-            size_bytes=path.stat().st_size,
-            sha256=file_sha256(path),
-        )
+    add_original(
+        session,
+        interview.id,
+        key=key,
+        content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        size_bytes=path.stat().st_size,
+        sha256=file_sha256(path),
     )
-    jobs.enqueue(session, "transcribe", interview.id)
-    jobs.enqueue(session, "playback", interview.id)
     return interview.id
 
 

@@ -36,6 +36,8 @@ class Settings(ProviderSettings):
     # only works with one API pod; set the same value on every pod before scaling out.
     media_url_secret: SecretStr | None = None
     media_url_ttl_seconds: int = 6 * 3600
+    # Largest recording an admin may upload. Q-19 sets no hard cap; this guards the volume.
+    max_upload_bytes: int = 10 * 1024**3
 
 
 @lru_cache

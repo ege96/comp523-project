@@ -10,12 +10,20 @@ import shutil
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 
 class MediaStore(Protocol):
     def put(self, key: str, source: Path) -> None:
         """Store a copy of `source` under `key`, replacing anything already there."""
+        ...
+
+    def writer(self, key: str) -> AbstractContextManager[BinaryIO]:
+        """A file to write the object into, for content that arrives in pieces (an upload).
+
+        The object appears under `key` only if the `with` block ends without an exception;
+        otherwise nothing is stored.
+        """
         ...
 
     def local_copy(self, key: str) -> AbstractContextManager[Path]:
@@ -47,6 +55,19 @@ class LocalMediaStore:
         partial = target.with_name(target.name + ".partial")
         shutil.copyfile(source, partial)
         partial.replace(target)  # atomic, so readers never see half a file
+
+    @contextmanager
+    def writer(self, key: str) -> Iterator[BinaryIO]:
+        target = self._path(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        try:
+            with partial.open("wb") as f:
+                yield f
+        except BaseException:
+            partial.unlink(missing_ok=True)
+            raise
+        partial.replace(target)
 
     @contextmanager
     def local_copy(self, key: str) -> Iterator[Path]:
