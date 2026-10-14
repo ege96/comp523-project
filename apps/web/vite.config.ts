@@ -13,7 +13,15 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/main.tsx", "src/**/*.d.ts", "src/**/*.test.{ts,tsx}"],
+      exclude: [
+        "src/main.tsx",
+        "src/**/*.d.ts",
+        "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        // Generated types, and the thin Firebase SDK adapter (needs a real Firebase project).
+        "src/api/schema.gen.ts",
+        "src/auth/firebaseClient.ts",
+      ],
       thresholds: { lines: 80, functions: 80, branches: 80, statements: 80 },
     },
   },

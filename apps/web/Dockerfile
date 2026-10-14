@@ -9,6 +9,12 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 COPY . .
+# The Firebase web config comes from .env.production. A build arg overrides it, e.g. to point a
+# staging build at another Firebase project. No defaults: an empty ARG would override the file.
+# hadolint ignore=DL3064
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_AUTH_DOMAIN
 RUN npm run build
 
 # ---- runtime: static files on unprivileged nginx (runs as non-root on 8080) ----

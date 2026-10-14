@@ -4,3 +4,5 @@ coverage
 Dockerfile
 .dockerignore
 *.md
+.env.local
+.env.*.local
