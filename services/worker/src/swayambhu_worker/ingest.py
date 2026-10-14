@@ -1,6 +1,6 @@
 """Add a recording from the command line and queue it for processing.
 
-Does what the upload route (`POST /api/interviews`) does, for bulk loads and testing. Run it
+Does what an admin upload (`/api/uploads`) does, for bulk loads and testing. Run it
 where the worker runs, so the file lands in the worker's media directory:
 
     python -m swayambhu_worker.ingest interview.mp3 --title "Interview with ..." --language ne

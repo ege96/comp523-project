@@ -39,15 +39,11 @@ def test_file_sha256(tmp_path: Path) -> None:
     assert file_sha256(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
 
 
-def test_writer_stores_only_a_completed_write(tmp_path: Path) -> None:
-    store = LocalMediaStore(tmp_path)
-    with store.writer("a/upload.wav") as f:
-        f.write(b"part one, ")
-        f.write(b"part two")
-    with store.local_copy("a/upload.wav") as copy:
-        assert copy.read_bytes() == b"part one, part two"
-
-    with pytest.raises(ConnectionError), store.writer("a/broken.wav") as f:
-        f.write(b"half")
-        raise ConnectionError
-    assert sorted(p.name for p in (tmp_path / "a").iterdir()) == ["upload.wav"]
+def test_put_can_move_instead_of_copying(tmp_path: Path) -> None:
+    store = LocalMediaStore(tmp_path / "media")
+    upload = tmp_path / "upload"
+    upload.write_bytes(b"audio")
+    store.put("a/original.wav", upload, move=True)
+    assert not upload.exists()
+    with store.local_copy("a/original.wav") as stored:
+        assert stored.read_bytes() == b"audio"

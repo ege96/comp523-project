@@ -21,9 +21,11 @@ def add_original(
     key: str,
     content_type: str,
     size_bytes: int,
-    sha256: str,
+    sha256: str | None,
 ) -> None:
-    """Record an interview's stored original and queue its processing. Doesn't commit."""
+    """Record an interview's stored original and queue its processing. Doesn't commit.
+
+    `sha256` may be None when hashing would hold up the request (a resumable upload)."""
     session.add(
         MediaFileRow(
             interview_id=interview_id,

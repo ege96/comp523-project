@@ -3,12 +3,14 @@
 import logging
 import signal
 import threading
+import time
 from collections.abc import Callable
 from datetime import timedelta
 
 from swayambhu_core.storage import LocalMediaStore
 from swayambhu_providers.factory import build_embedder, build_transcriber, build_translator
 
+from swayambhu_worker.cleanup import remove_abandoned_uploads
 from swayambhu_worker.config import WorkerSettings
 from swayambhu_worker.db import session_factory
 from swayambhu_worker.runner import JobRunner
@@ -50,6 +52,22 @@ def build_runner(settings: WorkerSettings) -> JobRunner:
     )
 
 
+def with_upload_cleanup(settings: WorkerSettings, handle_one: JobHandler) -> JobHandler:
+    """Sweep abandoned uploads at most once an hour, between jobs."""
+    next_sweep = 0.0
+
+    def handle() -> bool:
+        nonlocal next_sweep
+        if time.monotonic() >= next_sweep:
+            next_sweep = time.monotonic() + 3600
+            remove_abandoned_uploads(
+                settings.media_root / "uploads", timedelta(days=settings.upload_retention_days)
+            )
+        return handle_one()
+
+    return handle
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     stop = threading.Event()
@@ -58,7 +76,7 @@ def main() -> None:
     settings = WorkerSettings()
     runner = build_runner(settings)
     log.info("worker started")
-    run(settings, runner.handle_one, stop)
+    run(settings, with_upload_cleanup(settings, runner.handle_one), stop)
     log.info("worker stopped")
 
 

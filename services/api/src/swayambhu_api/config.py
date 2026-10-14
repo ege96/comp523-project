@@ -38,6 +38,12 @@ class Settings(ProviderSettings):
     media_url_ttl_seconds: int = 6 * 3600
     # Largest recording an admin may upload. Q-19 sets no hard cap; this guards the volume.
     max_upload_bytes: int = 10 * 1024**3
+    # Largest single tus PATCH. The server holds one in memory, so this bounds a pod's RAM per
+    # concurrent upload; clients send smaller chunks (tus-js-client `chunkSize`).
+    upload_chunk_max_bytes: int = 64 * 1024**2
+    # How long an unfinished upload can be resumed before it is deleted. Keep the worker's
+    # UPLOAD_RETENTION_DAYS the same: the worker does the deleting.
+    upload_retention_days: int = 3
 
 
 @lru_cache
