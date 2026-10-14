@@ -1,7 +1,7 @@
 from typing import Literal
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderSettings(BaseSettings):
@@ -12,6 +12,10 @@ class ProviderSettings(BaseSettings):
     worker used for stored chunks. Model names have no defaults because they are vendor- and
     time-sensitive. `fake` runs offline for local dev and tests.
     """
+
+    # An empty value (`OPENAI_API_KEY=` in .env.example) means unset, not "".
+    # Subclasses' model_config is merged with this.
+    model_config = SettingsConfigDict(env_ignore_empty=True)
 
     transcription_provider: Literal["openai", "elevenlabs", "fake"] = "openai"
     transcription_model: str | None = None

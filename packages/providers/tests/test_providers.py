@@ -188,3 +188,12 @@ def test_factory_names_the_missing_setting(settings: ProviderSettings, missing: 
 def test_factory_requires_translation_key() -> None:
     with pytest.raises(ProviderConfigError, match="GOOGLE_TRANSLATE_API_KEY"):
         build_translator(ProviderSettings(google_translate_api_key=None))
+
+
+def test_empty_env_values_count_as_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`.env.example` lists every key with an empty value; that must not break parsing."""
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    settings = ProviderSettings()
+    assert settings.embedding_dimensions is None
+    assert settings.openai_api_key is None
