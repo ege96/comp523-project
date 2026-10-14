@@ -14,8 +14,9 @@ from typing import Protocol
 
 
 class MediaStore(Protocol):
-    def put(self, key: str, source: Path) -> None:
-        """Store a copy of `source` under `key`, replacing anything already there."""
+    def put(self, key: str, source: Path, *, move: bool = False) -> None:
+        """Store `source` under `key`, replacing anything already there. With `move`, the
+        source file is consumed, which avoids copying a multi-GB upload when possible."""
         ...
 
     def local_copy(self, key: str) -> AbstractContextManager[Path]:
@@ -41,11 +42,14 @@ class LocalMediaStore:
             raise ValueError(f"Invalid storage key: {key!r}")
         return self._root.joinpath(*parts)
 
-    def put(self, key: str, source: Path) -> None:
+    def put(self, key: str, source: Path, *, move: bool = False) -> None:
         target = self._path(key)
         target.parent.mkdir(parents=True, exist_ok=True)
         partial = target.with_name(target.name + ".partial")
-        shutil.copyfile(source, partial)
+        if move:
+            shutil.move(source, partial)  # a rename when both are on the same volume
+        else:
+            shutil.copyfile(source, partial)
         partial.replace(target)  # atomic, so readers never see half a file
 
     @contextmanager
