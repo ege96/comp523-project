@@ -9,13 +9,12 @@ COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 COPY . .
-# Firebase *web* config, baked into the bundle (public by design, not secrets). Leave the key
-# empty and the site works without admin sign-in. On CloudApps set it as a BuildConfig build arg.
-# The Firebase web API key identifies the project and ships to every browser; not a secret.
+# The Firebase web config comes from .env.production. A build arg overrides it, e.g. to point a
+# staging build at another Firebase project. No defaults: an empty ARG would override the file.
 # hadolint ignore=DL3064
-ARG VITE_FIREBASE_API_KEY=""
-ARG VITE_FIREBASE_PROJECT_ID="comp523"
-ARG VITE_FIREBASE_AUTH_DOMAIN=""
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_AUTH_DOMAIN
 RUN npm run build
 
 # ---- runtime: static files on unprivileged nginx (runs as non-root on 8080) ----

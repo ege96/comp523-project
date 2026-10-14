@@ -30,7 +30,7 @@ Web app (Node 26, see `apps/web/.nvmrc`; proxies `/api` to `localhost:8000`):
 cd apps/web && npm install && npm run dev
 ```
 
-Admin sign-in needs the Firebase web config: copy `apps/web/.env.example` to `apps/web/.env.local` and fill in `VITE_FIREBASE_API_KEY`. Without it the site works, and the sign-in page says sign-in isn't available.
+Admin sign-in needs the Firebase web config. It is public by design and committed in `apps/web/.env.production`, which production builds and the web image read. For `npm run dev`, copy `apps/web/.env.example` to `apps/web/.env.local` and fill in the same values. Without them the site works, and the sign-in page says sign-in isn't available.
 
 The web app is a TanStack Router single-page app (`src/router.tsx` lists the routes). It fetches with TanStack Query and checks every API response with zod schemas (`src/api/schemas.ts`) that are type-checked against `src/api/schema.gen.ts`, which is generated from the API. After changing an API route or response model, run `npm run gen:api` (needs uv) and commit the result.
 
