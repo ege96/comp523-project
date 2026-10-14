@@ -2,3 +2,4 @@ dist
 coverage
 package-lock.json
 security-headers.inc
+src/api/schema.gen.ts

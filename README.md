@@ -30,6 +30,10 @@ Web app (Node 26, see `apps/web/.nvmrc`; proxies `/api` to `localhost:8000`):
 cd apps/web && npm install && npm run dev
 ```
 
+Admin sign-in needs the Firebase web config. It is public by design and committed in `apps/web/.env.production`, which production builds and the web image read. For `npm run dev`, copy `apps/web/.env.example` to `apps/web/.env.local` and fill in the same values. Without them the site works, and the sign-in page says sign-in isn't available.
+
+The web app is a TanStack Router single-page app (`src/router.tsx` lists the routes). It fetches with TanStack Query and checks every API response with zod schemas (`src/api/schemas.ts`) that are type-checked against `src/api/schema.gen.ts`, which is generated from the API. After changing an API route or response model, run `npm run gen:api` (needs uv) and commit the result.
+
 Without Docker, run each service directly:
 
 ```sh
@@ -86,6 +90,8 @@ docker compose run --rm api python -m swayambhu_api.manage_admins remove you@exa
 ```
 
 On CloudApps, run the same command with `oc exec deploy/<api deployment> -- python -m swayambhu_api.manage_admins ...`.
+
+In the web app, the footer links to `/signin` (Sign in with Google, in a popup). Firebase is only downloaded by browsers that open the sign-in page or were signed in before, so public visitors never load it. The web app asks `GET /api/auth/me` whether the account is an admin, and shows the admin pages only then. That is only for the UI: the API checks the token on every admin request.
 
 ## Uploading recordings
 

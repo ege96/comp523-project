@@ -11,3 +11,5 @@ coverage/
 .coverage
 # Local uploaded recordings (MEDIA_ROOT)
 media/
+.env.local
+.env.*.local
