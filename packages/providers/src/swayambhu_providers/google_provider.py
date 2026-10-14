@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 import httpx2 as httpx
 
-from swayambhu_providers import ProviderError, raise_for_status
+from swayambhu_providers import ProviderError, Translation, raise_for_status
 
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 
@@ -30,8 +30,10 @@ class GoogleNmtTranslator:
     def name(self) -> str:
         return "google:nmt"
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
-        results: list[str] = []
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
+        results: list[Translation] = []
         for start in range(0, len(texts), self._batch_size):
             batch = list(texts[start : start + self._batch_size])
             body: dict[str, object] = {"q": batch, "target": "en", "format": "text"}
@@ -53,5 +55,11 @@ class GoogleNmtTranslator:
                     f"Google returned {len(translations)} translations for {len(batch)} texts",
                     retryable=False,
                 )
-            results.extend(str(t.get("translatedText", "")) for t in translations)
+            results.extend(
+                Translation(
+                    str(t.get("translatedText", "")),
+                    t.get("detectedSourceLanguage") or None,
+                )
+                for t in translations
+            )
         return results

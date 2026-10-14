@@ -7,7 +7,7 @@ import hashlib
 import math
 from collections.abc import Sequence
 
-from swayambhu_providers import AudioClip, EmbeddingKind, TranscribedSegment
+from swayambhu_providers import AudioClip, EmbeddingKind, TranscribedSegment, Translation
 
 
 class FakeTranscriber:
@@ -27,8 +27,10 @@ class FakeTranscriber:
 class FakeTranslator:
     name = "fake:translator"
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
-        return [f"[fake {source_language or 'auto'}->en] {text}" for text in texts]
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
+        return [Translation(f"[fake {source_language or 'auto'}->en] {text}") for text in texts]
 
 
 class FakeEmbedder:

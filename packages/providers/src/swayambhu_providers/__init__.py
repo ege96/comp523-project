@@ -42,6 +42,14 @@ class TranscribedSegment:
     language: str | None  # ISO 639 code if the provider reported one
 
 
+@dataclass(frozen=True)
+class Translation:
+    text: str
+    # The source language the translator detected (any code it uses, e.g. "ne"); only
+    # reported when no source language was given.
+    detected_language: str | None = None
+
+
 class Transcriber(Protocol):
     @property
     def name(self) -> str:
@@ -59,8 +67,11 @@ class Translator(Protocol):
         """Provenance stored in interviews.translated_by, e.g. "google:nmt"."""
         ...
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
-        """One English string per input, in order. `source_language` None means detect it."""
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
+        """One translation per input, in order. `source_language` None means detect it, and
+        the detected language is reported with each translation."""
         ...
 
 
