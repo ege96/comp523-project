@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,35 @@ def test_plan_cuts_at_the_maximum_without_loudness() -> None:
 def test_short_recordings_are_one_piece() -> None:
     assert plan_pieces(3_000, []) == [Span(0, 3_000)]
     assert plan_pieces(0, []) == []
+
+
+def test_playback_copy_of_audio_is_m4a(tmp_path: Path) -> None:
+    source = make_audio(tmp_path / "talk.wav", SPEECH_AND_PAUSES, 3)
+    made, content_type = audio.make_playback(source, tmp_path / "playback")
+    assert (made.name, content_type) == ("playback.m4a", "audio/mp4")
+    assert not audio.has_video(made)
+    assert abs(audio.duration_ms(made) - 3_000) < 100
+
+
+def test_playback_copy_of_video_is_mp4_at_most_720p(tmp_path: Path) -> None:
+    source = tmp_path / "clip.mkv"
+    subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=size=1920x1080:rate=10:duration=2",
+            "-f", "lavfi", "-i", "sine=duration=2", "-shortest", str(source),
+        ],
+        check=True,
+    )  # fmt: skip
+    seen: list[int] = []
+    made, content_type = audio.make_playback(source, tmp_path / "playback", lambda: seen.append(1))
+    assert (made.name, content_type) == ("playback.mp4", "video/mp4")
+    probe = subprocess.run(  # noqa: S603
+        ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",  # noqa: S607
+         "stream=height", "-of", "csv=p=0", str(made)],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    assert probe.stdout.strip() == "720"
 
 
 def test_unreadable_audio_is_an_audio_error(tmp_path: Path) -> None:

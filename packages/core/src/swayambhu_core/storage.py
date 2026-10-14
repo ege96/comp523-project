@@ -5,6 +5,7 @@ module turns a key into a location, so swapping the local disk for object storag
 adding an implementation here and changing config.
 """
 
+import hashlib
 import shutil
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -60,3 +61,11 @@ class LocalMediaStore:
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()

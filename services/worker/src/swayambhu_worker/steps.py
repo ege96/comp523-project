@@ -29,7 +29,7 @@ from swayambhu_core.models import (
     SearchChunkRow,
     SegmentRow,
 )
-from swayambhu_core.storage import MediaStore
+from swayambhu_core.storage import MediaStore, file_sha256
 from swayambhu_providers import AudioClip, Embedder, Transcriber, Translator
 
 from swayambhu_worker import audio
@@ -87,6 +87,17 @@ def _segments(session: Session, interview_id: uuid.UUID) -> list[SegmentRow]:
     )
 
 
+def _original_media(session: Session, interview_id: uuid.UUID) -> MediaFileRow:
+    media = session.scalar(
+        select(MediaFileRow).where(
+            MediaFileRow.interview_id == interview_id, MediaFileRow.kind == "original"
+        )
+    )
+    if media is None:
+        raise StepError("The interview has no uploaded recording")
+    return media
+
+
 def _record_languages(
     session: Session, interview: InterviewRow, segments: list[SegmentRow]
 ) -> None:
@@ -132,13 +143,7 @@ def transcribe(
             "Not re-transcribing: an admin has edited this transcript, and replacing it "
             "needs their confirmation."
         )
-    media = session.scalar(
-        select(MediaFileRow).where(
-            MediaFileRow.interview_id == interview_id, MediaFileRow.kind == "original"
-        )
-    )
-    if media is None:
-        raise StepError("The interview has no uploaded recording")
+    media = _original_media(session, interview_id)
     interview.status_detail = "Transcribing"
     hints = [interview.language_confirmed] if interview.language_confirmed else []
     known = set(session.scalars(select(LanguageRow.code)))
@@ -307,6 +312,52 @@ def index(
         interview.status_detail = None
 
 
+def playback(
+    session: Session,
+    interview_id: uuid.UUID,
+    providers: Providers,
+    store: MediaStore,
+    heartbeat: Heartbeat,
+) -> None:
+    """Make the copy the player streams. Independent of the transcript steps."""
+    _interview(session, interview_id)
+    original = _original_media(session, interview_id)
+    session.commit()
+    with store.local_copy(original.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
+        made, content_type = audio.make_playback(source, Path(tmp) / "playback", heartbeat)
+        key = f"interviews/{interview_id}/playback{made.suffix}"
+        store.put(key, made)
+        size = made.stat().st_size
+        digest = file_sha256(made)
+
+    old = session.scalar(
+        select(MediaFileRow).where(
+            MediaFileRow.interview_id == interview_id, MediaFileRow.kind == "playback"
+        )
+    )
+    if old is not None:
+        if old.storage_key != key:
+            store.delete(old.storage_key)
+        session.delete(old)
+        session.flush()
+    session.add(
+        MediaFileRow(
+            interview_id=interview_id,
+            kind="playback",
+            storage_key=key,
+            content_type=content_type,
+            size_bytes=size,
+            sha256=digest,
+        )
+    )
+
+
+def give_up_playback(session: Session, interview_id: uuid.UUID, error: str) -> None:
+    """The transcript is still usable without a player, so the status stays as it is."""
+    interview = _interview(session, interview_id)
+    interview.status_detail = f"Playback copy failed: {error}"
+
+
 def give_up(session: Session, interview_id: uuid.UUID, error: str) -> None:
     """Transcription or indexing failed for good: show it to admins (D-008 "Failed")."""
     interview = session.get(InterviewRow, interview_id)
@@ -316,9 +367,15 @@ def give_up(session: Session, interview_id: uuid.UUID, error: str) -> None:
 
 
 Step = Callable[[Session, uuid.UUID, Providers, MediaStore, Heartbeat], None]
-STEPS: dict[str, Step] = {"transcribe": transcribe, "translate": translate, "index": index}
+STEPS: dict[str, Step] = {
+    "transcribe": transcribe,
+    "translate": translate,
+    "index": index,
+    "playback": playback,
+}
 GIVE_UP: dict[str, Callable[[Session, uuid.UUID, str], None]] = {
     "transcribe": give_up,
     "translate": give_up_translating,
     "index": give_up,
+    "playback": give_up_playback,
 }
