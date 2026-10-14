@@ -11,6 +11,8 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY . .
 # Firebase *web* config, baked into the bundle (public by design, not secrets). Leave the key
 # empty and the site works without admin sign-in. On CloudApps set it as a BuildConfig build arg.
+# The Firebase web API key identifies the project and ships to every browser; not a secret.
+# hadolint ignore=DL3064
 ARG VITE_FIREBASE_API_KEY=""
 ARG VITE_FIREBASE_PROJECT_ID="comp523"
 ARG VITE_FIREBASE_AUTH_DOMAIN=""
