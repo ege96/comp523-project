@@ -5,18 +5,18 @@ import httpx2 as httpx
 import pytest
 from pydantic import SecretStr
 
-from swayambhu_worker.config import WorkerSettings
-from swayambhu_worker.providers import AudioClip, ProviderError
-from swayambhu_worker.providers.elevenlabs_provider import ElevenLabsTranscriber
-from swayambhu_worker.providers.factory import (
+from swayambhu_providers import AudioClip, ProviderError
+from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber
+from swayambhu_providers.factory import (
     ProviderConfigError,
     build_embedder,
     build_transcriber,
     build_translator,
 )
-from swayambhu_worker.providers.fake_provider import FakeEmbedder, FakeTranscriber
-from swayambhu_worker.providers.google_provider import GoogleNmtTranslator
-from swayambhu_worker.providers.openai_provider import OpenAIEmbedder, OpenAITranscriber
+from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber
+from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.openai_provider import OpenAIEmbedder, OpenAITranscriber
+from swayambhu_providers.settings import ProviderSettings
 
 
 def client(handler: object, base_url: str = "https://example.test") -> httpx.Client:
@@ -151,7 +151,7 @@ def test_fake_embedder_is_deterministic_and_unit_length() -> None:
 
 
 def test_factory_picks_providers_from_settings() -> None:
-    settings = WorkerSettings(
+    settings = ProviderSettings(
         transcription_provider="elevenlabs",
         transcription_model="scribe-model",
         elevenlabs_api_key=SecretStr("k"),
@@ -165,7 +165,7 @@ def test_factory_picks_providers_from_settings() -> None:
     assert build_embedder(settings).name == "openai:embed-model@1024"
     assert build_translator(settings).name == "google:nmt"
 
-    fake = WorkerSettings(
+    fake = ProviderSettings(
         transcription_provider="fake", translation_provider="fake", embedding_provider="fake"
     )
     assert isinstance(build_transcriber(fake), FakeTranscriber)
@@ -176,15 +176,15 @@ def test_factory_picks_providers_from_settings() -> None:
 @pytest.mark.parametrize(
     ("settings", "missing"),
     [
-        (WorkerSettings(transcription_model=None), "TRANSCRIPTION_MODEL"),
-        (WorkerSettings(transcription_model="m", openai_api_key=None), "OPENAI_API_KEY"),
+        (ProviderSettings(transcription_model=None), "TRANSCRIPTION_MODEL"),
+        (ProviderSettings(transcription_model="m", openai_api_key=None), "OPENAI_API_KEY"),
     ],
 )
-def test_factory_names_the_missing_setting(settings: WorkerSettings, missing: str) -> None:
+def test_factory_names_the_missing_setting(settings: ProviderSettings, missing: str) -> None:
     with pytest.raises(ProviderConfigError, match=missing):
         build_transcriber(settings)
 
 
 def test_factory_requires_translation_key() -> None:
     with pytest.raises(ProviderConfigError, match="GOOGLE_TRANSLATE_API_KEY"):
-        build_translator(WorkerSettings(google_translate_api_key=None))
+        build_translator(ProviderSettings(google_translate_api_key=None))

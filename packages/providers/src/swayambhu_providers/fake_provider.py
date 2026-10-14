@@ -7,7 +7,7 @@ import hashlib
 import math
 from collections.abc import Sequence
 
-from swayambhu_worker.providers import AudioClip, EmbeddingKind, TranscribedSegment
+from swayambhu_providers import AudioClip, EmbeddingKind, TranscribedSegment
 
 
 class FakeTranscriber:

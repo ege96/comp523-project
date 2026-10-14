@@ -71,6 +71,25 @@ jobs:
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
 
+  providers:
+    # packages/providers: AI provider interfaces shared by the api and worker images.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/providers
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest --cov
+      - name: Audit runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
+
   web:
     runs-on: ubuntu-latest
     defaults:
@@ -101,7 +120,7 @@ jobs:
       # Lint and format hooks are skipped here: the api, worker and web jobs already run them.
       - run: uvx pre-commit run --all-files --show-diff-on-failure
         env:
-          SKIP: ruff-api,ruff-format-api,ruff-worker,ruff-format-worker,prettier-web,eslint-web
+          SKIP: ruff-api,ruff-format-api,ruff-worker,ruff-format-worker,ruff-providers,ruff-format-providers,prettier-web,eslint-web
 
   docker:
     # Builds each image (no push), checks it runs as an arbitrary non-root UID the way
@@ -130,7 +149,10 @@ jobs:
               grep -qi '^content-encoding: gzip' asset-headers
               grep -qi '^x-content-type-options: nosniff' asset-headers
           - name: api
+            # `context` names the check (required by the main ruleset); the build itself
+            # runs from the repo root so the image can install packages/providers.
             context: services/api
+            build_context: .
             smoke: |
               # No database here, so skip the startup migration.
               docker run -d --name app --user 1000680000:0 -e RUN_MIGRATIONS=0 -p 8080:8080 "$IMAGE"
@@ -138,6 +160,7 @@ jobs:
               curl -fsS localhost:8080/api/health | grep -q '"ok"'
           - name: worker
             context: services/worker
+            build_context: .
             smoke: |
               docker run --rm --user 1000680000:0 "$IMAGE" python -c "import swayambhu_worker.__main__"
               docker run --rm --user 1000680000:0 "$IMAGE" ffmpeg -hide_banner -version
@@ -153,7 +176,8 @@ jobs:
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.context }}
+          context: ${{ matrix.build_context || matrix.context }}
+          file: ${{ matrix.context }}/Dockerfile
           push: false
           load: true
           tags: ${{ env.IMAGE }}

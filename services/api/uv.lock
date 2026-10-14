@@ -1324,12 +1324,12 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
-    { name = "httpx2" },
     { name = "pgvector" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
     { name = "sqlalchemy" },
+    { name = "swayambhu-providers" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1346,18 +1346,41 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "httpx2", specifier = ">=2.13" },
     { name = "pgvector", specifier = ">=0.3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.4" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
+    { name = "swayambhu-providers", editable = "../../packages/providers" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx2", specifier = ">=2.13" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "swayambhu-providers"
+version = "0.1.0"
+source = { editable = "../../packages/providers" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "pydantic-settings", specifier = ">=2.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
     { name = "mypy", specifier = ">=1.11" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-cov", specifier = ">=5" },

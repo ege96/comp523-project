@@ -18,7 +18,7 @@ services:
 
   # Applies migrations on startup (services/api/start.sh), then serves.
   api:
-    build: services/api
+    build: { context: ., dockerfile: services/api/Dockerfile }
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
@@ -29,7 +29,7 @@ services:
       db: { condition: service_healthy }
 
   worker:
-    build: services/worker
+    build: { context: ., dockerfile: services/worker/Dockerfile }
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
       TRANSCRIPTION_PROVIDER: fake

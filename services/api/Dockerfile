@@ -9,18 +9,21 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
-WORKDIR /app
+# Build context is the repo root (so packages/providers is reachable); see .dockerignore.
+WORKDIR /app/services/api
 
-# Dependencies only. This layer is reused until pyproject.toml or uv.lock changes,
-# and the cache mount keeps downloaded wheels between builds.
+# Third-party dependencies only. This layer is reused until pyproject.toml or uv.lock
+# changes, and the cache mount keeps downloaded wheels between builds.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv sync --frozen --no-dev --no-install-project
+    --mount=type=bind,source=services/api/pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=services/api/uv.lock,target=uv.lock \
+    uv sync --frozen --no-dev --no-install-project --no-install-local
 
-# Then the app itself, installed non-editable so the runtime image needs no source tree.
-COPY pyproject.toml uv.lock ./
-COPY src ./src
+# Then the shared providers package and the app, installed non-editable so the runtime
+# image needs no source tree.
+COPY packages/providers /app/packages/providers
+COPY services/api/pyproject.toml services/api/uv.lock ./
+COPY services/api/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 
@@ -34,7 +37,7 @@ COPY --from=build /opt/venv /opt/venv
 # Only the OpenShift router (via the Service) can reach the pod, so trust its
 # X-Forwarded-For for client IPs. Override per environment if that ever changes.
 ENV FORWARDED_ALLOW_IPS="*"
-COPY start.sh /opt/start.sh
+COPY services/api/start.sh /opt/start.sh
 USER 1001
 EXPOSE 8080
 CMD ["sh", "/opt/start.sh"]

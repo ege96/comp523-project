@@ -38,6 +38,18 @@ repos:
         language: system
         files: ^services/worker/.*\.py$
         pass_filenames: false
+      - id: ruff-providers
+        name: ruff (providers)
+        entry: uv run --directory packages/providers ruff check --fix
+        language: system
+        files: ^packages/providers/.*\.py$
+        pass_filenames: false
+      - id: ruff-format-providers
+        name: ruff format (providers)
+        entry: uv run --directory packages/providers ruff format
+        language: system
+        files: ^packages/providers/.*\.py$
+        pass_filenames: false
       - id: prettier-web
         name: prettier (web)
         entry: npm --prefix apps/web run format

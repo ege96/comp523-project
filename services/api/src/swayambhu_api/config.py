@@ -1,8 +1,8 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+from swayambhu_providers.settings import ProviderSettings
 
 # Google's published signing keys for Firebase Auth ID tokens, in JWK form.
 FIREBASE_JWKS_URL = (
@@ -10,8 +10,10 @@ FIREBASE_JWKS_URL = (
 )
 
 
-class Settings(BaseSettings):
-    """API settings, read from environment variables (Proposal: names not yet agreed)."""
+class Settings(ProviderSettings):
+    """API settings, read from environment variables, then `.env` in the working directory
+    (Proposal: names not yet agreed). AI provider settings come from ProviderSettings; the API
+    uses only the embedding ones, to embed search queries."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,14 +28,6 @@ class Settings(BaseSettings):
     # Unset means sign-in is not configured: every authenticated request gets a 503.
     firebase_project_id: str | None = None
     firebase_jwks_url: str = FIREBASE_JWKS_URL
-    # Search queries are embedded with the same model the worker used for stored chunks
-    # (D-012), so these must match the worker's settings. No model default: it is
-    # vendor- and time-sensitive. `fake` runs offline for local dev and tests.
-    embedding_provider: Literal["openai", "fake"] = "openai"
-    embedding_model: str | None = None
-    embedding_dimensions: int | None = None
-    embedding_timeout_seconds: float = 10.0
-    openai_api_key: SecretStr | None = None
 
 
 @lru_cache

@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 import httpx2 as httpx
 
-from swayambhu_worker.providers import (
+from swayambhu_providers import (
     AudioClip,
     EmbeddingKind,
     ProviderError,

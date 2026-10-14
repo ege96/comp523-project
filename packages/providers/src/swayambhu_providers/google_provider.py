@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 import httpx2 as httpx
 
-from swayambhu_worker.providers import ProviderError, raise_for_status
+from swayambhu_providers import ProviderError, raise_for_status
 
 GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2"
 

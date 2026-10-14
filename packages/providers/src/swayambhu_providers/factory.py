@@ -2,16 +2,16 @@
 
 import httpx2 as httpx
 
-from swayambhu_worker.config import WorkerSettings
-from swayambhu_worker.providers import Embedder, Transcriber, Translator
-from swayambhu_worker.providers.elevenlabs_provider import ElevenLabsTranscriber, elevenlabs_client
-from swayambhu_worker.providers.fake_provider import FakeEmbedder, FakeTranscriber, FakeTranslator
-from swayambhu_worker.providers.google_provider import GoogleNmtTranslator
-from swayambhu_worker.providers.openai_provider import (
+from swayambhu_providers import Embedder, Transcriber, Translator
+from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber, elevenlabs_client
+from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber, FakeTranslator
+from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.openai_provider import (
     OpenAIEmbedder,
     OpenAITranscriber,
     openai_client,
 )
+from swayambhu_providers.settings import ProviderSettings
 
 
 class ProviderConfigError(ValueError):
@@ -25,7 +25,7 @@ def _required(value: object, env_name: str, provider: str) -> str:
     return str(secret() if secret else value)
 
 
-def build_transcriber(settings: WorkerSettings) -> Transcriber:
+def build_transcriber(settings: ProviderSettings) -> Transcriber:
     provider = settings.transcription_provider
     if provider == "fake":
         return FakeTranscriber()
@@ -38,14 +38,14 @@ def build_transcriber(settings: WorkerSettings) -> Transcriber:
     return ElevenLabsTranscriber(elevenlabs_client(key, timeout=timeout), model)
 
 
-def build_translator(settings: WorkerSettings) -> Translator:
+def build_translator(settings: ProviderSettings) -> Translator:
     if settings.translation_provider == "fake":
         return FakeTranslator()
     key = _required(settings.google_translate_api_key, "GOOGLE_TRANSLATE_API_KEY", "google_nmt")
     return GoogleNmtTranslator(httpx.Client(timeout=settings.provider_timeout_seconds), key)
 
 
-def build_embedder(settings: WorkerSettings) -> Embedder:
+def build_embedder(settings: ProviderSettings) -> Embedder:
     if settings.embedding_provider == "fake":
         return FakeEmbedder(settings.embedding_dimensions or 8)
     model = _required(settings.embedding_model, "EMBEDDING_MODEL", "openai")

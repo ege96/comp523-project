@@ -4,8 +4,8 @@ version = "0.1.0"
 description = "Background media-processing worker for the Swayambhu Stories archive"
 requires-python = ">=3.12"
 dependencies = [
-    "httpx2>=2.13",
     "pydantic-settings>=2.4",
+    "swayambhu-providers",
 ]
 
 [dependency-groups]
@@ -48,3 +48,6 @@ branch = true
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
+
+[tool.uv.sources]
+swayambhu-providers = { path = "../../packages/providers", editable = true }

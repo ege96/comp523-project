@@ -666,12 +666,35 @@ wheels = [
 ]
 
 [[package]]
+name = "swayambhu-providers"
+version = "0.1.0"
+source = { editable = "../../packages/providers" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "pydantic-settings" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "pydantic-settings", specifier = ">=2.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "pytest", specifier = ">=8.3" },
+    { name = "pytest-cov", specifier = ">=5" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
 name = "swayambhu-worker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "httpx2" },
     { name = "pydantic-settings" },
+    { name = "swayambhu-providers" },
 ]
 
 [package.dev-dependencies]
@@ -684,8 +707,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "httpx2", specifier = ">=2.13" },
     { name = "pydantic-settings", specifier = ">=2.4" },
+    { name = "swayambhu-providers", editable = "../../packages/providers" },
 ]
 
 [package.metadata.requires-dev]
