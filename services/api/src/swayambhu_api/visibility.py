@@ -7,9 +7,9 @@ that returns interviews, segments, search hits or media joins `interviews` and f
 """
 
 from sqlalchemy import ColumnElement, true
+from swayambhu_core.models import InterviewRow
 
 from swayambhu_api.admins import Admin
-from swayambhu_api.models import InterviewRow
 
 
 def visible_to(viewer: Admin | None) -> ColumnElement[bool]:

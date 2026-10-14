@@ -30,11 +30,13 @@ class GoogleNmtTranslator:
     def name(self) -> str:
         return "google:nmt"
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str) -> list[str]:
+    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
         results: list[str] = []
         for start in range(0, len(texts), self._batch_size):
             batch = list(texts[start : start + self._batch_size])
-            body = {"q": batch, "source": source_language, "target": "en", "format": "text"}
+            body: dict[str, object] = {"q": batch, "target": "en", "format": "text"}
+            if source_language:  # otherwise Google detects the language
+                body["source"] = source_language
             try:
                 # Key in a header, not the URL, so it never lands in access logs.
                 response = self._client.post(

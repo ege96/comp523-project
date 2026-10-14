@@ -38,6 +38,18 @@ repos:
         language: system
         files: ^services/worker/.*\.py$
         pass_filenames: false
+      - id: ruff-core
+        name: ruff (core)
+        entry: uv run --directory packages/core ruff check --fix
+        language: system
+        files: ^packages/core/.*\.py$
+        pass_filenames: false
+      - id: ruff-format-core
+        name: ruff format (core)
+        entry: uv run --directory packages/core ruff format
+        language: system
+        files: ^packages/core/.*\.py$
+        pass_filenames: false
       - id: ruff-providers
         name: ruff (providers)
         entry: uv run --directory packages/providers ruff check --fix

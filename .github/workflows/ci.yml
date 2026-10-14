@@ -58,6 +58,45 @@ jobs:
     defaults:
       run:
         working-directory: services/worker
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: swayambhu
+          POSTGRES_DB: swayambhu_worker_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U swayambhu"
+          --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://swayambhu@localhost:5432/swayambhu_worker_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Install FFmpeg (the static build the worker image uses; bump both together)
+        run: |
+          id=$(docker create mwader/static-ffmpeg:9.0.2-1)
+          sudo docker cp "$id:/ffmpeg" /usr/local/bin/ffmpeg
+          sudo docker cp "$id:/ffprobe" /usr/local/bin/ffprobe
+          docker rm "$id"
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      # Unit and integration tests together: the pipeline is only covered against Postgres.
+      - run: uv run pytest --cov -m ""
+      - name: Audit runtime dependencies
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
+
+  core:
+    # packages/core: database models, job queue and storage shared by the api and worker images.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/core
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -120,7 +159,7 @@ jobs:
       # Lint and format hooks are skipped here: the api, worker and web jobs already run them.
       - run: uvx pre-commit run --all-files --show-diff-on-failure
         env:
-          SKIP: ruff-api,ruff-format-api,ruff-worker,ruff-format-worker,ruff-providers,ruff-format-providers,prettier-web,eslint-web
+          SKIP: ruff-api,ruff-format-api,ruff-worker,ruff-format-worker,ruff-core,ruff-format-core,ruff-providers,ruff-format-providers,prettier-web,eslint-web
 
   docker:
     # Builds each image (no push), checks it runs as an arbitrary non-root UID the way
@@ -150,7 +189,7 @@ jobs:
               grep -qi '^x-content-type-options: nosniff' asset-headers
           - name: api
             # `context` names the check (required by the main ruleset); the build itself
-            # runs from the repo root so the image can install packages/providers.
+            # runs from the repo root so the image can install packages/.
             context: services/api
             build_context: .
             smoke: |

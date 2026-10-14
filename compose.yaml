@@ -35,8 +35,13 @@ services:
       TRANSCRIPTION_PROVIDER: fake
       TRANSLATION_PROVIDER: fake
       EMBEDDING_PROVIDER: fake
+    volumes:
+      - media:/data/media
     depends_on:
       db: { condition: service_healthy }
 
 volumes:
   pgdata:
+  # Uploaded recordings (LocalMediaStore). Try it: docker compose cp talk.mp3 worker:/tmp/ &&
+  # docker compose exec worker python -m swayambhu_worker.ingest /tmp/talk.mp3 --title Test
+  media:

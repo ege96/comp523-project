@@ -9,3 +9,5 @@ __pycache__/
 .env
 coverage/
 .coverage
+# Local uploaded recordings (MEDIA_ROOT)
+media/

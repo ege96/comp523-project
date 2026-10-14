@@ -59,8 +59,8 @@ class Translator(Protocol):
         """Provenance stored in interviews.translated_by, e.g. "google:nmt"."""
         ...
 
-    def translate_to_english(self, texts: Sequence[str], source_language: str) -> list[str]:
-        """One English string per input, in order."""
+    def translate_to_english(self, texts: Sequence[str], source_language: str | None) -> list[str]:
+        """One English string per input, in order. `source_language` None means detect it."""
         ...
 
 

@@ -10,7 +10,7 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
-# Build context is the repo root (so packages/providers is reachable); see .dockerignore.
+# Build context is the repo root (so packages/ is reachable); see .dockerignore.
 WORKDIR /app/services/worker
 
 # Third-party dependencies only. This layer is reused until pyproject.toml or uv.lock
@@ -20,8 +20,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=services/worker/uv.lock,target=uv.lock \
     uv sync --frozen --no-dev --no-install-project --no-install-local
 
-# Then the shared providers package and the app, installed non-editable so the runtime
+# Then the shared packages and the app, installed non-editable so the runtime
 # image needs no source tree.
+COPY packages/core /app/packages/core
 COPY packages/providers /app/packages/providers
 COPY services/worker/pyproject.toml services/worker/uv.lock ./
 COPY services/worker/src ./src
@@ -38,5 +39,8 @@ ENV PATH=/opt/venv/bin:$PATH \
 # Files are world-readable, so OpenShift's arbitrary UID (group 0) can run them.
 # No chmod/chgrp pass: that would copy the whole venv into a second layer.
 COPY --from=build /opt/venv /opt/venv
+# Default media directory (MEDIA_ROOT) for when no volume is mounted there. Group 0 and
+# group-writable, because OpenShift runs the image as an arbitrary UID in group 0.
+RUN mkdir -p /data/media && chgrp 0 /data/media && chmod 2775 /data/media
 USER 1001
 CMD ["python", "-m", "swayambhu_worker"]

@@ -1,8 +1,9 @@
-"""Database tables, as SQLAlchemy ORM models (Proposal P-010).
+"""Database tables, as SQLAlchemy ORM models (Proposal P-010), shared by the API and worker.
 
-Alembic migrations in `migrations/versions` create these tables; an integration test fails if
-the models and the migrations drift apart. Keep ORM rows inside the data layer: stores return
-plain domain objects (like `admins.Admin`), so routes never hold a live database row.
+The API's Alembic migrations (`services/api/.../migrations/versions`) create these tables; an
+API integration test fails if the models and the migrations drift apart. Keep ORM rows inside
+the data layer: stores return plain domain objects (like `admins.Admin`), so routes never hold
+a live database row.
 """
 
 import uuid
@@ -25,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -76,6 +78,8 @@ TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")
 REPRESENTATIONS = ("original", "english")
+JOB_KINDS = ("transcribe", "translate", "index")
+JOB_STATES = ("queued", "running", "done", "failed")
 
 
 def _one_of(column: str, values: tuple[str, ...]) -> str:
@@ -320,4 +324,45 @@ class ChunkEmbeddingRow(Base):
 
     __table_args__ = (
         CheckConstraint(_one_of("representation", REPRESENTATIONS), name="representation_valid"),
+    )
+
+
+class JobRow(Base):
+    """A unit of worker work on one interview (Proposal for Q-18: a Postgres table, no broker).
+
+    Workers claim queued jobs with `FOR UPDATE SKIP LOCKED`, so several can run at once.
+    A running job whose `heartbeat_at` is older than the worker's lease is reclaimed, which
+    covers a pod killed mid-job. Each kind enqueues the next: transcribe, translate, index.
+    See `swayambhu_core.jobs`.
+    """
+
+    __tablename__ = "jobs"
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    kind: Mapped[str] = mapped_column(Text)
+    interview_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("interviews.id", ondelete="CASCADE"))
+    state: Mapped[str] = mapped_column(Text, server_default="queued")
+    attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    max_attempts: Mapped[int] = mapped_column(Integer, server_default="3")
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Last failure, kept after a retry succeeds. Admin-only: provider errors can be verbose.
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(_one_of("kind", JOB_KINDS), name="kind_valid"),
+        CheckConstraint(_one_of("state", JOB_STATES), name="state_valid"),
+        CheckConstraint("attempts >= 0 AND max_attempts >= 1", name="attempts_valid"),
+        # One live job per step per interview, so enqueueing twice is harmless.
+        Index(
+            "jobs_one_active_idx",
+            "interview_id",
+            "kind",
+            unique=True,
+            postgresql_where=text("state IN ('queued', 'running')"),
+        ),
+        Index("jobs_queued_idx", "run_after", postgresql_where=text("state = 'queued'")),
+        Index("jobs_interview_id_idx", "interview_id"),
     )
