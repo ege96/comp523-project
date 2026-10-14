@@ -10,18 +10,21 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=0 \
     UV_PROJECT_ENVIRONMENT=/opt/venv
-WORKDIR /app
+# Build context is the repo root (so packages/providers is reachable); see .dockerignore.
+WORKDIR /app/services/worker
 
-# Dependencies only. This layer is reused until pyproject.toml or uv.lock changes,
-# and the cache mount keeps downloaded wheels between builds.
+# Third-party dependencies only. This layer is reused until pyproject.toml or uv.lock
+# changes, and the cache mount keeps downloaded wheels between builds.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv sync --frozen --no-dev --no-install-project
+    --mount=type=bind,source=services/worker/pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=services/worker/uv.lock,target=uv.lock \
+    uv sync --frozen --no-dev --no-install-project --no-install-local
 
-# Then the app itself, installed non-editable so the runtime image needs no source tree.
-COPY pyproject.toml uv.lock ./
-COPY src ./src
+# Then the shared providers package and the app, installed non-editable so the runtime
+# image needs no source tree.
+COPY packages/providers /app/packages/providers
+COPY services/worker/pyproject.toml services/worker/uv.lock ./
+COPY services/worker/src ./src
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-editable
 

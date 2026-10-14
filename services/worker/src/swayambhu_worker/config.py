@@ -1,8 +1,10 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+from swayambhu_providers.settings import ProviderSettings
 
 
-class WorkerSettings(BaseSettings):
-    """Worker settings, read from environment variables (Proposal: names not yet agreed)."""
+class WorkerSettings(ProviderSettings):
+    """Worker settings, read from environment variables, then `.env` in the working directory
+    (Proposal: names not yet agreed). AI provider settings come from ProviderSettings."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

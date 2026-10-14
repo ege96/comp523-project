@@ -1,7 +1,8 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import SettingsConfigDict
+from swayambhu_providers.settings import ProviderSettings
 
 # Google's published signing keys for Firebase Auth ID tokens, in JWK form.
 FIREBASE_JWKS_URL = (
@@ -9,8 +10,10 @@ FIREBASE_JWKS_URL = (
 )
 
 
-class Settings(BaseSettings):
-    """API settings, read from environment variables (Proposal: names not yet agreed)."""
+class Settings(ProviderSettings):
+    """API settings, read from environment variables, then `.env` in the working directory
+    (Proposal: names not yet agreed). AI provider settings come from ProviderSettings; the API
+    uses only the embedding ones, to embed search queries."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -18,18 +18,23 @@ services:
 
   # Applies migrations on startup (services/api/start.sh), then serves.
   api:
-    build: services/api
+    build: { context: ., dockerfile: services/api/Dockerfile }
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
+      # Offline stand-ins so local dev needs no API keys. Must match the worker's.
+      EMBEDDING_PROVIDER: fake
     ports: ["8000:8080"]
     depends_on:
       db: { condition: service_healthy }
 
   worker:
-    build: services/worker
+    build: { context: ., dockerfile: services/worker/Dockerfile }
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
+      TRANSCRIPTION_PROVIDER: fake
+      TRANSLATION_PROVIDER: fake
+      EMBEDDING_PROVIDER: fake
     depends_on:
       db: { condition: service_healthy }
 
