@@ -18,7 +18,16 @@ from tests.fakes import FakeAdminStore, Row, TokenSigner
 
 # Routes anyone may call. Every other route must turn away anonymous requests;
 # test_anonymous_cannot_reach_any_other_route enforces that for routes added later.
-PUBLIC_ROUTES = {"/api/health", "/api/health/ready"}
+# Open to anonymous visitors. The interview routes filter by `visible_to` instead (tested in
+# test_interviews_integration.py); the media route checks a signed link.
+PUBLIC_ROUTES = {
+    "/api/health",
+    "/api/health/ready",
+    "/api/interviews",
+    "/api/interviews/{interview_id}",
+    "/api/interviews/{interview_id}/segments",
+    "/api/media/{media_id}",
+}
 
 
 @pytest.fixture

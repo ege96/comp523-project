@@ -1,6 +1,8 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import SettingsConfigDict
 from swayambhu_providers.settings import ProviderSettings
 
@@ -28,6 +30,12 @@ class Settings(ProviderSettings):
     # Unset means sign-in is not configured: every authenticated request gets a 503.
     firebase_project_id: str | None = None
     firebase_jwks_url: str = FIREBASE_JWKS_URL
+    # Where LocalMediaStore keeps recordings: the same directory the worker writes (D-007).
+    media_root: Path = Path("/data/media")
+    # Signs the expiring media links the player uses. Unset: a random key per process, which
+    # only works with one API pod; set the same value on every pod before scaling out.
+    media_url_secret: SecretStr | None = None
+    media_url_ttl_seconds: int = 6 * 3600
 
 
 @lru_cache

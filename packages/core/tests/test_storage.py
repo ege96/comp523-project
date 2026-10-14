@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from swayambhu_core.db import sqlalchemy_url
-from swayambhu_core.storage import LocalMediaStore
+from swayambhu_core.storage import LocalMediaStore, file_sha256
 
 
 def test_put_then_read_back_then_delete(tmp_path: Path) -> None:
@@ -31,3 +31,9 @@ def test_keys_cannot_escape_the_media_directory(tmp_path: Path, key: str) -> Non
 def test_database_url_uses_psycopg_3() -> None:
     url = sqlalchemy_url("postgresql://u@db:5432/archive")
     assert (url.drivername, url.host, url.database) == ("postgresql+psycopg", "db", "archive")
+
+
+def test_file_sha256(tmp_path: Path) -> None:
+    path = tmp_path / "f"
+    path.write_bytes(b"abc")
+    assert file_sha256(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

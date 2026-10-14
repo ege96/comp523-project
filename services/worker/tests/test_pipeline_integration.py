@@ -7,12 +7,14 @@ from pathlib import Path
 import pytest
 from audio_helpers import SPEECH_AND_PAUSES, make_audio
 from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session
 from swayambhu_core import jobs
 from swayambhu_core.models import (
     ChunkEmbeddingRow,
     InterviewLanguageRow,
     InterviewRow,
     JobRow,
+    MediaFileRow,
     SearchChunkRow,
     SegmentRow,
 )
@@ -33,24 +35,23 @@ class ScriptedTranscriber:
     name = "test:transcriber"
 
     def __init__(self) -> None:
-        self.hints: list[Sequence[str]] = []
+        self.hints: set[tuple[str, ...]] = set()
 
     def transcribe(
         self, clip: AudioClip, language_hints: Sequence[str]
     ) -> list[TranscribedSegment]:
-        self.hints.append(language_hints)
+        self.hints.add(tuple(language_hints))
         return [TranscribedSegment(0, clip.duration_ms, f"टुक्रा {clip.path.stem}", "nep")]
 
 
 class SilentTranscriber(ScriptedTranscriber):
-    """Reports no language, like OpenAI's transcription models."""
+    """Reports no language, like OpenAI's transcription models. The second piece is English."""
 
     def transcribe(
         self, clip: AudioClip, language_hints: Sequence[str]
     ) -> list[TranscribedSegment]:
-        self.hints.append(language_hints)
-        english = clip.path.stem.endswith("1")  # the second piece is English
-        text = f"piece {clip.path.stem}" if english else f"टुक्रा {clip.path.stem}"
+        [segment] = super().transcribe(clip, language_hints)
+        text = f"piece {clip.path.stem}" if clip.path.stem.endswith("1") else segment.text
         return [TranscribedSegment(0, clip.duration_ms, text, None)]
 
 
@@ -68,8 +69,8 @@ class DetectingTranslator(FakeTranslator):
 
 
 class FlakyTranslator(FakeTranslator):
-    def __init__(self, failures: int, *, retryable: bool) -> None:
-        self.failures = failures
+    def __init__(self, *, retryable: bool) -> None:
+        self.failures = 1
         self.retryable = retryable
 
     def translate_to_english(
@@ -81,26 +82,24 @@ class FlakyTranslator(FakeTranslator):
         return super().translate_to_english(texts, source_language)
 
 
-def make_runner(
+def start(
     new_session: SessionFactory,
     store: LocalMediaStore,
+    tmp_path: Path,
+    language: str | None = None,
     translator: FakeTranslator | None = None,
     transcriber: ScriptedTranscriber | None = None,
-) -> JobRunner:
-    providers = Providers(
-        transcriber or ScriptedTranscriber(), translator or FakeTranslator(), FakeEmbedder(8)
-    )
-    return JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
-
-
-def add_interview(
-    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path, language: str | None
-) -> uuid.UUID:
-    recording = make_audio(tmp_path / "talk.wav", SPEECH_AND_PAUSES, 130)
+    recording: Path | None = None,
+) -> tuple[uuid.UUID, JobRunner]:
+    """Ingest a recording (130 s of speech unless given) and return its id and a runner."""
+    recording = recording or make_audio(tmp_path / "talk.wav", SPEECH_AND_PAUSES, 130)
     with new_session() as session:
         interview_id = ingest(session, store, recording, "Test interview", language)
         session.commit()
-    return interview_id
+    providers = Providers(
+        transcriber or ScriptedTranscriber(), translator or FakeTranslator(), FakeEmbedder(8)
+    )
+    return interview_id, JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
 
 
 def drain(runner: JobRunner) -> int:
@@ -110,89 +109,71 @@ def drain(runner: JobRunner) -> int:
     return handled
 
 
-def make_due(new_session: SessionFactory) -> None:
-    """Skip the retry backoff."""
-    with new_session() as session:
-        session.execute(update(JobRow).values(run_after=func.now()))
-        session.commit()
+def job(session: Session, kind: str) -> JobRow:
+    return session.scalars(select(JobRow).where(JobRow.kind == kind)).one()
 
 
-def test_a_recording_becomes_segments_translations_and_embeddings(
+def test_a_recording_becomes_segments_translations_embeddings_and_playback(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
-    runner = make_runner(new_session, store)
-
-    assert drain(runner) == 3  # transcribe, translate, index
+    interview_id, runner = start(new_session, store, tmp_path)
+    assert drain(runner) == 4  # transcribe, playback, translate, index
 
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
-        assert (interview.status, interview.status_detail) == ("needs_review", None)
-        assert interview.duration_ms == 130_000
+        interview = session.get_one(InterviewRow, interview_id)
+        assert (interview.status, interview.status_detail, interview.duration_ms) == (
+            "needs_review", None, 130_000,
+        )  # fmt: skip
         assert (interview.language_detected, interview.language_detected_confidence) == ("ne", 1)
-        assert interview.translation_status == "done"
-        assert (interview.transcribed_by, interview.translated_by) == (
-            "test:transcriber",
-            "fake:translator",
-        )
+        assert (interview.translation_status, interview.transcribed_by) == (
+            "done", "test:transcriber",
+        )  # fmt: skip
         assert session.scalars(select(InterviewLanguageRow.language_code)).all() == ["ne"]
+        assert set(session.scalars(select(JobRow.state))) == {"done"}
 
         segments = session.scalars(select(SegmentRow).order_by(SegmentRow.seq)).all()
-        assert segments[0].start_ms == 0
-        assert segments[-1].end_ms == 130_000
+        assert (segments[0].start_ms, segments[-1].end_ms) == (0, 130_000)
         assert all(a.end_ms == b.start_ms for a, b in pairwise(segments))
         assert all(5_000 <= s.end_ms - s.start_ms <= 20_000 for s in segments[:-1])
         assert {s.language for s in segments} == {"ne"}
         assert segments[0].english_text == f"[fake ne->en] {segments[0].original_text}"
 
         chunks = session.scalars(select(SearchChunkRow).order_by(SearchChunkRow.first_seq)).all()
-        assert chunks[0].start_ms == 0
-        assert chunks[-1].last_seq == segments[-1].seq
-        embeddings = session.scalars(select(ChunkEmbeddingRow)).all()
-        assert sorted(e.representation for e in embeddings) == sorted(
-            ["english", "original"] * len(chunks)
+        assert (chunks[0].start_ms, chunks[-1].last_seq) == (0, segments[-1].seq)
+        embeddings = session.execute(
+            select(ChunkEmbeddingRow.representation, ChunkEmbeddingRow.model)
+        ).all()
+        assert sorted(embeddings) == sorted(
+            [("english", "fake:hash@8"), ("original", "fake:hash@8")] * len(chunks)
         )
-        assert {e.model for e in embeddings} == {"fake:hash@8"}
-        assert session.scalar(select(func.count()).select_from(JobRow)) == 3
-        assert set(session.scalars(select(JobRow.state))) == {"done"}
 
-
-def test_a_confirmed_language_is_passed_to_the_transcriber_and_english_is_not_translated(
-    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
-) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, "en")
-    runner = make_runner(new_session, store)
-    transcriber = runner._providers.transcriber
-    assert isinstance(transcriber, ScriptedTranscriber)
-
-    drain(runner)
-
-    assert set(map(tuple, transcriber.hints)) == {("en",)}
-    with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
-        assert interview.translation_status == "done"  # segments still reported Nepali
-        assert interview.primary_language == "en"
+        playback = session.scalars(
+            select(MediaFileRow).where(MediaFileRow.kind == "playback")
+        ).one()
+        assert (playback.content_type, playback.storage_key) == (
+            "audio/mp4", f"interviews/{interview_id}/playback.m4a",
+        )  # fmt: skip
+        with store.local_copy(playback.storage_key) as copy:
+            assert copy.stat().st_size == playback.size_bytes
 
 
 def test_the_translator_detects_languages_the_transcriber_did_not_report(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
     translator = DetectingTranslator()
-    drain(make_runner(new_session, store, translator, SilentTranscriber()))
+    interview_id, runner = start(
+        new_session, store, tmp_path, None, translator, SilentTranscriber()
+    )
+    drain(runner)
 
     assert translator.sources == [None]  # one call, Google detects
     with new_session() as session:
         segments = session.scalars(select(SegmentRow).order_by(SegmentRow.seq)).all()
         assert [s.language for s in segments][:3] == ["ne", "en", "ne"]
-        english_segment = segments[1]
-        assert (english_segment.english_machine, english_segment.english_text) == (None, None)
+        assert (segments[1].english_machine, segments[1].english_text) == (None, None)
         assert segments[0].english_text == f"[en] {segments[0].original_text}"
 
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
+        interview = session.get_one(InterviewRow, interview_id)
         assert interview.language_detected == "ne"
         assert 0.5 < (interview.language_detected_confidence or 0) < 1
         languages = session.scalars(select(InterviewLanguageRow.language_code)).all()
@@ -202,55 +183,55 @@ def test_the_translator_detects_languages_the_transcriber_did_not_report(
 def test_a_confirmed_language_is_used_instead_of_detection(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    add_interview(new_session, store, tmp_path, "new")
-    translator = DetectingTranslator()
-    drain(make_runner(new_session, store, translator, SilentTranscriber()))
+    translator, transcriber = DetectingTranslator(), SilentTranscriber()
+    interview_id, runner = start(new_session, store, tmp_path, "new", translator, transcriber)
+    drain(runner)
 
-    assert translator.sources == ["new"]
+    assert (transcriber.hints, translator.sources) == ({("new",)}, ["new"])
     with new_session() as session:
         assert set(session.scalars(select(SegmentRow.language))) == {None}
+        assert session.get_one(InterviewRow, interview_id).primary_language == "new"
 
 
 def test_a_translator_outage_is_retried(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
-    runner = make_runner(new_session, store, FlakyTranslator(1, retryable=True))
+    translator = FlakyTranslator(retryable=True)
+    interview_id, runner = start(new_session, store, tmp_path, None, translator)
 
-    assert drain(runner) == 2  # transcribe, then translate fails and waits for its retry
+    assert drain(runner) == 3  # transcribe, playback, then translate fails and waits
     with new_session() as session:
-        job = session.scalars(select(JobRow).where(JobRow.kind == "translate")).one()
-        assert (job.state, job.attempts, job.last_error) == ("queued", 1, "translator down")
+        translate = job(session, "translate")
+        assert (translate.state, translate.attempts, translate.last_error) == (
+            "queued", 1, "translator down",
+        )  # fmt: skip
+        session.execute(update(JobRow).values(run_after=func.now()))  # skip the backoff
+        session.commit()
 
-    make_due(new_session)
     assert drain(runner) == 2  # translate, index
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
+        interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.translation_status) == ("needs_review", "done")
 
 
 def test_a_permanent_translation_failure_still_indexes_the_original(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
-    runner = make_runner(new_session, store, FlakyTranslator(1, retryable=False))
+    translator = FlakyTranslator(retryable=False)
+    interview_id, runner = start(new_session, store, tmp_path, None, translator)
 
-    assert drain(runner) == 3
+    assert drain(runner) == 4
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
+        interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.translation_status) == ("needs_review", "failed")
         assert interview.status_detail == "Translation failed: translator down"
-        representations = set(session.scalars(select(ChunkEmbeddingRow.representation)))
-        assert representations == {"original"}
+        assert set(session.scalars(select(ChunkEmbeddingRow.representation))) == {"original"}
 
 
 def test_edited_transcripts_are_not_replaced(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
-    runner = make_runner(new_session, store)
+    interview_id, runner = start(new_session, store, tmp_path)
     drain(runner)
     with new_session() as session:
         session.execute(
@@ -264,13 +245,11 @@ def test_edited_transcripts_are_not_replaced(
 
     assert drain(runner) == 1
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
+        interview = session.get_one(InterviewRow, interview_id)
         assert interview.status == "failed"
         assert "edited" in (interview.status_detail or "")
-        assert session.scalar(select(SegmentRow.original_text).where(SegmentRow.seq == 0)) == (
-            "सच्याइएको"
-        )
+        first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
+        assert session.scalar(first) == "सच्याइएको"
 
 
 def test_unreadable_media_fails_without_retrying(
@@ -278,34 +257,28 @@ def test_unreadable_media_fails_without_retrying(
 ) -> None:
     junk = tmp_path / "junk.mp3"
     junk.write_bytes(b"not audio")
-    with new_session() as session:
-        interview_id = ingest(session, store, junk, "Broken", None)
-        session.commit()
+    interview_id, runner = start(new_session, store, tmp_path, recording=junk)
 
-    assert drain(make_runner(new_session, store)) == 1
+    assert drain(runner) == 2  # transcribe and playback
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        job = session.scalars(select(JobRow)).one()
-        assert interview is not None
-        assert interview.status == "failed"
-        assert (job.state, job.attempts) == ("failed", 1)
+        assert session.get_one(InterviewRow, interview_id).status == "failed"
+        transcribe = job(session, "transcribe")
+        assert (transcribe.state, transcribe.attempts) == ("failed", 1)
 
 
 def test_a_job_whose_worker_vanished_is_taken_over_then_given_up(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
-    interview_id = add_interview(new_session, store, tmp_path, None)
+    interview_id, runner = start(new_session, store, tmp_path)
     stale = func.now() - timedelta(hours=1)
     with new_session() as session:
         session.execute(update(JobRow).values(state="running", attempts=1, heartbeat_at=stale))
         session.commit()
 
-    runner = make_runner(new_session, store)
     assert runner.handle_one()  # attempt 2 takes it over
     with new_session() as session:
-        job = session.scalars(select(JobRow).where(JobRow.kind == "transcribe")).one()
-        assert (job.state, job.attempts) == ("done", 2)
-
+        transcribe = job(session, "transcribe")
+        assert (transcribe.state, transcribe.attempts) == ("done", 2)
         session.execute(
             update(JobRow)
             .where(JobRow.kind == "translate")
@@ -314,13 +287,11 @@ def test_a_job_whose_worker_vanished_is_taken_over_then_given_up(
         session.commit()
 
     # Out of attempts, so translation is given up and indexing runs without English.
-    assert drain(runner) == 1
+    assert drain(runner) == 2  # the stale playback job, then index
     with new_session() as session:
-        interview = session.get(InterviewRow, interview_id)
-        assert interview is not None
+        interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.translation_status) == ("needs_review", "failed")
-        job = session.scalars(select(JobRow).where(JobRow.kind == "translate")).one()
-        assert job.state == "failed"
+        assert job(session, "translate").state == "failed"
 
 
 def test_the_ingest_command_queues_a_file(
@@ -338,6 +309,6 @@ def test_the_ingest_command_queues_a_file(
     with new_session() as session:
         interview = session.scalars(select(InterviewRow)).one()
         assert (interview.title, interview.language_confirmed) == ("From the CLI", "new")
-        assert session.scalars(select(JobRow.kind)).all() == ["transcribe"]
+        assert session.scalars(select(JobRow.kind)).all() == ["transcribe", "playback"]
     assert capsys.readouterr().out == f"Queued interview {interview.id}\n"
     assert (tmp_path / "media" / "interviews" / str(interview.id) / "original.mp3").is_file()

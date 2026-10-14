@@ -7,7 +7,6 @@ file lands in the worker's media directory:
 """
 
 import argparse
-import hashlib
 import mimetypes
 import uuid
 from pathlib import Path
@@ -15,24 +14,16 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs
 from swayambhu_core.models import InterviewRow, MediaFileRow
-from swayambhu_core.storage import LocalMediaStore, MediaStore
+from swayambhu_core.storage import LocalMediaStore, MediaStore, file_sha256
 
 from swayambhu_worker.config import WorkerSettings
 from swayambhu_worker.db import session_factory
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def ingest(
     session: Session, store: MediaStore, path: Path, title: str, language: str | None
 ) -> uuid.UUID:
-    """Store the file, create a Private interview for it, and queue transcription."""
+    """Store the file, create a Private interview for it, and queue its processing."""
     interview = InterviewRow(title=title, language_confirmed=language)
     session.add(interview)
     session.flush()
@@ -45,10 +36,11 @@ def ingest(
             storage_key=key,
             content_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
             size_bytes=path.stat().st_size,
-            sha256=_sha256(path),
+            sha256=file_sha256(path),
         )
     )
     jobs.enqueue(session, "transcribe", interview.id)
+    jobs.enqueue(session, "playback", interview.id)
     return interview.id
 
 
