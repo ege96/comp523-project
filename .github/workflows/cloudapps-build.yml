@@ -1,0 +1,58 @@
+name: CloudApps build
+
+# Starts a CloudApps (OpenShift) build only for the apps whose files changed on main.
+# Each BuildConfig's GitHub webhook trigger rebuilds every app on every push, so this
+# replaces it with the BuildConfig's Generic webhook. Setup: notes in cloudapps_deploy.md §8.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: cloudapps-build
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Trigger builds for changed apps
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          # Full Generic webhook URLs ("Copy URL with Secret"); each one is a credential.
+          WEBHOOK_API: ${{ secrets.OPENSHIFT_WEBHOOK_API }}
+          WEBHOOK_WEB: ${{ secrets.OPENSHIFT_WEBHOOK_WEB }}
+          WEBHOOK_WORKER: ${{ secrets.OPENSHIFT_WEBHOOK_WORKER }}
+        run: |
+          # A new branch or rewritten history has no usable "before" commit: build everything.
+          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            changed=$(git diff --name-only "$BEFORE" "$AFTER")
+          else
+            changed=ALL
+          fi
+          printf 'Changed files:\n%s\n' "$changed"
+
+          # app, webhook URL, then path prefixes whose changes need a rebuild.
+          # api and worker images build from the repo root and include packages/providers.
+          trigger() {
+            app=$1 url=$2; shift 2
+            hit=false
+            if [ "$changed" = ALL ]; then hit=true; fi
+            for prefix in "$@"; do
+              if printf '%s\n' "$changed" | grep -q "^$prefix"; then hit=true; fi
+            done
+            if [ "$hit" = false ]; then echo "$app: unchanged, skipping"; return; fi
+            if [ -z "$url" ]; then echo "::warning::$app changed but its webhook secret isn't set"; return; fi
+            curl -fsS -X POST -o /dev/null "$url"
+            echo "$app: build started"
+          }
+          trigger api "$WEBHOOK_API" services/api/ packages/providers/ .dockerignore
+          trigger worker "$WEBHOOK_WORKER" services/worker/ packages/providers/ .dockerignore
+          trigger web "$WEBHOOK_WEB" apps/web/
