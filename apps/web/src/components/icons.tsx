@@ -1,7 +1,7 @@
 import SvgIcon, { type SvgIconProps } from "@mui/material/SvgIcon";
 
-// The three icons the archive uses, inlined so the bundle doesn't need @mui/icons-material.
-// Search and arrow paths are Material Symbols (Apache 2.0).
+// The icons the archive uses, inlined so the bundle doesn't need @mui/icons-material.
+// Search, arrow and play paths are Material Symbols (Apache 2.0).
 
 export function SearchIcon(props: SvgIconProps) {
   return (
@@ -24,6 +24,14 @@ export function WaveformIcon(props: SvgIconProps) {
   return (
     <SvgIcon {...props}>
       <path d="M11 3h2v18h-2zM7 7h2v10H7zm8 0h2v10h-2zM3 10h2v4H3zm16 0h2v4h-2z" />
+    </SvgIcon>
+  );
+}
+
+export function PlayIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M8 5v14l11-7z" />
     </SvgIcon>
   );
 }

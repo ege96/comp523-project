@@ -1,4 +1,4 @@
-import { QueryClient, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, QueryClient, queryOptions } from "@tanstack/react-query";
 import type { z } from "zod";
 
 import { API_BASE_URL } from "../config";
@@ -6,6 +6,8 @@ import {
   AdminSchema,
   InterviewDetailSchema,
   InterviewListSchema,
+  SearchFiltersSchema,
+  SearchResultsSchema,
   SegmentListSchema,
 } from "./schemas";
 
@@ -71,6 +73,55 @@ export const interviewQueries = {
           token: await viewer.getToken(),
           signal,
         }),
+    }),
+};
+
+/** What `GET /api/search` filters on; undefined means "any". Dates are YYYY-MM-DD. */
+export type SearchParams = {
+  q: string;
+  language?: string;
+  interviewee?: number | "unknown";
+  from?: string;
+  to?: string;
+  undated?: boolean;
+};
+
+const SEARCH_PAGE_SIZE = 20;
+
+export const searchQueries = {
+  // Pages until the API says there's no more; it never reports a total (handoff: no counts).
+  moments: (viewer: Viewer, params: SearchParams) =>
+    infiniteQueryOptions({
+      queryKey: ["search", viewer.key, params],
+      initialPageParam: 0,
+      queryFn: async ({ pageParam, signal }) => {
+        const query = new URLSearchParams({
+          q: params.q,
+          limit: String(SEARCH_PAGE_SIZE),
+          offset: String(pageParam),
+        });
+        if (params.language) query.set("language", params.language);
+        if (params.interviewee !== undefined) query.set("interviewee", String(params.interviewee));
+        if (params.from) query.set("recorded_from", params.from);
+        if (params.to) query.set("recorded_to", params.to);
+        if (params.undated) query.set("undated", "true");
+        return getJson(`/api/search?${query.toString()}`, SearchResultsSchema, {
+          token: await viewer.getToken(),
+          signal,
+        });
+      },
+      getNextPageParam: (last, pages) =>
+        last.has_more ? pages.length * SEARCH_PAGE_SIZE : undefined,
+    }),
+  filters: (viewer: Viewer) =>
+    queryOptions({
+      queryKey: ["search", viewer.key, "filters"],
+      queryFn: async ({ signal }) =>
+        getJson("/api/search/filters", SearchFiltersSchema, {
+          token: await viewer.getToken(),
+          signal,
+        }),
+      staleTime: 5 * 60_000,
     }),
 };
 

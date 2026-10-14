@@ -13,7 +13,8 @@ export interface paths {
         };
         /**
          * List Interviews
-         * @description Interviews the viewer may see, most recently added first.
+         * @description Interviews the viewer may see, most recently added first, optionally only those with
+         *     one status (for the admin's processing queue).
          */
         get: operations["list_interviews_api_interviews_get"];
         put?: never;
@@ -38,7 +39,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Interview
+         * @description Publish (Public) or hide (Private) an interview. Takes effect on the next request.
+         */
+        patch: operations["update_interview_api_interviews__interview_id__patch"];
         trace?: never;
     };
     "/api/interviews/{interview_id}/segments": {
@@ -77,6 +82,118 @@ export interface paths {
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description Transcript moments most relevant to `q`, best first. Paging goes as deep as
+         *     SEARCH_CANDIDATES hits from each search.
+         */
+        get: operations["search_api_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/search/filters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Filters */
+        get: operations["search_filters_api_search_filters_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/interviews/{interview_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description Every processing step queued for an interview, oldest first, with retries and errors.
+         */
+        get: operations["list_jobs_api_interviews__interview_id__jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads/{uuid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Extension Termination Route */
+        delete: operations["extension_termination_route_api_uploads__uuid__delete"];
+        options?: never;
+        /** Core Head Route */
+        head: operations["core_head_route_api_uploads__uuid__head"];
+        /** Core Patch Route */
+        patch: operations["core_patch_route_api_uploads__uuid__patch"];
+        trace?: never;
+    };
+    "/api/uploads/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extension Creation Route */
+        post: operations["extension_creation_route_api_uploads__post"];
+        delete?: never;
+        /** Core Options Route */
+        options: operations["core_options_route_api_uploads__options"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Extension Creation Route */
+        post: operations["extension_creation_route_api_uploads_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -257,6 +374,49 @@ export interface components {
              */
             created_at: string;
         };
+        /** InterviewUpdate */
+        InterviewUpdate: {
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "private";
+        };
+        /** Interviewee */
+        Interviewee: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+        };
+        /** Job */
+        Job: {
+            /** Kind */
+            kind: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "done" | "failed";
+            /** Attempts */
+            attempts: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Last Error */
+            last_error: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+        };
+        /** JobList */
+        JobList: {
+            /** Items */
+            items: components["schemas"]["Job"][];
+        };
         /** Language */
         Language: {
             /** Code */
@@ -284,6 +444,18 @@ export interface components {
              */
             expires_at: string;
         };
+        /** Moment */
+        Moment: {
+            interview: components["schemas"]["InterviewSummary"];
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Excerpt */
+            excerpt: components["schemas"]["Segment"][];
+            /** Matched By */
+            matched_by: ("keyword" | "semantic")[];
+        };
         /** ReadinessResponse */
         ReadinessResponse: {
             /**
@@ -295,6 +467,29 @@ export interface components {
             database: boolean;
             /** Pgvector */
             pgvector: boolean;
+        };
+        /**
+         * SearchFilters
+         * @description Filter choices drawn only from interviews the viewer may see. Interviews with no
+         *     interviewee or no recording date are reached with `interviewee=unknown` and `undated`.
+         */
+        SearchFilters: {
+            /** Languages */
+            languages: components["schemas"]["Language"][];
+            /** Interviewees */
+            interviewees: components["schemas"]["Interviewee"][];
+        };
+        /** SearchResults */
+        SearchResults: {
+            /** Items */
+            items: components["schemas"]["Moment"][];
+            /** Has More */
+            has_more: boolean;
+            /**
+             * Search Mode
+             * @enum {string}
+             */
+            search_mode: "hybrid" | "keyword_only";
         };
         /** Segment */
         Segment: {
@@ -347,6 +542,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
+                status?: ("processing" | "needs_review" | "reviewed" | "failed") | null;
             };
             header?: never;
             path?: never;
@@ -393,6 +589,39 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InterviewDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_interview_api_interviews__interview_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InterviewUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -463,6 +692,298 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                /** @description Any language heard, e.g. ne */
+                language?: string | null;
+                /** @description An interviewee id, or unknown */
+                interviewee?: number | "unknown" | null;
+                recorded_from?: string | null;
+                recorded_to?: string | null;
+                /** @description With a date range, also include undated interviews */
+                undated?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_filters_api_search_filters_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchFilters"];
+                };
+            };
+        };
+    };
+    list_jobs_api_interviews__interview_id__jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extension_termination_route_api_uploads__uuid__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "tus-resumable"?: string;
+            };
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    core_head_route_api_uploads__uuid__head: {
+        parameters: {
+            query?: never;
+            header?: {
+                "tus-resumable"?: string;
+            };
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    core_patch_route_api_uploads__uuid__patch: {
+        parameters: {
+            query?: {
+                post_request?: boolean;
+            };
+            header: {
+                "content-length": number;
+                "upload-offset": number;
+                "upload-length"?: number;
+                "content-type"?: string;
+                "tus-resumable"?: string;
+            };
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extension_creation_route_api_uploads__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "upload-metadata"?: string;
+                "upload-length"?: number;
+                "upload-defer-length"?: number;
+                "upload-concat"?: string;
+                "tus-resumable"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    core_options_route_api_uploads__options: {
+        parameters: {
+            query?: never;
+            header?: {
+                "tus-resumable"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    extension_creation_route_api_uploads_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "upload-metadata"?: string;
+                "upload-length"?: number;
+                "upload-defer-length"?: number;
+                "upload-concat"?: string;
+                "tus-resumable"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
