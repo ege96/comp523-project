@@ -1331,6 +1331,7 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "swayambhu-core" },
     { name = "swayambhu-providers" },
+    { name = "tuspyserver" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1354,6 +1355,7 @@ requires-dist = [
     { name = "sqlalchemy", specifier = ">=2.0.36" },
     { name = "swayambhu-core", editable = "../../packages/core" },
     { name = "swayambhu-providers", editable = "../../packages/providers" },
+    { name = "tuspyserver", specifier = ">=4.4.2,<5" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
@@ -1421,6 +1423,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ee/9f/c5201d42a484c061e528825fc8e2d565f5abd50a4ced6fb7d29c4ec99b2b/truststore-0.10.5.tar.gz", hash = "sha256:30d36967ccaded5cbb38d602c433f53600036c79d502f4533a49b60a03bbefcd", size = 28091, upload-time = "2026-10-12T22:27:31.808Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/e9/3a7820be2bb0fe53b6bc9c3be26d3d1158004e4c3ab953aa6840b955b1e9/truststore-0.10.5-py3-none-any.whl", hash = "sha256:9aaaedaefaf06d8b206278cf8b5012bc897f485a874503501e12d776df78951c", size = 19017, upload-time = "2026-10-12T22:27:30.377Z" },
+]
+
+[[package]]
+name = "tuspyserver"
+version = "4.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "fastapi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/0d/0790d052099c0c33ecaf1871fdc9a4edca7116da9728455979ca96e96c0e/tuspyserver-4.4.2.tar.gz", hash = "sha256:63f0151dc71e52b8c52299c7a29f701397df1093e5f890214e5bbca0ee1bff68", size = 32163, upload-time = "2026-09-17T06:44:24.585Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/c2/050e80b8c15ab6b7d4e1b85c5a11ed0895256da93b008fb27e0d3f00bb1f/tuspyserver-4.4.2-py3-none-any.whl", hash = "sha256:d83d560f568e9833e1d12d46a8b289c4cfc3ccb844aac6bf471c354c2b4d4177", size = 41001, upload-time = "2026-09-17T06:44:23.491Z" },
 ]
 
 [[package]]

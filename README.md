@@ -93,6 +93,42 @@ On CloudApps, run the same command with `oc exec deploy/<api deployment> -- pyth
 
 In the web app, the footer links to `/signin` (Sign in with Google, in a popup). Firebase is only downloaded by browsers that open the sign-in page or were signed in before, so public visitors never load it. The web app asks `GET /api/auth/me` whether the account is an admin, and shows the admin pages only then. That is only for the UI: the API checks the token on every admin request.
 
+## Uploading recordings
+
+Admins upload recordings with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (Proposal; served by `tuspyserver`). If the connection drops, the upload resumes from the last byte the server has rather than starting again. The web app uses `tus-js-client`. Every route needs an admin token.
+
+1. `POST /api/uploads` with `Upload-Length` and `Upload-Metadata`, and no body. The metadata keys are `title`, `filename` and `filetype` (all required), plus optional `language` (`en`, `ne`, `new`), `interviewee_id` or `interviewee_name`, and `recorded_on` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`). Bad metadata is refused here, before any bytes are sent.
+2. `PATCH` the returned `Location` in chunks of at most `UPLOAD_CHUNK_MAX_BYTES` (64 MiB). `HEAD` on it tells you where to resume.
+3. The last PATCH's response has the new interview's id in `Upload-Interview-Id`. The interview is Private, and its processing is already queued.
+
+From a script, the Python client `tuspy` resumes and chunks for you:
+
+```python
+from tusclient import client  # pip install tuspy
+
+tus = client.TusClient("https://<host>/api/uploads", headers={"Authorization": f"Bearer {token}"})
+tus.uploader(
+    "talk.mp3",
+    chunk_size=32 * 1024 * 1024,
+    metadata={"title": "Interview with ...", "filename": "talk.mp3", "filetype": "audio/mpeg"},
+).upload()
+```
+
+With curl, a file smaller than one chunk is two requests (metadata values are base64):
+
+```sh
+b64() { printf %s "$1" | base64 -w0; }
+curl -i -X POST https://<host>/api/uploads -H "Authorization: Bearer $TOKEN" -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Length: $(stat -c%s talk.mp3)" \
+  -H "Upload-Metadata: title $(b64 'Interview'),filename $(b64 talk.mp3),filetype $(b64 audio/mpeg)"
+curl -i -X PATCH "<Location from above>" -H "Authorization: Bearer $TOKEN" -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Offset: 0" -H "Content-Type: application/offset+octet-stream" --data-binary @talk.mp3
+```
+
+Unfinished uploads sit in `<MEDIA_ROOT>/uploads` and the worker deletes them after `UPLOAD_RETENTION_DAYS` (3) without a new chunk. For bulk loads on the server itself, `python -m swayambhu_worker.ingest FILE --title ...` skips HTTP entirely.
+
+Admins publish or hide an interview with `PATCH /api/interviews/{id}` `{"visibility": "public"}`, follow its processing with `GET /api/interviews/{id}/jobs`, and list by status with `GET /api/interviews?status=processing`.
+
 ## Logs and request IDs
 
 The API writes one JSON object per line to stdout (`LOG_FORMAT=json`, the default), which OpenShift collects. Set `LOG_FORMAT=text` for readable local output and `LOG_LEVEL` to change the level. Every response carries an `X-Request-ID`: the caller's own if it is a short token of letters, digits, `.`, `_` or `-`, otherwise a new one. Every log line written during that request includes it. Each request gets one access line with the method, path (no query string), status, duration and client IP. Headers, tokens and search terms are never logged. An unhandled error is logged with its stack and returns `500 {"detail": "Internal error", "request_id": "..."}`, so a reported ID leads straight to the trace.

@@ -37,3 +37,13 @@ def test_file_sha256(tmp_path: Path) -> None:
     path = tmp_path / "f"
     path.write_bytes(b"abc")
     assert file_sha256(path) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+
+def test_put_can_move_instead_of_copying(tmp_path: Path) -> None:
+    store = LocalMediaStore(tmp_path / "media")
+    upload = tmp_path / "upload"
+    upload.write_bytes(b"audio")
+    store.put("a/original.wav", upload, move=True)
+    assert not upload.exists()
+    with store.local_copy("a/original.wav") as stored:
+        assert stored.read_bytes() == b"audio"
