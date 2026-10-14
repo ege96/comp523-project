@@ -5,6 +5,7 @@ description = "Background media-processing worker for the Swayambhu Stories arch
 requires-python = ">=3.12"
 dependencies = [
     "pydantic-settings>=2.4",
+    "swayambhu-providers",
 ]
 
 [dependency-groups]
@@ -47,3 +48,6 @@ branch = true
 [tool.coverage.report]
 fail_under = 80
 show_missing = true
+
+[tool.uv.sources]
+swayambhu-providers = { path = "../../packages/providers", editable = true }
