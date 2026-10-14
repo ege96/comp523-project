@@ -2,7 +2,6 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from swayambhu_api.auth import (
@@ -18,8 +17,9 @@ from tests.fakes import FakeAdminStore, Row, TokenSigner
 
 # Routes anyone may call. Every other route must turn away anonymous requests;
 # test_anonymous_cannot_reach_any_other_route enforces that for routes added later.
-# Open to anonymous visitors. The interview routes filter by `visible_to` instead (tested in
-# test_interviews_integration.py); the media route checks a signed link.
+# Open to anonymous visitors. The interview and search routes filter by `visible_to` instead
+# (tested in test_interviews_integration.py and test_search_integration.py); the media route
+# checks a signed link.
 PUBLIC_ROUTES = {
     "/api/health",
     "/api/health/ready",
@@ -27,6 +27,8 @@ PUBLIC_ROUTES = {
     "/api/interviews/{interview_id}",
     "/api/interviews/{interview_id}/segments",
     "/api/media/{media_id}",
+    "/api/search",
+    "/api/search/filters",
 }
 
 
@@ -60,15 +62,17 @@ def test_anonymous_cannot_reach_admin_endpoint(client: TestClient) -> None:
 
 
 def admin_only_routes() -> list[tuple[str, str]]:
+    # From the OpenAPI schema: app.routes doesn't list routes added with include_router.
     return [
-        (method, route.path)
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path not in PUBLIC_ROUTES
-        for method in sorted(route.methods)
+        (method.upper(), path)
+        for path, operations in app.openapi()["paths"].items()
+        if path not in PUBLIC_ROUTES
+        for method in sorted(operations)
     ]
 
 
-def test_there_are_admin_only_routes_to_check() -> None:
+def test_every_route_is_checked() -> None:
+    assert set(app.openapi()["paths"]) >= PUBLIC_ROUTES  # no stale entries
     assert ("GET", "/api/auth/me") in admin_only_routes()
 
 

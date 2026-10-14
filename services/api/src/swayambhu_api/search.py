@@ -1,0 +1,374 @@
+"""Searching transcripts for timestamped moments (Proposal: paths, shapes and ranking).
+
+Two searches run on every query and are merged with reciprocal rank fusion (Q-14):
+- keyword: Postgres full-text search over display segments (P-016), with English stemming on
+  English text and the `simple` configuration on original text, so a Devanagari query
+  matches Nepali or Nepal Bhasa words directly;
+- semantic: the query's embedding against the stored chunk embeddings of the configured model
+  (both the original and English representations), by exact cosine distance (P-015).
+
+A moment is one search chunk (P-014). A keyword hit in a chunk anchors the moment at the
+matching line; a semantic-only hit starts at the chunk's first line. A keyword hit in an
+interview that hasn't been indexed yet is its own moment, so visitors find what is ready
+(D-008). Results are ranked, never counted: there is no total, only whether more exist.
+
+Every query joins `interviews` and filters with `visible_to`, like the rest of the API.
+"""
+
+import logging
+import uuid
+from dataclasses import dataclass
+from datetime import date
+from functools import lru_cache
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+from sqlalchemy import (
+    TIMESTAMP,
+    ColumnElement,
+    Date,
+    and_,
+    case,
+    cast,
+    exists,
+    func,
+    literal,
+    literal_column,
+    or_,
+    select,
+)
+from swayambhu_core.models import (
+    CHUNKER,
+    ChunkEmbeddingRow,
+    IntervieweeRow,
+    InterviewLanguageRow,
+    InterviewRow,
+    LanguageRow,
+    SearchChunkRow,
+    SegmentRow,
+)
+from swayambhu_providers import Embedder, ProviderError
+from swayambhu_providers.factory import ProviderConfigError, build_embedder
+
+from swayambhu_api.auth import CurrentViewer
+from swayambhu_api.config import get_settings
+from swayambhu_api.db import DbSession
+from swayambhu_api.interviews import (
+    InterviewSummary,
+    Language,
+    Segment,
+    summary_query,
+    to_segment,
+    to_summary,
+)
+from swayambhu_api.visibility import visible_to
+
+log = logging.getLogger(__name__)
+router = APIRouter()
+
+# Proposals, to tune with the evaluation harness.
+CANDIDATES = 100  # hits taken from each search before fusing; also the deepest page
+RRF_K = 60  # the usual reciprocal rank fusion constant
+EXCERPT_MS = 30_000  # roughly how much transcript a moment shows
+EXCERPT_MAX_SEGMENTS = 10
+
+_ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
+_SIMPLE: ColumnElement[str] = literal_column("'simple'::regconfig")
+
+
+@lru_cache
+def _embedder() -> Embedder:
+    settings = get_settings()
+    # A visitor is waiting: give up on the provider quickly and fall back to keywords.
+    timeout = {"provider_timeout_seconds": settings.search_embedding_timeout_seconds}
+    return build_embedder(settings.model_copy(update=timeout))
+
+
+def get_embedder() -> Embedder | None:
+    """The embedder the worker used for stored chunks (both read the same settings), or None
+    when it isn't configured, which leaves keyword search only."""
+    try:
+        return _embedder()
+    except ProviderConfigError as exc:
+        log.error("Semantic search is off: %s", exc)
+        return None
+
+
+EmbedderDep = Annotated[Embedder | None, Depends(get_embedder)]
+
+
+class Moment(BaseModel):
+    interview: InterviewSummary
+    # The excerpt's span. The viewer seeks to start_ms and highlights the first segment.
+    start_ms: int
+    end_ms: int
+    excerpt: list[Segment]
+
+
+class SearchResults(BaseModel):
+    items: list[Moment]
+    has_more: bool
+
+
+class Interviewee(BaseModel):
+    id: int
+    name: str
+
+
+class SearchFilters(BaseModel):
+    """Filter choices drawn only from interviews the viewer may see. Interviews with no
+    interviewee or no recording date are reached with `interviewee=unknown` and `undated`."""
+
+    languages: list[Language]
+    interviewees: list[Interviewee]
+
+
+@dataclass(frozen=True)
+class Hit:
+    """One ranked hit from either search, keyed by the chunk it falls in (None when the
+    interview has no chunks yet). `seq` is the line a moment from it would start at."""
+
+    interview_id: uuid.UUID
+    chunk_id: int | None
+    seq: int
+
+
+def fuse(keyword: list[Hit], semantic: list[Hit]) -> list[Hit]:
+    """Reciprocal rank fusion. Each list counts once per moment, at its best rank; a keyword
+    hit's line wins over a chunk's first line."""
+    scores: dict[object, float] = {}
+    anchors: dict[object, Hit] = {}
+    for hits in (keyword, semantic):
+        seen: set[object] = set()
+        for rank, hit in enumerate(hits):
+            key = hit.chunk_id if hit.chunk_id is not None else (hit.interview_id, hit.seq)
+            if key in seen:
+                continue
+            seen.add(key)
+            scores[key] = scores.get(key, 0.0) + 1 / (RRF_K + rank + 1)
+            anchors.setdefault(key, hit)
+    return [anchors[k] for k in sorted(scores, key=lambda k: -scores[k])]
+
+
+def _filters(
+    language: str | None,
+    interviewee: int | Literal["unknown"] | None,
+    recorded_from: date | None,
+    recorded_to: date | None,
+    undated: bool,
+) -> list[ColumnElement[bool]]:
+    where: list[ColumnElement[bool]] = []
+    if language:
+        # Any language heard, so a mixed-language recording matches each of its languages.
+        where.append(
+            exists().where(
+                InterviewLanguageRow.interview_id == InterviewRow.id,
+                InterviewLanguageRow.language_code == language,
+            )
+        )
+    if interviewee == "unknown":
+        where.append(InterviewRow.interviewee_id.is_(None))
+    elif interviewee is not None:
+        where.append(InterviewRow.interviewee_id == interviewee)
+    if recorded_from or recorded_to:
+        # recorded_on is the first day of a year, month or day; match if that period overlaps.
+        dated: list[ColumnElement[bool]] = [InterviewRow.recorded_on.is_not(None)]
+        if recorded_to:
+            dated.append(InterviewRow.recorded_on <= recorded_to)
+        if recorded_from:
+            start = func.date_trunc(
+                InterviewRow.recorded_on_precision, cast(literal(recorded_from), TIMESTAMP)
+            )
+            dated.append(InterviewRow.recorded_on >= cast(start, Date))
+        where.append(
+            or_(and_(*dated), InterviewRow.recorded_on.is_(None)) if undated else and_(*dated)
+        )
+    return where
+
+
+def _keyword_hits(
+    session: DbSession, viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]]
+) -> list[Hit]:
+    english_q = func.websearch_to_tsquery(_ENGLISH, q)
+    simple_q = func.websearch_to_tsquery(_SIMPLE, q)
+    # English speech has no english_text, and neither has text whose translation failed.
+    untranslated = func.to_tsvector(_ENGLISH, SegmentRow.original_text)
+    no_english = SegmentRow.english_text.is_(None)
+    rank = func.greatest(
+        func.ts_rank_cd(SegmentRow.english_tsv, english_q),
+        func.ts_rank_cd(SegmentRow.original_tsv, simple_q),
+        case((no_english, func.ts_rank_cd(untranslated, english_q))),
+    )
+    rows = session.execute(
+        select(SegmentRow.interview_id, SearchChunkRow.id, SegmentRow.seq)
+        .join(InterviewRow, InterviewRow.id == SegmentRow.interview_id)
+        .outerjoin(
+            SearchChunkRow,
+            and_(
+                SearchChunkRow.interview_id == SegmentRow.interview_id,
+                SearchChunkRow.chunker == CHUNKER,
+                SegmentRow.seq.between(SearchChunkRow.first_seq, SearchChunkRow.last_seq),
+            ),
+        )
+        .where(
+            visible_to(viewer.admin),
+            *where,
+            or_(
+                SegmentRow.english_tsv.op("@@")(english_q),
+                SegmentRow.original_tsv.op("@@")(simple_q),
+                and_(no_english, untranslated.op("@@")(english_q)),
+            ),
+        )
+        .order_by(rank.desc(), SegmentRow.interview_id, SegmentRow.seq)
+        .limit(CANDIDATES)
+    ).all()
+    return [Hit(i, c, s) for i, c, s in rows]
+
+
+def _semantic_hits(
+    session: DbSession,
+    viewer: CurrentViewer,
+    embedder: Embedder | None,
+    q: str,
+    where: list[ColumnElement[bool]],
+) -> list[Hit]:
+    if embedder is None:
+        return []
+    try:
+        [vector] = embedder.embed([q], "query")
+    except ProviderError as exc:
+        # Keyword results are still worth returning when the provider is down. The error
+        # text can echo the request, and search terms are never logged.
+        log.warning("Query embedding failed (retryable=%s); keyword results only", exc.retryable)
+        return []
+    distance = func.min(ChunkEmbeddingRow.embedding.cosine_distance(vector))
+    rows = session.execute(
+        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
+        .join(ChunkEmbeddingRow, ChunkEmbeddingRow.chunk_id == SearchChunkRow.id)
+        .join(InterviewRow, InterviewRow.id == SearchChunkRow.interview_id)
+        .where(
+            visible_to(viewer.admin),
+            *where,
+            SearchChunkRow.chunker == CHUNKER,
+            ChunkEmbeddingRow.model == embedder.name,
+        )
+        .group_by(SearchChunkRow.id)
+        .order_by(distance, SearchChunkRow.id)
+        .limit(CANDIDATES)
+    ).all()
+    return [Hit(i, c, s) for i, c, s in rows]
+
+
+def _excerpts(
+    session: DbSession, viewer: CurrentViewer, hits: list[Hit]
+) -> dict[tuple[uuid.UUID, int], list[Segment]]:
+    """For each hit, the lines from its anchor onward, about EXCERPT_MS long."""
+    rows = session.scalars(
+        select(SegmentRow)
+        .join(InterviewRow, InterviewRow.id == SegmentRow.interview_id)
+        .where(
+            visible_to(viewer.admin),
+            or_(
+                *(
+                    and_(
+                        SegmentRow.interview_id == h.interview_id,
+                        SegmentRow.seq.between(h.seq, h.seq + EXCERPT_MAX_SEGMENTS - 1),
+                    )
+                    for h in hits
+                )
+            ),
+        )
+        .order_by(SegmentRow.interview_id, SegmentRow.seq)
+    ).all()
+    by_interview: dict[uuid.UUID, list[SegmentRow]] = {}
+    for row in rows:
+        by_interview.setdefault(row.interview_id, []).append(row)
+    excerpts: dict[tuple[uuid.UUID, int], list[Segment]] = {}
+    for h in hits:
+        lines = [s for s in by_interview.get(h.interview_id, []) if s.seq >= h.seq]
+        excerpt = lines[:1]
+        for line in lines[1:EXCERPT_MAX_SEGMENTS]:
+            if line.seq != excerpt[-1].seq + 1 or line.end_ms - excerpt[0].start_ms > EXCERPT_MS:
+                break
+            excerpt.append(line)
+        excerpts[(h.interview_id, h.seq)] = [to_segment(s) for s in excerpt]
+    return excerpts
+
+
+@router.get("/api/search", response_model=SearchResults)
+def search(
+    session: DbSession,
+    viewer: CurrentViewer,
+    embedder: EmbedderDep,
+    q: Annotated[str, Query(min_length=1, max_length=500, pattern=r"\S")],
+    language: Annotated[str | None, Query(description="Any language heard, e.g. ne")] = None,
+    interviewee: Annotated[
+        int | Literal["unknown"] | None, Query(description="An interviewee id, or unknown")
+    ] = None,
+    recorded_from: date | None = None,
+    recorded_to: date | None = None,
+    undated: Annotated[
+        bool, Query(description="With a date range, also include undated interviews")
+    ] = False,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    offset: Annotated[int, Query(ge=0, lt=CANDIDATES)] = 0,
+) -> SearchResults:
+    """Transcript moments most relevant to `q`, best first."""
+    where = _filters(language, interviewee, recorded_from, recorded_to, undated)
+    ranked = fuse(
+        _keyword_hits(session, viewer, q, where),
+        _semantic_hits(session, viewer, embedder, q, where),
+    )
+    page = ranked[offset : offset + limit]
+    if not page:
+        return SearchResults(items=[], has_more=False)
+
+    summaries = {
+        row.id: InterviewSummary.model_validate(to_summary(row, person, lang))
+        for row, person, lang in session.execute(
+            summary_query(viewer).where(InterviewRow.id.in_({h.interview_id for h in page}))
+        )
+    }
+    excerpts = _excerpts(session, viewer, page)
+    items = []
+    for hit in page:
+        excerpt = excerpts.get((hit.interview_id, hit.seq))
+        if hit.interview_id in summaries and excerpt:
+            items.append(
+                Moment(
+                    interview=summaries[hit.interview_id],
+                    start_ms=excerpt[0].start_ms,
+                    end_ms=excerpt[-1].end_ms,
+                    excerpt=excerpt,
+                )
+            )
+    return SearchResults(items=items, has_more=len(ranked) > offset + limit)
+
+
+@router.get("/api/search/filters", response_model=SearchFilters)
+def search_filters(session: DbSession, viewer: CurrentViewer) -> SearchFilters:
+    visible = select(InterviewRow.id).where(visible_to(viewer.admin))
+    languages = session.execute(
+        select(LanguageRow.code, LanguageRow.english_name)
+        .where(
+            exists().where(
+                InterviewLanguageRow.language_code == LanguageRow.code,
+                InterviewLanguageRow.interview_id.in_(visible),
+            )
+        )
+        .order_by(LanguageRow.english_name)
+    ).all()
+    people = session.execute(
+        select(IntervieweeRow.id, IntervieweeRow.display_name)
+        .where(
+            exists().where(
+                InterviewRow.interviewee_id == IntervieweeRow.id, visible_to(viewer.admin)
+            )
+        )
+        .order_by(IntervieweeRow.display_name, IntervieweeRow.id)
+    ).all()
+    return SearchFilters(
+        languages=[Language(code=c, name=n) for c, n in languages],
+        interviewees=[Interviewee(id=i, name=n) for i, n in people],
+    )

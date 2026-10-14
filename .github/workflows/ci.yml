@@ -41,17 +41,17 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run mypy
-      - run: uv run pytest --cov
       - name: Audit runtime dependencies
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
-      - name: Integration test against Postgres + pgvector
+      # Unit and integration tests together: the database code is only covered against Postgres.
+      - name: Test against Postgres + pgvector
         run: |
           for f in ../../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
           uv run python -m swayambhu_api.migrate upgrade head
           uv run python -m swayambhu_api.migrate check
-          uv run pytest -m integration
+          uv run pytest --cov -m ""
 
   worker:
     runs-on: ubuntu-latest

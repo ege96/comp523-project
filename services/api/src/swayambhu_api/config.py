@@ -36,6 +36,8 @@ class Settings(ProviderSettings):
     # only works with one API pod; set the same value on every pod before scaling out.
     media_url_secret: SecretStr | None = None
     media_url_ttl_seconds: int = 6 * 3600
+    # How long a search waits to embed the query before answering with keyword hits only.
+    search_embedding_timeout_seconds: float = 5.0
 
 
 @lru_cache
