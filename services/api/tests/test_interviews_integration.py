@@ -1,7 +1,6 @@
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -17,21 +16,12 @@ from swayambhu_core.models import (
 )
 
 from swayambhu_api import media_urls
-from swayambhu_api.admins import Admin
-from swayambhu_api.auth import Viewer, get_viewer
-from swayambhu_api.config import Settings, get_settings
-from swayambhu_api.main import app
+from swayambhu_api.config import Settings
+from tests.fakes import ADMIN, as_viewer
 
 pytestmark = pytest.mark.integration
 
 PLAYBACK = b"0123456789" * 100
-
-
-@pytest.fixture
-def settings(integration_settings: Settings, tmp_path: Path) -> Settings:
-    return integration_settings.model_copy(
-        update={"media_root": tmp_path, "media_url_secret": None}
-    )
 
 
 @pytest.fixture
@@ -85,22 +75,6 @@ def interviews(db_session: Session, settings: Settings) -> Iterator[dict[str, In
     db_session.execute(delete(InterviewRow))
     db_session.execute(delete(IntervieweeRow))
     db_session.commit()
-
-
-@pytest.fixture
-def client(settings: Settings) -> Iterator[TestClient]:
-    app.dependency_overrides[get_settings] = lambda: settings
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-
-
-def as_viewer(client: TestClient, admin: Admin | None = None) -> TestClient:
-    """Requests from `client` now come from `admin`, or an anonymous visitor."""
-    app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
-    return client
-
-
-ADMIN = Admin(1, "lead@example.org")
 
 
 def test_listing_shows_visitors_public_interviews_and_admins_all_newest_first(

@@ -1,9 +1,9 @@
 """Grouping display segments into search chunks (P-014). Sizes are first guesses for the
-evaluation harness to tune; a new strategy gets a new name so both can be compared."""
+evaluation harness to tune; a new strategy gets a new name (`swayambhu_core.models.CHUNKER`)
+so both can be compared."""
 
 from dataclasses import dataclass
 
-CHUNKER = "time-60s-v1"
 TARGET_MS = 60_000
 MIN_MS = 30_000
 MAX_MS = 90_000

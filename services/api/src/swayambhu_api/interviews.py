@@ -97,11 +97,24 @@ class SegmentList(BaseModel):
     items: list[Segment]
 
 
+def to_segment(row: SegmentRow) -> Segment:
+    return Segment(
+        seq=row.seq,
+        start_ms=row.start_ms,
+        end_ms=row.end_ms,
+        language=row.language,
+        original_text=row.original_text,
+        english_text=row.english_text,
+        original_edited=row.original_edited is not None,
+        english_edited=row.english_edited is not None,
+    )
+
+
 _primary = aliased(LanguageRow)
 
 
 # Outer joins: the interviewee and language names are None when the interview has neither.
-def _summaries(viewer: CurrentViewer) -> Select[InterviewRow, str, str]:
+def summary_query(viewer: CurrentViewer) -> Select[InterviewRow, str, str]:
     return (
         select(InterviewRow, IntervieweeRow.display_name, _primary.english_name)
         .outerjoin(IntervieweeRow, InterviewRow.interviewee_id == IntervieweeRow.id)
@@ -110,7 +123,9 @@ def _summaries(viewer: CurrentViewer) -> Select[InterviewRow, str, str]:
     )
 
 
-def _summary(row: InterviewRow, interviewee: str | None, language: str | None) -> dict[str, object]:
+def to_summary(
+    row: InterviewRow, interviewee: str | None, language: str | None
+) -> dict[str, object]:
     return {
         "id": row.id,
         "title": row.title,
@@ -140,7 +155,7 @@ def list_interviews(
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
     one status (for the admin's processing queue)."""
-    query = _summaries(viewer)
+    query = summary_query(viewer)
     if status_filter is not None:
         query = query.where(InterviewRow.status == status_filter)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
@@ -148,7 +163,7 @@ def list_interviews(
         query.order_by(InterviewRow.created_at.desc(), InterviewRow.id).limit(limit).offset(offset)
     ).all()
     return InterviewList(
-        items=[InterviewSummary.model_validate(_summary(i, p, lang)) for i, p, lang in rows],
+        items=[InterviewSummary.model_validate(to_summary(i, p, lang)) for i, p, lang in rows],
         total=total,
     )
 
@@ -156,7 +171,9 @@ def list_interviews(
 def _visible_interview(
     session: DbSession, viewer: CurrentViewer, interview_id: uuid.UUID
 ) -> tuple[InterviewRow, str | None, str | None]:
-    row = session.execute(_summaries(viewer).where(InterviewRow.id == interview_id)).one_or_none()
+    row = session.execute(
+        summary_query(viewer).where(InterviewRow.id == interview_id)
+    ).one_or_none()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Interview not found")
     interview, interviewee, language = row
@@ -189,7 +206,7 @@ def get_interview(
         )
     return InterviewDetail.model_validate(
         {
-            **_summary(interview, interviewee, language),
+            **to_summary(interview, interviewee, language),
             "interviewer": interview.interviewer,
             "location": interview.location,
             "description": interview.description,
@@ -211,21 +228,7 @@ def list_segments(
     rows = session.scalars(
         select(SegmentRow).where(SegmentRow.interview_id == interview_id).order_by(SegmentRow.seq)
     )
-    return SegmentList(
-        items=[
-            Segment(
-                seq=s.seq,
-                start_ms=s.start_ms,
-                end_ms=s.end_ms,
-                language=s.language,
-                original_text=s.original_text,
-                english_text=s.english_text,
-                original_edited=s.original_edited is not None,
-                english_edited=s.english_edited is not None,
-            )
-            for s in rows
-        ]
-    )
+    return SegmentList(items=[to_segment(s) for s in rows])
 
 
 @router.get(

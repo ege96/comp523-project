@@ -1,4 +1,5 @@
-"""Test doubles: an in-memory admin store and a signer for Firebase-shaped ID tokens."""
+"""Test doubles: an in-memory admin store, a signer for Firebase-shaped ID tokens, and a
+way to send requests as a given viewer."""
 
 import time
 from dataclasses import dataclass, field
@@ -6,11 +7,21 @@ from typing import Any
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
 
 from swayambhu_api.admins import Admin
+from swayambhu_api.auth import Viewer, get_viewer
+from swayambhu_api.main import app
 from swayambhu_api.tokens import FirebaseTokenVerifier
 
 PROJECT_ID = "swayambhu-test"
+ADMIN = Admin(1, "lead@example.org")
+
+
+def as_viewer(client: TestClient, admin: Admin | None = None) -> TestClient:
+    """Requests from `client` now come from `admin`, or an anonymous visitor."""
+    app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
+    return client
 
 
 @dataclass

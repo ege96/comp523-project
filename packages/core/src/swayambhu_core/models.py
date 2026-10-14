@@ -277,6 +277,11 @@ class SegmentRow(Base):
     )
 
 
+# The chunking strategy the worker builds and search reads (P-014). Rows from any other
+# strategy are kept for comparison only.
+CHUNKER = "time-60s-v1"
+
+
 class SearchChunkRow(Base):
     """A run of consecutive segments (roughly 30-90 s) that semantic search embeds as one unit.
 
