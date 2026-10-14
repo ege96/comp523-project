@@ -102,21 +102,28 @@ def archive(db_session: Session) -> Iterator[dict[str, uuid.UUID]]:
     db_session.commit()
 
 
-def moments(client: TestClient, query: str) -> list[tuple[str, int, tuple[int, ...]]]:
+Found = tuple[str, int, tuple[int, ...], tuple[str, ...]]  # title, start, seqs, matched_by
+
+
+def moments(client: TestClient, query: str, mode: str = "hybrid") -> list[Found]:
     body = client.get(f"/api/search?q={query}").json()
-    assert set(body) == {"items", "has_more"}  # never a match count
+    assert set(body) == {"items", "has_more", "search_mode"}  # never a match count
+    assert body["search_mode"] == mode
     return [
-        (m["interview"]["title"], m["start_ms"], tuple(s["seq"] for s in m["excerpt"]))
+        (
+            m["interview"]["title"], m["start_ms"], tuple(s["seq"] for s in m["excerpt"]),
+            tuple(m["matched_by"]),
+        )
         for m in body["items"]
-    ]
+    ]  # fmt: skip
 
 
 @pytest.mark.parametrize("query", ["butter lamp", "prayer wheels"])
 def test_visitors_never_get_private_moments(
     client: TestClient, archive: dict[str, uuid.UUID], query: str
 ) -> None:
-    visitor = {title for title, _, _ in moments(as_viewer(client), query)}
-    admin = {title for title, _, _ in moments(as_viewer(client, ADMIN), query)}
+    visitor = {found[0] for found in moments(as_viewer(client), query)}
+    admin = {found[0] for found in moments(as_viewer(client, ADMIN), query)}
     assert "public" in visitor and "private" not in visitor
     assert admin >= visitor | {"private"}
 
@@ -127,14 +134,18 @@ def test_moments_start_at_the_matching_line_or_the_chunk(
     visitor = as_viewer(client)
     # Keyword hits, stemmed ("lamps"), in an indexed interview and an unindexed English one.
     # The excerpt stops before the 40 s line that would take it past 30 s.
-    keyword = {("public", 20_000, (2,)), ("english", 5000, (0,))}
-    assert keyword <= set(moments(visitor, "butter lamp"))
+    found = {f[:3]: f[3] for f in moments(visitor, "butter lamp")}
+    assert found[("public", 20_000, (2,))] == ("keyword", "semantic")
+    assert found[("english", 5000, (0,))] == ("keyword",)  # no chunks yet
     # Semantic only: no line says it, so the moment is the chunk embedded with that meaning.
-    assert moments(visitor, "prayer wheels")[0] == ("public", 40_000, (3,))
+    assert moments(visitor, "prayer wheels")[0] == ("public", 40_000, (3,), ("semantic",))
 
+    # The provider is down: keyword hits only, and the response says so.
     app.dependency_overrides[get_embedder] = BrokenEmbedder
-    assert moments(visitor, "prayer wheels") == []
-    assert set(moments(visitor, "butter lamp")) == keyword
+    assert moments(visitor, "prayer wheels", "keyword_only") == []
+    assert {f[:3] for f in moments(visitor, "butter lamp", "keyword_only")} == {
+        ("public", 20_000, (2,)), ("english", 5000, (0,)),
+    }  # fmt: skip
 
 
 @pytest.mark.parametrize(

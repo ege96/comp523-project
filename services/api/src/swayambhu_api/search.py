@@ -52,7 +52,7 @@ from swayambhu_providers import Embedder, ProviderError
 from swayambhu_providers.factory import ProviderConfigError, build_embedder
 
 from swayambhu_api.auth import CurrentViewer
-from swayambhu_api.config import get_settings
+from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DbSession
 from swayambhu_api.interviews import (
     InterviewSummary,
@@ -67,10 +67,6 @@ from swayambhu_api.visibility import visible_to
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-# Proposals, to tune with the evaluation harness.
-CANDIDATES = 100  # hits taken from each search before fusing; also the deepest page
-RRF_K = 60  # the usual reciprocal rank fusion constant
-EXCERPT_MS = 30_000  # roughly how much transcript a moment shows
 EXCERPT_MAX_SEGMENTS = 10
 
 _ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
@@ -98,17 +94,27 @@ def get_embedder() -> Embedder | None:
 EmbedderDep = Annotated[Embedder | None, Depends(get_embedder)]
 
 
+Source = Literal["keyword", "semantic"]
+
+
 class Moment(BaseModel):
     interview: InterviewSummary
-    # The excerpt's span. The viewer seeks to start_ms and highlights the first segment.
+    # The excerpt's span, in ms from the start of the recording. The viewer seeks to
+    # start_ms and highlights the first segment.
     start_ms: int
     end_ms: int
+    # Original and (when there is one) English text of each line.
     excerpt: list[Segment]
+    # Which searches found it. Semantic alone means "related", not that the words appear.
+    matched_by: list[Source]
 
 
 class SearchResults(BaseModel):
     items: list[Moment]
     has_more: bool
+    # keyword_only: semantic search was unavailable (provider down, slow or not configured),
+    # so the results may miss moments that don't use the query's words.
+    search_mode: Literal["hybrid", "keyword_only"]
 
 
 class Interviewee(BaseModel):
@@ -134,21 +140,21 @@ class Hit:
     seq: int
 
 
-def fuse(keyword: list[Hit], semantic: list[Hit]) -> list[Hit]:
-    """Reciprocal rank fusion. Each list counts once per moment, at its best rank; a keyword
-    hit's line wins over a chunk's first line."""
+def fuse(ranked: dict[Source, list[Hit]], k: int) -> list[tuple[Hit, list[Source]]]:
+    """Reciprocal rank fusion. Each list counts once per moment, at its best rank; the best
+    keyword hit's line wins over a chunk's first line."""
     scores: dict[object, float] = {}
     anchors: dict[object, Hit] = {}
-    for hits in (keyword, semantic):
-        seen: set[object] = set()
-        for rank, hit in enumerate(hits):
+    sources: dict[object, list[Source]] = {}
+    for source in ("keyword", "semantic"):
+        for rank, hit in enumerate(ranked.get(source, [])):
             key = hit.chunk_id if hit.chunk_id is not None else (hit.interview_id, hit.seq)
-            if key in seen:
+            if source in sources.setdefault(key, []):
                 continue
-            seen.add(key)
-            scores[key] = scores.get(key, 0.0) + 1 / (RRF_K + rank + 1)
+            sources[key].append(source)
+            scores[key] = scores.get(key, 0.0) + 1 / (k + rank + 1)
             anchors.setdefault(key, hit)
-    return [anchors[k] for k in sorted(scores, key=lambda k: -scores[k])]
+    return [(anchors[key], sources[key]) for key in sorted(scores, key=lambda key: -scores[key])]
 
 
 def _filters(
@@ -188,7 +194,11 @@ def _filters(
 
 
 def _keyword_hits(
-    session: DbSession, viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]]
+    session: DbSession,
+    viewer: CurrentViewer,
+    q: str,
+    where: list[ColumnElement[bool]],
+    candidates: int,
 ) -> list[Hit]:
     english_q = func.websearch_to_tsquery(_ENGLISH, q)
     simple_q = func.websearch_to_tsquery(_SIMPLE, q)
@@ -221,7 +231,7 @@ def _keyword_hits(
             ),
         )
         .order_by(rank.desc(), SegmentRow.interview_id, SegmentRow.seq)
-        .limit(CANDIDATES)
+        .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
 
@@ -232,16 +242,18 @@ def _semantic_hits(
     embedder: Embedder | None,
     q: str,
     where: list[ColumnElement[bool]],
-) -> list[Hit]:
+    candidates: int,
+) -> list[Hit] | None:
+    """None when semantic search is unavailable."""
     if embedder is None:
-        return []
+        return None
     try:
         [vector] = embedder.embed([q], "query")
     except ProviderError as exc:
         # Keyword results are still worth returning when the provider is down. The error
         # text can echo the request, and search terms are never logged.
         log.warning("Query embedding failed (retryable=%s); keyword results only", exc.retryable)
-        return []
+        return None
     distance = func.min(ChunkEmbeddingRow.embedding.cosine_distance(vector))
     rows = session.execute(
         select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
@@ -255,15 +267,15 @@ def _semantic_hits(
         )
         .group_by(SearchChunkRow.id)
         .order_by(distance, SearchChunkRow.id)
-        .limit(CANDIDATES)
+        .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
 
 
 def _excerpts(
-    session: DbSession, viewer: CurrentViewer, hits: list[Hit]
+    session: DbSession, viewer: CurrentViewer, hits: list[Hit], excerpt_ms: int
 ) -> dict[tuple[uuid.UUID, int], list[Segment]]:
-    """For each hit, the lines from its anchor onward, about EXCERPT_MS long."""
+    """For each hit, the lines from its anchor onward, about excerpt_ms long."""
     rows = session.scalars(
         select(SegmentRow)
         .join(InterviewRow, InterviewRow.id == SegmentRow.interview_id)
@@ -289,7 +301,7 @@ def _excerpts(
         lines = [s for s in by_interview.get(h.interview_id, []) if s.seq >= h.seq]
         excerpt = lines[:1]
         for line in lines[1:EXCERPT_MAX_SEGMENTS]:
-            if line.seq != excerpt[-1].seq + 1 or line.end_ms - excerpt[0].start_ms > EXCERPT_MS:
+            if line.seq != excerpt[-1].seq + 1 or line.end_ms - excerpt[0].start_ms > excerpt_ms:
                 break
             excerpt.append(line)
         excerpts[(h.interview_id, h.seq)] = [to_segment(s) for s in excerpt]
@@ -301,6 +313,7 @@ def search(
     session: DbSession,
     viewer: CurrentViewer,
     embedder: EmbedderDep,
+    settings: Annotated[Settings, Depends(get_settings)],
     q: Annotated[str, Query(min_length=1, max_length=500, pattern=r"\S")],
     language: Annotated[str | None, Query(description="Any language heard, e.g. ne")] = None,
     interviewee: Annotated[
@@ -312,27 +325,31 @@ def search(
         bool, Query(description="With a date range, also include undated interviews")
     ] = False,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
-    offset: Annotated[int, Query(ge=0, lt=CANDIDATES)] = 0,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SearchResults:
-    """Transcript moments most relevant to `q`, best first."""
+    """Transcript moments most relevant to `q`, best first. Paging goes as deep as
+    SEARCH_CANDIDATES hits from each search."""
     where = _filters(language, interviewee, recorded_from, recorded_to, undated)
+    n = settings.search_candidates
+    semantic = _semantic_hits(session, viewer, embedder, q, where, n)
+    mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
     ranked = fuse(
-        _keyword_hits(session, viewer, q, where),
-        _semantic_hits(session, viewer, embedder, q, where),
+        {"keyword": _keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
+        settings.search_rrf_k,
     )
     page = ranked[offset : offset + limit]
     if not page:
-        return SearchResults(items=[], has_more=False)
+        return SearchResults(items=[], has_more=False, search_mode=mode)
 
     summaries = {
         row.id: InterviewSummary.model_validate(to_summary(row, person, lang))
         for row, person, lang in session.execute(
-            summary_query(viewer).where(InterviewRow.id.in_({h.interview_id for h in page}))
+            summary_query(viewer).where(InterviewRow.id.in_({h.interview_id for h, _ in page}))
         )
     }
-    excerpts = _excerpts(session, viewer, page)
+    excerpts = _excerpts(session, viewer, [h for h, _ in page], settings.search_excerpt_ms)
     items = []
-    for hit in page:
+    for hit, matched_by in page:
         excerpt = excerpts.get((hit.interview_id, hit.seq))
         if hit.interview_id in summaries and excerpt:
             items.append(
@@ -341,9 +358,10 @@ def search(
                     start_ms=excerpt[0].start_ms,
                     end_ms=excerpt[-1].end_ms,
                     excerpt=excerpt,
+                    matched_by=matched_by,
                 )
             )
-    return SearchResults(items=items, has_more=len(ranked) > offset + limit)
+    return SearchResults(items=items, has_more=len(ranked) > offset + limit, search_mode=mode)
 
 
 @router.get("/api/search/filters", response_model=SearchFilters)
