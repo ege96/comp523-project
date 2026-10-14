@@ -15,6 +15,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 // Proposal: URL paths. The handoff names screens (§5), not URLs.
 //   /                          home: search box and recently added interviews
 //   /search?q=                 search results (transcript moments)
+//   /interviews?page=          all interviews, newest first
 //   /interviews/$interviewId   interview viewer
 //   /signin                    admin sign-in
 //   /admin                     upload and review (admins only)
@@ -30,6 +31,14 @@ const searchRoute = createRoute({
   path: "search",
   validateSearch: z.object({ q: z.string().trim().catch("") }),
   component: lazyRouteComponent(() => import("./pages/SearchPage"), "SearchPage"),
+});
+
+const interviewsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "interviews",
+  // Page 1 stays out of the URL; anything that isn't a page number falls back to it.
+  validateSearch: z.object({ page: z.number().int().min(2).optional().catch(undefined) }),
+  component: lazyRouteComponent(() => import("./pages/InterviewsPage"), "InterviewsPage"),
 });
 
 const interviewRoute = createRoute({
@@ -60,6 +69,7 @@ const adminHomeRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   homeRoute,
   searchRoute,
+  interviewsRoute,
   interviewRoute,
   signInRoute,
   adminRoute.addChildren([adminHomeRoute]),

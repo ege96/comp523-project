@@ -43,15 +43,16 @@ export async function getJson<T>(
 export type Viewer = { key: string; getToken: () => Promise<string | null> };
 
 export const interviewQueries = {
-  // Proposal: the home page shows the 20 most recently added interviews.
-  recent: (viewer: Viewer) =>
+  // Newest first. The API caps `limit` at 100.
+  list: (viewer: Viewer, { limit, offset = 0 }: { limit: number; offset?: number }) =>
     queryOptions({
-      queryKey: ["interviews", viewer.key, "recent"],
+      queryKey: ["interviews", viewer.key, "list", { limit, offset }],
       queryFn: async ({ signal }) =>
-        getJson("/api/interviews?limit=20", InterviewListSchema, {
-          token: await viewer.getToken(),
-          signal,
-        }),
+        getJson(
+          `/api/interviews?limit=${String(limit)}&offset=${String(offset)}`,
+          InterviewListSchema,
+          { token: await viewer.getToken(), signal },
+        ),
     }),
   detail: (viewer: Viewer, id: string) =>
     queryOptions({

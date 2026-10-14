@@ -4,6 +4,8 @@ import InputBase from "@mui/material/InputBase";
 import { useNavigate } from "@tanstack/react-router";
 import type { SubmitEvent } from "react";
 
+import { SearchIcon } from "./icons";
+
 /**
  * Uncontrolled on purpose: the query only matters on submit, so typing re-renders nothing.
  * (A single field doesn't need TanStack Form; D-010 applies to the upload metadata form.)
@@ -21,8 +23,9 @@ export function SearchBox({ defaultValue = "" }: { defaultValue?: string }) {
       component="form"
       role="search"
       onSubmit={submit}
-      sx={{ display: "flex", alignItems: "center", gap: 1, p: 1, pl: 2 }}
+      sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, pl: 2 }}
     >
+      <SearchIcon color="primary" aria-hidden sx={{ display: { xs: "none", sm: "block" } }} />
       <InputBase
         name="q"
         defaultValue={defaultValue}

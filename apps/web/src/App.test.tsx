@@ -1,4 +1,4 @@
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -20,9 +20,8 @@ describe("app shell and sign-in", () => {
     renderApp("/");
 
     expect(await screen.findByRole("link", { name: "Test interview A" })).toBeTruthy();
-    expect(
-      screen.getByText(/Unknown interviewee · Nepali · 1:02:03 · Recorded May 2001/),
-    ).toBeTruthy();
+    expect(screen.getByText("Interviewee: Unknown · Nepali · 1:02:03")).toBeTruthy();
+    expect(screen.getByText("May 2001")).toBeTruthy();
     expect(screen.getByText("Machine-generated transcript")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Upload & review" })).toBeNull();
     expect(calls).toEqual([{ path: "/api/interviews", auth: null }]);
@@ -75,6 +74,23 @@ describe("app shell and sign-in", () => {
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText(/someone@example.org isn't an archive admin/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Admin sign-in" })).toBeTruthy();
+  });
+});
+
+describe("all interviews", () => {
+  it("pages through the list with the page number in the URL", async () => {
+    stubApi({ "/api/interviews": { body: { items: [interviewSummary], total: 45 } } });
+    const router = renderApp("/");
+    await userEvent.click(await screen.findByRole("link", { name: /Browse all interviews/ }));
+    expect(await screen.findByRole("heading", { name: "All interviews" })).toBeTruthy();
+
+    await userEvent.click(await screen.findByRole("link", { name: "Go to page 3" }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ page: 3 });
+    });
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => url);
+    expect(urls).toContain("/api/interviews?limit=20&offset=40");
+    expect(screen.getByRole("link", { name: "page 3" }).getAttribute("aria-current")).toBe("page");
   });
 });
 
