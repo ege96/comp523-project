@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Background media-processing worker for the Swayambhu Stories archive"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx2>=2.13",
     "pydantic-settings>=2.4",
 ]
 

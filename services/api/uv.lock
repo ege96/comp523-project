@@ -1324,6 +1324,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "fastapi" },
+    { name = "httpx2" },
     { name = "pgvector" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pydantic-settings" },
@@ -1345,6 +1346,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "httpx2", specifier = ">=2.13" },
     { name = "pgvector", specifier = ">=0.3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pydantic-settings", specifier = ">=2.4" },

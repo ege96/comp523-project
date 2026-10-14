@@ -22,6 +22,8 @@ services:
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
+      # Offline stand-ins so local dev needs no API keys. Must match the worker's.
+      EMBEDDING_PROVIDER: fake
     ports: ["8000:8080"]
     depends_on:
       db: { condition: service_healthy }
@@ -30,6 +32,9 @@ services:
     build: services/worker
     environment:
       DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu
+      TRANSCRIPTION_PROVIDER: fake
+      TRANSLATION_PROVIDER: fake
+      EMBEDDING_PROVIDER: fake
     depends_on:
       db: { condition: service_healthy }
 

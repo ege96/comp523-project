@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Google's published signing keys for Firebase Auth ID tokens, in JWK form.
@@ -25,6 +26,14 @@ class Settings(BaseSettings):
     # Unset means sign-in is not configured: every authenticated request gets a 503.
     firebase_project_id: str | None = None
     firebase_jwks_url: str = FIREBASE_JWKS_URL
+    # Search queries are embedded with the same model the worker used for stored chunks
+    # (D-012), so these must match the worker's settings. No model default: it is
+    # vendor- and time-sensitive. `fake` runs offline for local dev and tests.
+    embedding_provider: Literal["openai", "fake"] = "openai"
+    embedding_model: str | None = None
+    embedding_dimensions: int | None = None
+    embedding_timeout_seconds: float = 10.0
+    openai_api_key: SecretStr | None = None
 
 
 @lru_cache
