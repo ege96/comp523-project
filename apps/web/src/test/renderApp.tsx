@@ -4,7 +4,7 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
 import { vi } from "vitest";
 
-import type { AuthClient } from "../auth/authClient";
+import { SignInError, type AuthClient, type AuthUser } from "../auth/authClient";
 import { AuthProvider } from "../auth/AuthProvider";
 import { createAppRouter } from "../router";
 
@@ -26,15 +26,27 @@ export function stubApi(routes: Routes) {
   return calls;
 }
 
-/** A Firebase stand-in with one account, signed in from the start when `signedIn`. */
-export function fakeAuthClient({ signedIn }: { signedIn: boolean }): AuthClient {
-  const user = {
+/**
+ * A Firebase stand-in with one account (password "pw"), signed in from the start when
+ * `signedIn`. `sent` records the emails it would have sent.
+ */
+export function fakeAuthClient({
+  signedIn,
+  emailVerified = true,
+}: {
+  signedIn: boolean;
+  emailVerified?: boolean;
+}): AuthClient & { sent: string[] } {
+  const user: AuthUser = {
     uid: "u1",
     email: "someone@example.org",
+    emailVerified,
     getIdToken: () => Promise.resolve("tok"),
   };
-  let listener: ((u: typeof user | null) => void) | null = null;
+  const sent: string[] = [];
+  let listener: ((u: AuthUser | null) => void) | null = null;
   return {
+    sent,
     onUserChanged(callback) {
       listener = callback;
       callback(signedIn ? user : null);
@@ -44,6 +56,20 @@ export function fakeAuthClient({ signedIn }: { signedIn: boolean }): AuthClient 
     },
     signInWithGoogle: () => {
       listener?.(user);
+      return Promise.resolve();
+    },
+    signInWithPassword: (email, password) => {
+      if (email !== user.email || password !== "pw")
+        return Promise.reject(new SignInError("badCredentials"));
+      listener?.(user);
+      return Promise.resolve();
+    },
+    sendPasswordReset: (email) => {
+      sent.push(`reset:${email}`);
+      return Promise.resolve();
+    },
+    sendEmailVerification: () => {
+      sent.push("verify");
       return Promise.resolve();
     },
     signOut: () => {
@@ -56,6 +82,7 @@ export function fakeAuthClient({ signedIn }: { signedIn: boolean }): AuthClient 
 export function renderApp(path: string, client: AuthClient | null = null) {
   // Signed-in browsers carry this hint, which makes the provider load the client at once.
   vi.stubGlobal("scrollTo", vi.fn()); // the router restores scroll; jsdom doesn't implement it
+  Element.prototype.scrollIntoView = vi.fn(); // nor this (the viewer scrolls to a search hit)
   if (client) localStorage.setItem("swayambhu.auth.v1", "1");
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createAppRouter(createMemoryHistory({ initialEntries: [path] }));

@@ -9,6 +9,7 @@ export type AuthState =
   | {
       status: "signedIn";
       email: string | null;
+      emailVerified: boolean;
       /** From the API, not Firebase. "error" means the check itself failed. */
       role: "checking" | "admin" | "notAdmin" | "error";
     };
@@ -20,7 +21,11 @@ export type AuthContextValue = {
   /** Loads Firebase. Call before offering sign-in, so the popup opens inside the click. */
   connect: () => void;
   canSignIn: boolean;
-  signIn: () => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  /** Rejects with SignInError. */
+  signInWithPassword: (email: string, password: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  sendEmailVerification: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
