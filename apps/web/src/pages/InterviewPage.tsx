@@ -22,6 +22,8 @@ const route = getRouteApi("/interviews/$interviewId");
 
 export function InterviewPage() {
   const { interviewId } = route.useParams();
+  // Set when opened from a search result: start there and point out that line.
+  const { t } = route.useSearch();
   const { viewer } = useAuth();
   // Both requests start together rather than one waiting on the other.
   const interview = useQuery({
@@ -78,7 +80,7 @@ export function InterviewPage() {
         }}
       >
         <Stack spacing={3}>
-          <Player interview={interview.data} ref={player} />
+          <Player interview={interview.data} startMs={t} ref={player} />
           <AboutRecording interview={interview.data} />
         </Stack>
         <Paper sx={{ p: 3 }}>
@@ -94,6 +96,7 @@ export function InterviewPage() {
               segments={segments.data.items}
               translation={interview.data.translation_status}
               onSeek={seek}
+              highlightMs={t}
             />
           )}
         </Paper>
@@ -115,34 +118,31 @@ function summaryLine(interview: InterviewDetail): string {
 
 function Player({
   interview,
+  startMs,
   ref,
 }: {
   interview: InterviewDetail;
+  startMs: number | undefined;
   ref: React.Ref<HTMLMediaElement>;
 }) {
   const media = interview.media;
   if (!media) {
     return <Alert severity="info">The recording is still being prepared for playback.</Alert>;
   }
+  // A media fragment (#t=seconds) makes the browser start there, with no effect to run.
+  const src = startMs === undefined ? media.url : `${media.url}#t=${String(startMs / 1000)}`;
   // Media links are signed and expire (P-024); the API issues a fresh one on each load.
   return media.content_type.startsWith("video/") ? (
     <Box
       component="video"
       ref={ref}
-      src={media.url}
+      src={src}
       controls
       preload="metadata"
       sx={{ width: "100%", bgcolor: "black" }}
     />
   ) : (
-    <Box
-      component="audio"
-      ref={ref}
-      src={media.url}
-      controls
-      preload="metadata"
-      sx={{ width: "100%" }}
-    />
+    <Box component="audio" ref={ref} src={src} controls preload="metadata" sx={{ width: "100%" }} />
   );
 }
 
@@ -196,12 +196,21 @@ function Transcript({
   segments,
   translation,
   onSeek,
+  highlightMs,
 }: {
   segments: Segment[];
   translation: InterviewDetail["translation_status"];
   onSeek: (ms: number) => void;
+  highlightMs: number | undefined;
 }) {
   const [tab, setTab] = useState<"original" | "english">("original");
+  const scrolled = useRef(false);
+  // Brings the highlighted line into view once, when it first renders.
+  const scrollToHighlight = (el: HTMLElement | null) => {
+    if (!el || scrolled.current) return;
+    scrolled.current = true;
+    el.scrollIntoView({ block: "center" });
+  };
   if (segments.length === 0) {
     return <Typography color="text.secondary">No transcript yet.</Typography>;
   }
@@ -222,37 +231,47 @@ function Transcript({
         <Typography color="text.secondary">{englishNote}</Typography>
       ) : (
         <Stack component="ol" sx={{ listStyle: "none", p: 0, m: 0 }}>
-          {segments.map((s) => (
+          {segments.map((s) => {
+            const highlighted =
+              highlightMs !== undefined && highlightMs >= s.start_ms && highlightMs < s.end_ms;
             // content-visibility lets the browser skip laying out segments that are off screen.
-            <Box
-              component="li"
-              key={s.seq}
-              sx={{
-                display: "flex",
-                gap: 2,
-                py: 1.5,
-                contentVisibility: "auto",
-                containIntrinsicSize: "auto 3rem",
-              }}
-            >
-              <ButtonBase
-                onClick={() => {
-                  onSeek(s.start_ms);
-                }}
-                aria-label={`Play from ${formatClock(s.start_ms)}`}
+            return (
+              <Box
+                component="li"
+                key={s.seq}
+                ref={highlighted ? scrollToHighlight : undefined}
+                aria-current={highlighted ? "true" : undefined}
                 sx={{
-                  color: "primary.main",
-                  alignSelf: "start",
-                  fontVariantNumeric: "tabular-nums",
+                  display: "flex",
+                  gap: 2,
+                  py: 1.5,
+                  px: 1,
+                  mx: -1,
+                  borderRadius: 1,
+                  bgcolor: highlighted ? "rgba(150, 58, 53, 0.08)" : undefined,
+                  contentVisibility: "auto",
+                  containIntrinsicSize: "auto 3rem",
                 }}
               >
-                {formatClock(s.start_ms)}
-              </ButtonBase>
-              <Typography>
-                {tab === "english" ? (s.english_text ?? s.original_text) : s.original_text}
-              </Typography>
-            </Box>
-          ))}
+                <ButtonBase
+                  onClick={() => {
+                    onSeek(s.start_ms);
+                  }}
+                  aria-label={`Play from ${formatClock(s.start_ms)}`}
+                  sx={{
+                    color: "primary.main",
+                    alignSelf: "start",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {formatClock(s.start_ms)}
+                </ButtonBase>
+                <Typography>
+                  {tab === "english" ? (s.english_text ?? s.original_text) : s.original_text}
+                </Typography>
+              </Box>
+            );
+          })}
         </Stack>
       )}
     </>

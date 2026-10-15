@@ -37,20 +37,39 @@ export const InterviewDetailSchema = InterviewSummary.extend({
   status_detail: z.string().nullable(),
 }) satisfies z.ZodType<Schemas["InterviewDetail"]>;
 
+const Segment = z.object({
+  seq: z.number().int(),
+  start_ms: z.number().int(),
+  end_ms: z.number().int(),
+  language: z.string().nullable(),
+  original_text: z.string(),
+  english_text: z.string().nullable(),
+  original_edited: z.boolean(),
+  english_edited: z.boolean(),
+}) satisfies z.ZodType<Schemas["Segment"]>;
+
 export const SegmentListSchema = z.object({
+  items: z.array(Segment),
+}) satisfies z.ZodType<Schemas["SegmentList"]>;
+
+export const SearchResultsSchema = z.object({
   items: z.array(
     z.object({
-      seq: z.number().int(),
+      interview: InterviewSummary,
       start_ms: z.number().int(),
       end_ms: z.number().int(),
-      language: z.string().nullable(),
-      original_text: z.string(),
-      english_text: z.string().nullable(),
-      original_edited: z.boolean(),
-      english_edited: z.boolean(),
+      excerpt: z.array(Segment),
+      matched_by: z.array(z.enum(["keyword", "semantic"])),
     }),
   ),
-}) satisfies z.ZodType<Schemas["SegmentList"]>;
+  has_more: z.boolean(),
+  search_mode: z.enum(["hybrid", "keyword_only"]),
+}) satisfies z.ZodType<Schemas["SearchResults"]>;
+
+export const SearchFiltersSchema = z.object({
+  languages: z.array(Language),
+  interviewees: z.array(z.object({ id: z.number().int(), name: z.string() })),
+}) satisfies z.ZodType<Schemas["SearchFilters"]>;
 
 export const AdminSchema = z.object({
   id: z.number().int(),
@@ -59,4 +78,5 @@ export const AdminSchema = z.object({
 
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
 export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
-export type Segment = z.infer<typeof SegmentListSchema>["items"][number];
+export type Segment = z.infer<typeof Segment>;
+export type Moment = z.infer<typeof SearchResultsSchema>["items"][number];

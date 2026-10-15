@@ -8,6 +8,7 @@ import Typography from "@mui/material/Typography";
 import { Outlet } from "@tanstack/react-router";
 
 import { useAuth } from "../auth/useAuth";
+import { WaveformIcon } from "./icons";
 import { ButtonLink, TextLink } from "./links";
 
 const activeNav = { style: { boxShadow: "inset 0 -2px 0 currentColor" } } as const;
@@ -25,7 +26,26 @@ export function AppShell() {
       >
         <Container>
           <Toolbar disableGutters sx={{ gap: 1, minHeight: 72 }}>
-            <TextLink to="/" underline="none" color="inherit" sx={{ mr: "auto" }}>
+            <TextLink
+              to="/"
+              underline="none"
+              color="inherit"
+              sx={{ mr: "auto", display: "flex", alignItems: "center", gap: 1.5 }}
+            >
+              <Box
+                aria-hidden
+                sx={{
+                  display: "grid",
+                  placeItems: "center",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 1,
+                  bgcolor: "primary.main",
+                  color: "primary.contrastText",
+                }}
+              >
+                <WaveformIcon fontSize="small" />
+              </Box>
               <Typography variant="h3" component="span">
                 Swayambhu Stories
               </Typography>

@@ -1,38 +1,75 @@
 import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
 import Container from "@mui/material/Container";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
-import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 import { useQuery } from "@tanstack/react-query";
 
 import { interviewQueries } from "../api/client";
-import type { InterviewSummary } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
-import { InterviewChips } from "../components/InterviewChips";
-import { TextLink } from "../components/links";
+import { ArrowForwardIcon } from "../components/icons";
+import { InterviewList } from "../components/InterviewList";
+import { ButtonLink } from "../components/links";
 import { SearchBox } from "../components/SearchBox";
-import { formatClock, formatRecordedOn } from "../format";
+
+// Proposal: the home page shows the 5 most recently added interviews; the rest are a click away
+// on /interviews. Search-first: no themes, featured items or recommendations (handoff, settled).
+const RECENT_COUNT = 5;
 
 export function HomePage() {
   return (
-    <Container sx={{ py: 6 }}>
-      <Stack spacing={2} sx={{ maxWidth: 720, mb: 8 }}>
-        <Typography variant="overline" color="primary">
+    <Container sx={{ py: { xs: 5, md: 8 } }}>
+      <Stack spacing={3} sx={{ maxWidth: 900, mb: { xs: 7, md: 10 } }}>
+        <Typography variant="overline" color="primary" sx={{ fontWeight: 600 }}>
           Oral histories · Swayambhu, Kathmandu
         </Typography>
-        <Typography variant="h1">Swayambhu Stories</Typography>
-        <Typography color="text.secondary">
-          Recorded interviews with people connected to Swayambhu. Search their words, listen to
-          their stories, and read along.
+        <Typography
+          variant="h1"
+          sx={{ fontSize: { xs: "2.5rem", md: "3.5rem" }, lineHeight: 1.15 }}
+        >
+          An archive of voices, memories and lived heritage.
         </Typography>
-        <SearchBox />
+        <Typography variant="h6" component="p" color="text.secondary" sx={{ fontWeight: 400 }}>
+          Explore recorded interviews with people connected to Swayambhu. Search their words, listen
+          to their stories, and read along.
+        </Typography>
+        <Box>
+          <SearchBox />
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
+            Search finds moments by meaning as well as exact words, in the original transcripts and
+            their English translations. Try a question, like “How have festivals changed?”
+          </Typography>
+        </Box>
+        <Box>
+          <ButtonLink to="/interviews" variant="outlined" endIcon={<ArrowForwardIcon />}>
+            Browse all interviews
+          </ButtonLink>
+        </Box>
       </Stack>
-      <Typography variant="h2" gutterBottom>
-        Recently added interviews
-      </Typography>
+
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        spacing={2}
+        sx={{ justifyContent: "space-between", alignItems: { sm: "flex-end" }, mb: 3 }}
+      >
+        <Box>
+          <Typography variant="h2" gutterBottom>
+            Recently added interviews
+          </Typography>
+          <Typography color="text.secondary">
+            Original recordings with timestamped transcripts. English translations are shown when
+            available.
+          </Typography>
+        </Box>
+        <ButtonLink
+          to="/interviews"
+          endIcon={<ArrowForwardIcon />}
+          sx={{ flexShrink: 0, alignSelf: { xs: "flex-start", sm: "auto" } }}
+        >
+          View all interviews
+        </ButtonLink>
+      </Stack>
       <RecentInterviews />
     </Container>
   );
@@ -41,51 +78,14 @@ export function HomePage() {
 function RecentInterviews() {
   const { viewer } = useAuth();
   const { data, isPending, isError } = useQuery({
-    ...interviewQueries.recent(viewer),
+    ...interviewQueries.list(viewer, { limit: RECENT_COUNT }),
     enabled: viewer.ready,
   });
   if (isError)
     return <Alert severity="error">Interviews couldn&apos;t be loaded. Please try again.</Alert>;
-  if (isPending) return <Skeleton variant="rounded" height={160} />;
+  if (isPending) return <Skeleton variant="rounded" height={320} />;
   if (data.items.length === 0) {
     return <Typography color="text.secondary">No interviews have been published yet.</Typography>;
   }
-  return (
-    <Paper>
-      <List disablePadding>
-        {data.items.map((interview, i) => (
-          <ListItem key={interview.id} divider={i < data.items.length - 1} sx={{ py: 2 }}>
-            <InterviewRow interview={interview} />
-          </ListItem>
-        ))}
-      </List>
-    </Paper>
-  );
-}
-
-function InterviewRow({ interview }: { interview: InterviewSummary }) {
-  const recorded = formatRecordedOn(interview);
-  const details = [
-    interview.interviewee ?? "Unknown interviewee",
-    interview.primary_language?.name,
-    interview.duration_ms === null ? null : formatClock(interview.duration_ms),
-    recorded ? `Recorded ${recorded}` : null,
-  ].filter(Boolean);
-  return (
-    <Stack spacing={0.5}>
-      <TextLink
-        to="/interviews/$interviewId"
-        params={{ interviewId: interview.id }}
-        variant="subtitle1"
-        underline="hover"
-        color="inherit"
-      >
-        {interview.title}
-      </TextLink>
-      <Typography variant="body2" color="text.secondary">
-        {details.join(" · ")}
-      </Typography>
-      <InterviewChips interview={interview} />
-    </Stack>
-  );
+  return <InterviewList interviews={data.items} />;
 }

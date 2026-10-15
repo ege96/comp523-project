@@ -95,6 +95,7 @@ export function AuthProvider({
       ? {
           status: "signedIn",
           email: session.user.email,
+          emailVerified: session.user.emailVerified,
           role: roleQuery.isError ? "error" : (roleQuery.data ?? "checking"),
         }
       : session;
@@ -108,13 +109,19 @@ export function AuthProvider({
     [user, session.status],
   );
 
+  const withClient = (action: (c: AuthClient) => Promise<void>) =>
+    client ? action(client) : Promise.reject(new Error("Sign-in isn't ready"));
+
   const value: AuthContextValue = {
     state,
     viewer,
     connect,
     canSignIn: client !== null,
-    signIn: () =>
-      client ? client.signInWithGoogle() : Promise.reject(new Error("Sign-in isn't ready")),
+    signInWithGoogle: () => withClient((c) => c.signInWithGoogle()),
+    signInWithPassword: (email, password) =>
+      withClient((c) => c.signInWithPassword(email, password)),
+    sendPasswordReset: (email) => withClient((c) => c.sendPasswordReset(email)),
+    sendEmailVerification: () => withClient((c) => c.sendEmailVerification()),
     signOut: () => (client ? client.signOut() : Promise.resolve()),
   };
 
