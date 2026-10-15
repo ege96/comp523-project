@@ -198,11 +198,27 @@ jobs:
               docker run -d --name app --user 1000680000:0 -e RUN_MIGRATIONS=0 -p 8080:8080 "$IMAGE"
               for i in $(seq 20); do curl -fsS localhost:8080/api/health && break; sleep 1; done
               curl -fsS localhost:8080/api/health | grep -q '"ok"'
+              # The baked-in local embedding model loads, and a Nepali passage about the stupa
+              # is closer to an English query about it than an unrelated passage is.
+              docker run --rm --user 1000680000:0 -e EMBEDDING_PROVIDER=local \
+                -e EMBEDDING_MODEL=intfloat/multilingual-e5-small \
+                -e EMBEDDING_QUERY_PREFIX="query: " -e EMBEDDING_PASSAGE_PREFIX="passage: " \
+                "$IMAGE" python -c '
+              from swayambhu_providers.factory import build_embedder
+              from swayambhu_providers.settings import ProviderSettings
+              e = build_embedder(ProviderSettings())
+              [q] = e.embed(["Swayambhu stupa"], "query")
+              near, far = e.embed(["स्वयम्भू स्तूप काठमाडौंमा छ।", "The train leaves at noon."], "passage")
+              dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+              assert len(q) == 384, len(q)
+              assert dot(q, near) > dot(q, far), (dot(q, near), dot(q, far))
+              '
           - name: worker
             context: services/worker
             build_context: .
             smoke: |
               docker run --rm --user 1000680000:0 "$IMAGE" python -c "import swayambhu_worker.__main__"
+              docker run --rm --user 1000680000:0 "$IMAGE" test -s /opt/models/intfloat/multilingual-e5-small/onnx/model.onnx
               docker run --rm --user 1000680000:0 "$IMAGE" ffmpeg -hide_banner -version
               docker run --rm --user 1000680000:0 "$IMAGE" ffprobe -hide_banner -version
     name: docker (${{ matrix.context }})

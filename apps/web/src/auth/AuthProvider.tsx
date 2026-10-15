@@ -34,7 +34,8 @@ async function loadFirebaseClient(): Promise<AuthClient | null> {
 }
 
 type Session =
-  { status: "unavailable" | "loading" | "signedOut" } | { status: "signedIn"; user: AuthUser };
+  | { status: "unavailable" | "loading" | "signedOut" }
+  | { status: "signedIn"; user: AuthUser };
 
 const anonymousToken = () => Promise.resolve(null);
 

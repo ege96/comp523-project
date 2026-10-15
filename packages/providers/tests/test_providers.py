@@ -210,3 +210,82 @@ def test_empty_env_values_count_as_unset(monkeypatch: pytest.MonkeyPatch) -> Non
     settings = ProviderSettings()
     assert settings.embedding_dimensions is None
     assert settings.openai_api_key is None
+
+
+def _tiny_local_model(model_dir: Path) -> None:
+    """A word-level tokenizer and an ONNX "encoder" whose token states are a lookup table,
+    so pooled vectors can be checked by hand."""
+    import onnx
+    from onnx import TensorProto, helper
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import WhitespaceSplit
+
+    vocab = {"[UNK]": 0, "query:": 1, "passage:": 2, "a": 3, "b": 4}
+    tokenizer = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))  # noqa: S106
+    tokenizer.pre_tokenizer = WhitespaceSplit()  # type: ignore[assignment]
+    model_dir.mkdir(parents=True)
+    tokenizer.save(str(model_dir / "tokenizer.json"))
+
+    # Token states: query: -> x, passage: -> y, a -> x, b -> z.
+    table = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]]
+    graph = helper.make_graph(
+        [helper.make_node("Gather", ["table", "input_ids"], ["last_hidden_state"])],
+        "tiny",
+        [
+            helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["b", "s"]),
+            helper.make_tensor_value_info("attention_mask", TensorProto.INT64, ["b", "s"]),
+        ],
+        [helper.make_tensor_value_info("last_hidden_state", TensorProto.FLOAT, ["b", "s", 3])],
+        [helper.make_tensor("table", TensorProto.FLOAT, [5, 3], [x for row in table for x in row])],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    (model_dir / "onnx").mkdir()
+    onnx.save(model, str(model_dir / "onnx" / "model.onnx"))
+
+
+def test_local_embedder_mean_pools_with_prefixes(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "org" / "tiny")
+    settings = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="org/tiny",
+        local_model_dir=tmp_path,
+        embedding_query_prefix="query: ",
+        embedding_passage_prefix="passage: ",
+        local_embedding_batch_size=1,
+    )
+    embedder = build_embedder(settings)
+    assert embedder.name == "local:org/tiny"
+
+    # "query: a" -> mean(x, x) = x. "query: a b b" -> mean(x, x, z, z) -> (1, 0, 1)/sqrt2.
+    # Batch size 1 and different lengths also check that padding never enters the mean.
+    short, long = embedder.embed(["a", "a b b"], "query")
+    assert short == pytest.approx([1, 0, 0])
+    assert long == pytest.approx([2**-0.5, 0, 2**-0.5])
+    [passage] = embedder.embed(["a"], "passage")
+    assert passage == pytest.approx([2**-0.5, 2**-0.5, 0])
+
+
+def test_local_embedder_truncates_long_text(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "tiny")
+    settings = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="tiny",
+        local_model_dir=tmp_path,
+        local_embedding_max_tokens=2,
+    )
+    [vector] = build_embedder(settings).embed(["a a b b b"], "passage")
+    assert vector == pytest.approx([1, 0, 0])
+
+
+def test_local_embedder_needs_model_files_and_no_dimension(tmp_path: Path) -> None:
+    settings = ProviderSettings(
+        embedding_provider="local", embedding_model="missing", local_model_dir=tmp_path
+    )
+    with pytest.raises(ProviderConfigError, match=r"model\.onnx"):
+        build_embedder(settings)
+    _tiny_local_model(tmp_path / "tiny")
+    sized = settings.model_copy(update={"embedding_model": "tiny", "embedding_dimensions": 384})
+    with pytest.raises(ProviderConfigError, match="EMBEDDING_DIMENSIONS"):
+        build_embedder(sized)

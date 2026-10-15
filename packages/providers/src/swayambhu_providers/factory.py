@@ -46,9 +46,36 @@ def build_translator(settings: ProviderSettings) -> Translator:
 
 
 def build_embedder(settings: ProviderSettings) -> Embedder:
-    if settings.embedding_provider == "fake":
+    provider = settings.embedding_provider
+    if provider == "fake":
         return FakeEmbedder(settings.embedding_dimensions or 8)
-    model = _required(settings.embedding_model, "EMBEDDING_MODEL", "openai")
+    model = _required(settings.embedding_model, "EMBEDDING_MODEL", provider)
+    if provider == "local":
+        return _build_local_embedder(settings, model)
     key = _required(settings.openai_api_key, "OPENAI_API_KEY", "openai")
     client = openai_client(key, timeout=settings.provider_timeout_seconds)
     return OpenAIEmbedder(client, model, settings.embedding_dimensions)
+
+
+def _build_local_embedder(settings: ProviderSettings, model: str) -> Embedder:
+    # Imported here so the other providers don't load ONNX Runtime.
+    from swayambhu_providers.local_provider import LocalOnnxEmbedder, find_model_file
+
+    if settings.embedding_dimensions is not None:
+        raise ProviderConfigError(
+            "EMBEDDING_DIMENSIONS must be empty for the local provider: the model fixes it"
+        )
+    model_dir = settings.local_model_dir / model
+    if find_model_file(model_dir) is None or not (model_dir / "tokenizer.json").is_file():
+        raise ProviderConfigError(
+            f"local embedding model not found: {model_dir} needs model.onnx and tokenizer.json"
+        )
+    return LocalOnnxEmbedder(
+        model,
+        model_dir,
+        query_prefix=settings.embedding_query_prefix,
+        passage_prefix=settings.embedding_passage_prefix,
+        max_tokens=settings.local_embedding_max_tokens,
+        threads=settings.local_embedding_threads,
+        batch_size=settings.local_embedding_batch_size,
+    )
