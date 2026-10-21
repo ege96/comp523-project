@@ -1,39 +1,36 @@
 version: 2
+
+# Every ecosystem below is part of one multi-ecosystem group, so a week's version updates
+# arrive as a single PR (Python locks, npm, Actions, base images and compose together)
+# instead of one per directory. Security updates still come as their own PRs.
+multi-ecosystem-groups:
+  weekly:
+    schedule: { interval: weekly }
+
 updates:
   - package-ecosystem: uv
-    directory: /services/api
-    schedule: { interval: weekly }
-    groups: { python: { patterns: ["*"] } }
-  - package-ecosystem: uv
-    directory: /services/worker
-    schedule: { interval: weekly }
-    groups: { python: { patterns: ["*"] } }
-  - package-ecosystem: uv
-    directory: /packages/core
-    schedule: { interval: weekly }
-    groups: { python: { patterns: ["*"] } }
-  - package-ecosystem: uv
-    directory: /packages/providers
-    schedule: { interval: weekly }
-    groups: { python: { patterns: ["*"] } }
+    directories: [/services/api, /services/worker, /packages/core, /packages/providers]
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
   - package-ecosystem: npm
     directory: /apps/web
-    schedule: { interval: weekly }
-    groups: { npm: { patterns: ["*"] } }
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
     ignore:
       # typescript-eslint supports TypeScript < 6.1 only. Lift once it supports newer.
       - dependency-name: typescript
         versions: [">=6.1"]
   - package-ecosystem: github-actions
     directory: /
-    schedule: { interval: weekly }
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
 
   # Base images. Python minor versions and nginx minor versions (odd = mainline) are moved by
   # hand, since requires-python and CI change with Python, and nginx should stay on stable.
   - package-ecosystem: docker
     directories: [/apps/web, /services/api, /services/worker]
-    schedule: { interval: weekly }
-    groups: { images: { patterns: ["*"] } }
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
     ignore:
       - dependency-name: python
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
@@ -44,7 +41,8 @@ updates:
   # image and isn't covered by Dependabot: keep the two in step by hand.
   - package-ecosystem: docker-compose
     directory: /
-    schedule: { interval: weekly }
+    patterns: ["*"]
+    multi-ecosystem-group: weekly
     ignore:
       - dependency-name: pgvector/pgvector
         update-types: ["version-update:semver-major"]
