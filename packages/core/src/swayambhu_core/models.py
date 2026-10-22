@@ -337,8 +337,10 @@ class JobRow(Base):
 
     Workers claim queued jobs with `FOR UPDATE SKIP LOCKED`, so several can run at once.
     A running job whose `heartbeat_at` is older than the worker's lease is reclaimed, which
-    covers a pod killed mid-job. Each kind enqueues the next: transcribe, translate, index;
-    `playback` (the browser-playable copy) runs alongside them.
+    covers a pod killed mid-job. A queued job waits while the same step runs for the same
+    interview, so one step never runs twice at once on one interview. Each kind enqueues the
+    next: transcribe, translate, index; `playback` (the browser-playable copy) runs alongside
+    them.
     See `swayambhu_core.jobs`.
     """
 
@@ -361,13 +363,14 @@ class JobRow(Base):
         CheckConstraint(_one_of("kind", JOB_KINDS), name="kind_valid"),
         CheckConstraint(_one_of("state", JOB_STATES), name="state_valid"),
         CheckConstraint("attempts >= 0 AND max_attempts >= 1", name="attempts_valid"),
-        # One live job per step per interview, so enqueueing twice is harmless.
+        # At most one waiting job per step per interview, so enqueueing twice is harmless.
+        # One may wait behind a running one: its inputs changed after that run started.
         Index(
-            "jobs_one_active_idx",
+            "jobs_one_queued_idx",
             "interview_id",
             "kind",
             unique=True,
-            postgresql_where=text("state IN ('queued', 'running')"),
+            postgresql_where=text("state = 'queued'"),
         ),
         Index("jobs_queued_idx", "run_after", postgresql_where=text("state = 'queued'")),
         Index("jobs_interview_id_idx", "interview_id"),
