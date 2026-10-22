@@ -40,3 +40,16 @@ export function transcriptLabel(status: InterviewSummary["status"]): string | nu
       return null;
   }
 }
+
+/** 1536 -> "1.5 KB", 3_221_225_472 -> "3 GB" (binary units, as file managers show them). */
+export function formatBytes(bytes: number): string {
+  const units = ["bytes", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  const rounded = unit === 0 ? value : Math.round(value * 10) / 10;
+  return `${String(rounded)} ${units[unit] ?? ""}`;
+}

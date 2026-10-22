@@ -76,7 +76,24 @@ export const AdminSchema = z.object({
   email: z.string(),
 }) satisfies z.ZodType<Schemas["AdminResponse"]>;
 
+export const JobListSchema = z.object({
+  items: z.array(
+    z.object({
+      kind: z.string(),
+      state: z.enum(["queued", "running", "done", "failed"]),
+      attempts: z.number().int(),
+      max_attempts: z.number().int(),
+      last_error: z.string().nullable(),
+      created_at: z.string(),
+      finished_at: z.string().nullable(),
+    }),
+  ),
+}) satisfies z.ZodType<Schemas["JobList"]>;
+
+export type InterviewUpdate = Schemas["InterviewUpdate"];
+
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
 export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
 export type Segment = z.infer<typeof Segment>;
+export type Job = z.infer<typeof JobListSchema>["items"][number];
 export type Moment = z.infer<typeof SearchResultsSchema>["items"][number];

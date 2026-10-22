@@ -19,7 +19,9 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 //   /interviews?page=          all interviews, newest first
 //   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
 //   /signin                    admin sign-in
-//   /admin                     upload and review (admins only)
+//   /admin?status=&page=       upload, processing status and publishing (admins only)
+//   /admin/interviews/$interviewId
+//                              one interview's processing steps and visibility (admins only)
 // Only the home page is in the main bundle; the rest load on demand, and `defaultPreload:
 // "intent"` fetches a page's code when the pointer rests on a link to it.
 
@@ -77,7 +79,20 @@ const adminRoute = createRoute({
 const adminHomeRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: "/",
+  validateSearch: z.object({
+    status: z
+      .enum(["processing", "needs_review", "reviewed", "failed"])
+      .optional()
+      .catch(undefined),
+    page: z.number().int().min(2).optional().catch(undefined),
+  }),
   component: lazyRouteComponent(() => import("./pages/AdminPage"), "AdminPage"),
+});
+
+const adminInterviewRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "interviews/$interviewId",
+  component: lazyRouteComponent(() => import("./pages/AdminInterviewPage"), "AdminInterviewPage"),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -86,7 +101,7 @@ const routeTree = rootRoute.addChildren([
   interviewsRoute,
   interviewRoute,
   signInRoute,
-  adminRoute.addChildren([adminHomeRoute]),
+  adminRoute.addChildren([adminHomeRoute, adminInterviewRoute]),
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
