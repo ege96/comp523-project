@@ -21,10 +21,12 @@
     "@firebase/app": "0.16.3",
     "@firebase/auth": "1.13.7",
     "@mui/material": "9.5.0",
+    "@tanstack/react-form": "1.33.5",
     "@tanstack/react-query": "5.104.4",
     "@tanstack/react-router": "1.170.45",
     "react": "19.3.1",
     "react-dom": "19.3.1",
+    "tus-js-client": "4.3.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
