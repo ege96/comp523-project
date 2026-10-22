@@ -90,7 +90,29 @@ export const JobListSchema = z.object({
   ),
 }) satisfies z.ZodType<Schemas["JobList"]>;
 
+// Admin-only: machine text and edits side by side, for the transcript editor.
+export const AdminSegmentListSchema = z.object({
+  items: z.array(
+    z.object({
+      seq: z.number().int(),
+      start_ms: z.number().int(),
+      end_ms: z.number().int(),
+      language: z.string().nullable(),
+      original_machine: z.string(),
+      original_edited: z.string().nullable(),
+      english_machine: z.string().nullable(),
+      english_edited: z.string().nullable(),
+      edited_at: z.string().nullable(),
+      edited_by: z.string().nullable(),
+    }),
+  ),
+}) satisfies z.ZodType<Schemas["AdminSegmentList"]>;
+
+export const AdminSegmentSchema = AdminSegmentListSchema.shape.items.element;
+
 export type InterviewUpdate = Schemas["InterviewUpdate"];
+export type SegmentEdit = Schemas["SegmentEdit"];
+export type AdminSegment = z.infer<typeof AdminSegmentSchema>;
 
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
 export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
