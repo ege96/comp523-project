@@ -19,7 +19,13 @@ from swayambhu_core.models import (
     SegmentRow,
 )
 from swayambhu_core.storage import LocalMediaStore
-from swayambhu_providers import AudioClip, ProviderError, TranscribedSegment, Translation
+from swayambhu_providers import (
+    AudioClip,
+    EmbeddingKind,
+    ProviderError,
+    TranscribedSegment,
+    Translation,
+)
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranslator
 
 from swayambhu_worker.ingest import ingest
@@ -250,6 +256,88 @@ def test_edited_transcripts_are_not_replaced(
         assert "edited" in (interview.status_detail or "")
         first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
         assert session.scalar(first) == "सच्याइएको"
+
+
+class CountingEmbedder(FakeEmbedder):
+    def __init__(self) -> None:
+        super().__init__(8)
+        self.texts: list[str] = []
+
+    def embed(self, texts: Sequence[str], kind: EmbeddingKind) -> list[list[float]]:
+        self.texts += texts
+        return super().embed(texts, kind)
+
+
+def test_an_edit_reembeds_only_its_own_chunk(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        before = dict(session.execute(select(SearchChunkRow.id, SearchChunkRow.first_seq)).all())
+        assert len(before) >= 2
+        # What the API does when an admin saves a line: edit it, then queue indexing.
+        session.execute(
+            update(SegmentRow)
+            .where(SegmentRow.seq == 0)
+            .values(english_edited="The first line, corrected", edited_at=func.now())
+        )
+        jobs.enqueue(session, "index", interview_id)
+        session.commit()
+
+    embedder = CountingEmbedder()
+    providers = Providers(ScriptedTranscriber(), FakeTranslator(), embedder)
+    runner = JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
+    assert drain(runner) == 1
+    assert len(embedder.texts) == 1  # the first chunk's English; its Nepali didn't change
+    assert embedder.texts[0].startswith("The first line, corrected ")
+    with new_session() as session:
+        after = dict(session.execute(select(SearchChunkRow.id, SearchChunkRow.first_seq)).all())
+        assert after == before  # chunk rows kept, so their other embeddings were kept too
+        assert session.scalar(select(func.count()).select_from(ChunkEmbeddingRow)) == 2 * len(
+            before
+        )
+
+    # Indexing again with nothing changed embeds nothing.
+    with new_session() as session:
+        jobs.enqueue(session, "index", interview_id)
+        session.commit()
+    assert drain(runner) == 1
+    assert len(embedder.texts) == 1
+
+
+def test_a_step_queued_while_it_runs_waits_then_runs_again(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        jobs.enqueue(session, "index", interview_id)
+        session.commit()
+        running = jobs.claim(session, timedelta(minutes=10))
+        session.commit()
+        assert running is not None
+        # An admin saves an edit while that index runs: a second one waits behind it.
+        jobs.enqueue(session, "index", interview_id)
+        jobs.enqueue(session, "index", interview_id)
+        session.commit()
+        assert jobs.claim(session, timedelta(minutes=10)) is None  # not while one runs
+        queued = select(func.count()).where(JobRow.kind == "index", JobRow.state == "queued")
+        assert session.scalar(queued) == 1
+
+        # A retryable failure leaves the retry to the waiting job.
+        assert jobs.fail(session, running, "embedder down", retryable=True)
+        session.commit()
+        assert job_states(session, "index")[-2:] == ["failed", "queued"]
+    assert drain(runner) == 1
+    with new_session() as session:
+        assert job_states(session, "index")[-1] == "done"
+
+
+def job_states(session: Session, kind: str) -> list[str]:
+    return list(
+        session.scalars(select(JobRow.state).where(JobRow.kind == kind).order_by(JobRow.id))
+    )
 
 
 def test_unreadable_media_fails_without_retrying(

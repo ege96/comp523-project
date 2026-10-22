@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs
@@ -252,6 +252,22 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def _chunk_texts(members: list[SegmentRow], interview: InterviewRow) -> dict[str, str]:
+    """The text each representation embeds for one chunk. English speech counts as English;
+    "original" is left out when the chunk is all English."""
+    english_speech = [_source_language(s, interview) == "en" for s in members]
+    english = " ".join(
+        s.original_text if is_en else (s.english_text or "")
+        for s, is_en in zip(members, english_speech, strict=True)
+    ).strip()
+    texts = {}
+    if english:
+        texts["english"] = english
+    if not all(english_speech):
+        texts["original"] = " ".join(s.original_text for s in members)
+    return texts
+
+
 def index(
     session: Session,
     interview_id: uuid.UUID,
@@ -259,50 +275,86 @@ def index(
     store: MediaStore,
     heartbeat: Heartbeat,
 ) -> None:
+    """Group segments into search chunks and embed them with the configured model.
+
+    Incremental: a chunk whose boundaries haven't changed keeps its row, and an embedding
+    whose text hash still matches is kept, so after an admin edits one line only that line's
+    chunk is embedded again. Embeddings from other models are left for comparison.
+    """
     interview = _interview(session, interview_id)
     if interview.translation_status != "failed":
         interview.status_detail = "Indexing for search"
     segments = _segments(session, interview_id)
     by_seq = {s.seq: s for s in segments}
-    session.execute(
-        delete(SearchChunkRow).where(
-            SearchChunkRow.interview_id == interview_id, SearchChunkRow.chunker == CHUNKER
-        )
-    )
+    model = providers.embedder.name
 
-    pending: list[tuple[SearchChunkRow, str, str]] = []  # chunk, representation, text
-    for chunk in chunk_segments([Timed(s.seq, s.start_ms, s.end_ms) for s in segments]):
-        row = SearchChunkRow(
-            interview_id=interview_id,
-            chunker=CHUNKER,
-            first_seq=chunk.first_seq,
-            last_seq=chunk.last_seq,
-            start_ms=chunk.start_ms,
-            end_ms=chunk.end_ms,
+    existing = {
+        (c.first_seq, c.last_seq, c.start_ms, c.end_ms): c
+        for c in session.scalars(
+            select(SearchChunkRow).where(
+                SearchChunkRow.interview_id == interview_id, SearchChunkRow.chunker == CHUNKER
+            )
         )
-        session.add(row)
+    }
+    planned: list[tuple[SearchChunkRow, dict[str, str]]] = []
+    for chunk in chunk_segments([Timed(s.seq, s.start_ms, s.end_ms) for s in segments]):
+        key = (chunk.first_seq, chunk.last_seq, chunk.start_ms, chunk.end_ms)
+        row = existing.pop(key, None)
+        if row is None:
+            row = SearchChunkRow(
+                interview_id=interview_id,
+                chunker=CHUNKER,
+                first_seq=chunk.first_seq,
+                last_seq=chunk.last_seq,
+                start_ms=chunk.start_ms,
+                end_ms=chunk.end_ms,
+            )
+            session.add(row)
         members = [by_seq[seq] for seq in range(chunk.first_seq, chunk.last_seq + 1)]
-        english_speech = [_source_language(s, interview) == "en" for s in members]
-        english = " ".join(
-            s.original_text if is_en else (s.english_text or "")
-            for s, is_en in zip(members, english_speech, strict=True)
-        ).strip()
-        if english:
-            pending.append((row, "english", english))
-        if not all(english_speech):
-            pending.append((row, "original", " ".join(s.original_text for s in members)))
-    session.flush()  # assigns chunk ids
+        planned.append((row, _chunk_texts(members, interview)))
+    if existing:  # chunks that no longer match the segments, with all their embeddings
+        session.execute(
+            delete(SearchChunkRow).where(SearchChunkRow.id.in_(c.id for c in existing.values()))
+        )
+    session.flush()  # assigns new chunk ids
+
+    stored = {
+        (e.chunk_id, e.representation): e
+        for e in session.scalars(
+            select(ChunkEmbeddingRow).where(
+                ChunkEmbeddingRow.model == model,
+                ChunkEmbeddingRow.chunk_id.in_(row.id for row, _ in planned),
+            )
+        )
+    }
+    pending: list[tuple[int, str, str]] = []  # chunk id, representation, text
+    for row, texts in planned:
+        for representation, text in texts.items():
+            current = stored.pop((row.id, representation), None)
+            if current is None or current.source_hash != _sha256(text):
+                pending.append((row.id, representation, text))
+    for leftover in stored.values():  # e.g. the English text is now empty
+        session.delete(leftover)
 
     if pending:
         vectors = providers.embedder.embed([text for _, _, text in pending], "passage")
-        for (chunk_row, representation, text), vector in zip(pending, vectors, strict=True):
-            session.add(
-                ChunkEmbeddingRow(
-                    chunk_id=chunk_row.id,
-                    model=providers.embedder.name,
+        for (chunk_id, representation, text), vector in zip(pending, vectors, strict=True):
+            session.execute(
+                insert(ChunkEmbeddingRow)
+                .values(
+                    chunk_id=chunk_id,
+                    model=model,
                     representation=representation,
                     embedding=vector,
                     source_hash=_sha256(text),
+                )
+                .on_conflict_do_update(
+                    index_elements=["chunk_id", "model", "representation"],
+                    set_={
+                        "embedding": vector,
+                        "source_hash": _sha256(text),
+                        "created_at": func.now(),
+                    },
                 )
             )
         heartbeat()
