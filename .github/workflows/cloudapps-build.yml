@@ -3,10 +3,16 @@ name: CloudApps build
 # Starts a CloudApps (OpenShift) build only for the apps whose files changed on main.
 # Each BuildConfig's GitHub webhook trigger rebuilds every app on every push, so this
 # replaces it with the BuildConfig's Generic webhook. Setup: notes in cloudapps_deploy.md §8.
+#
+# Changes are counted from the last successful run of this workflow, not from the push's
+# own "before" commit, so a push whose run was skipped, cancelled while queued, or failed
+# is picked up by the next run. Run it by hand (Actions tab, "Run workflow") to rebuild
+# all three apps.
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: cloudapps-build
@@ -14,6 +20,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read # to find the last successful run
 
 jobs:
   trigger:
@@ -24,16 +31,22 @@ jobs:
           fetch-depth: 0
       - name: Trigger builds for changed apps
         env:
-          BEFORE: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
           AFTER: ${{ github.sha }}
           # Full Generic webhook URLs ("Copy URL with Secret"); each one is a credential.
           WEBHOOK_API: ${{ secrets.OPENSHIFT_WEBHOOK_API }}
           WEBHOOK_WEB: ${{ secrets.OPENSHIFT_WEBHOOK_WEB }}
           WEBHOOK_WORKER: ${{ secrets.OPENSHIFT_WEBHOOK_WORKER }}
         run: |
-          # A new branch or rewritten history has no usable "before" commit: build everything.
-          if git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            changed=$(git diff --name-only "$BEFORE" "$AFTER")
+          # The commit the last successful run built. With none, or one that isn't in
+          # main's history any more (force push), or a manual run: build everything.
+          base=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/cloudapps-build.yml/runs?branch=main&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty' || true)
+          echo "Last successful run built: ${base:-none}"
+          if [ "$EVENT" != workflow_dispatch ] && [ -n "$base" ] \
+            && git merge-base --is-ancestor "$base" "$AFTER" 2>/dev/null; then
+            changed=$(git diff --name-only "$base" "$AFTER")
           else
             changed=ALL
           fi
@@ -50,7 +63,8 @@ jobs:
             done
             if [ "$hit" = false ]; then echo "$app: unchanged, skipping"; return; fi
             if [ -z "$url" ]; then echo "::warning::$app changed but its webhook secret isn't set"; return; fi
-            curl -fsS -X POST -o /dev/null "$url"
+            # A failed call fails the run, so the next run tries this app again.
+            curl -fsS --retry 3 -X POST -o /dev/null "$url"
             echo "$app: build started"
           }
           trigger api "$WEBHOOK_API" services/api/ packages/ .dockerignore
