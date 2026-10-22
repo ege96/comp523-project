@@ -146,6 +146,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/interviews/{interview_id}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Transcript
+         * @description Every line with its machine text and any edit, in order. Admins only.
+         */
+        get: operations["get_transcript_api_interviews__interview_id__transcript_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/interviews/{interview_id}/segments/{seq}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit Segment
+         * @description Correct one line's original text, its English, or both. Timestamps can't be edited.
+         */
+        patch: operations["edit_segment_api_interviews__interview_id__segments__seq__patch"];
+        trace?: never;
+    };
     "/api/uploads/{uuid}": {
         parameters: {
             query?: never;
@@ -270,6 +310,37 @@ export interface components {
             id: number;
             /** Email */
             email: string;
+        };
+        /**
+         * AdminSegment
+         * @description A transcript line with machine output and edits side by side, for the edit screen.
+         */
+        AdminSegment: {
+            /** Seq */
+            seq: number;
+            /** Start Ms */
+            start_ms: number;
+            /** End Ms */
+            end_ms: number;
+            /** Language */
+            language: string | null;
+            /** Original Machine */
+            original_machine: string;
+            /** Original Edited */
+            original_edited: string | null;
+            /** English Machine */
+            english_machine: string | null;
+            /** English Edited */
+            english_edited: string | null;
+            /** Edited At */
+            edited_at: string | null;
+            /** Edited By */
+            edited_by: string | null;
+        };
+        /** AdminSegmentList */
+        AdminSegmentList: {
+            /** Items */
+            items: components["schemas"]["AdminSegment"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -509,6 +580,17 @@ export interface components {
             original_edited: boolean;
             /** English Edited */
             english_edited: boolean;
+        };
+        /**
+         * SegmentEdit
+         * @description Fields left out stay as they are. A string replaces the text; null drops the edit and
+         *     shows the machine text again.
+         */
+        SegmentEdit: {
+            /** Original Text */
+            original_text?: string | null;
+            /** English Text */
+            english_text?: string | null;
         };
         /** SegmentList */
         SegmentList: {
@@ -783,6 +865,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_transcript_api_interviews__interview_id__transcript_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSegmentList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_segment_api_interviews__interview_id__segments__seq__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+                seq: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SegmentEdit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminSegment"];
                 };
             };
             /** @description Validation Error */

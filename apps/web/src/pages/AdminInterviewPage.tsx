@@ -15,6 +15,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 
 import { adminQueries, PROCESSING_POLL_MS } from "../admin/api";
+import { TranscriptEditor } from "../admin/TranscriptEditor";
 import { jobLabel, STATUS_COLORS, STATUS_LABELS, TRANSLATION_LABELS } from "../admin/status";
 import { VisibilitySwitch } from "../admin/VisibilitySwitch";
 import { ApiError, interviewQueries } from "../api/client";
@@ -53,19 +54,7 @@ export function AdminInterviewPage() {
           <>
             <Summary interview={data} />
             <ProcessingSteps interview={data} />
-            {/* Transcript review and editing will live here, in its own component. */}
-            <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-              <Stack spacing={1}>
-                <Typography variant="h2">Transcript review</Typography>
-                <Typography color="text.secondary">
-                  Editing the transcript and translation is coming next. Until then,{" "}
-                  <TextLink to="/interviews/$interviewId" params={{ interviewId: data.id }}>
-                    read it in the archive viewer
-                  </TextLink>
-                  .
-                </Typography>
-              </Stack>
-            </Paper>
+            <TranscriptEditor interview={data} />
           </>
         )}
       </Stack>
