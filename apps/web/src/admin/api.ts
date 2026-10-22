@@ -2,10 +2,14 @@ import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query
 
 import { ApiError, getJson, type Viewer } from "../api/client";
 import {
+  AdminSegmentListSchema,
+  AdminSegmentSchema,
   InterviewListSchema,
   JobListSchema,
+  type AdminSegment,
   type InterviewSummary,
   type InterviewUpdate,
+  type SegmentEdit,
 } from "../api/schemas";
 import { API_BASE_URL } from "../config";
 import { useAuth } from "../auth/useAuth";
@@ -44,6 +48,16 @@ export const adminQueries = {
           signal,
         }),
     }),
+  // Every line with its machine text and any edit, for the transcript editor.
+  transcript: (viewer: Viewer, id: string) =>
+    queryOptions({
+      queryKey: ["interviews", viewer.key, id, "transcript"],
+      queryFn: async ({ signal }) =>
+        getJson(`/api/interviews/${encodeURIComponent(id)}/transcript`, AdminSegmentListSchema, {
+          token: await viewer.getToken(),
+          signal,
+        }),
+    }),
 };
 
 async function patchInterview(token: string | null, id: string, update: InterviewUpdate) {
@@ -67,6 +81,53 @@ export function useSetVisibility() {
     mutationFn: async ({ id, visibility }: { id: string } & InterviewUpdate) =>
       patchInterview(await viewer.getToken(), id, { visibility }),
     // Search results and filters change too, so refresh everything this viewer has cached.
+    onSettled: () =>
+      Promise.all(
+        ["interviews", "search"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      ),
+  });
+}
+
+async function patchSegment(
+  token: string | null,
+  id: string,
+  seq: number,
+  edit: SegmentEdit,
+): Promise<AdminSegment> {
+  const url = `${API_BASE_URL}/api/interviews/${encodeURIComponent(id)}/segments/${String(seq)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(edit),
+  });
+  if (!res.ok) throw new ApiError(res.status, url);
+  const parsed = AdminSegmentSchema.safeParse(await res.json().catch(() => undefined));
+  if (!parsed.success) throw new ApiError(res.status, url);
+  return parsed.data;
+}
+
+/**
+ * Save a correction to one transcript line. A string replaces the text; null goes back to the
+ * machine text. The API queues re-indexing, so search finds the new words shortly after.
+ */
+export function useEditSegment(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ seq, edit }: { seq: number; edit: SegmentEdit }) =>
+      patchSegment(await viewer.getToken(), interviewId, seq, edit),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(
+        adminQueries.transcript(viewer, interviewId).queryKey,
+        (old) => old && { items: old.items.map((line) => (line.seq === saved.seq ? saved : line)) },
+      );
+    },
+    // The public transcript, the job list and search results change too.
     onSettled: () =>
       Promise.all(
         ["interviews", "search"].map((prefix) =>
