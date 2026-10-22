@@ -306,6 +306,25 @@ def test_an_edit_reembeds_only_its_own_chunk(
     assert len(embedder.texts) == 1
 
 
+def test_switching_embedder_adds_its_vectors_beside_the_old_ones(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        jobs.enqueue(session, "index", interview_id)
+        session.commit()
+    providers = Providers(ScriptedTranscriber(), FakeTranslator(), FakeEmbedder(4))
+    runner = JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
+    assert drain(runner) == 1
+    with new_session() as session:
+        chunks = session.scalar(select(func.count()).select_from(SearchChunkRow)) or 0
+        models = session.execute(
+            select(ChunkEmbeddingRow.model, func.count()).group_by(ChunkEmbeddingRow.model)
+        ).all()
+        assert sorted(models) == [("fake:hash@4", 2 * chunks), ("fake:hash@8", 2 * chunks)]
+
+
 def test_a_step_queued_while_it_runs_waits_then_runs_again(
     new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
 ) -> None:
