@@ -101,6 +101,8 @@ In the web app, the footer links to `/signin` (Sign in with Google, in a popup).
 
 Admins upload recordings with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (Proposal; served by `tuspyserver`). If the connection drops, the upload resumes from the last byte the server has rather than starting again. The web app uses `tus-js-client`. Every route needs an admin token.
 
+In the web app, admins do all of this from **Upload & review** (`/admin`): pick or drop a file, fill in what is known, and watch the progress bar. A dropped connection retries on its own, and pressing Upload again with the same file and details resumes rather than restarting. The same page lists every interview with its status and a Public/Private switch; each interview's page (`/admin/interviews/{id}`) shows its processing steps and errors.
+
 1. `POST /api/uploads` with `Upload-Length` and `Upload-Metadata`, and no body. The metadata keys are `title`, `filename` and `filetype` (all required), plus optional `language` (`en`, `ne`, `new`), `interviewee_id` or `interviewee_name`, and `recorded_on` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`). Bad metadata is refused here, before any bytes are sent.
 2. `PATCH` the returned `Location` in chunks of at most `UPLOAD_CHUNK_MAX_BYTES` (64 MiB). `HEAD` on it tells you where to resume.
 3. The last PATCH's response has the new interview's id in `Upload-Interview-Id`. The interview is Private, and its processing is already queued.
