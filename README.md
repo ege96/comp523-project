@@ -133,6 +133,8 @@ curl -i -X PATCH "<Location from above>" -H "Authorization: Bearer $TOKEN" -H "T
 
 Unfinished uploads sit in `<MEDIA_ROOT>/uploads` and the worker deletes them after `UPLOAD_RETENTION_DAYS` (3) without a new chunk. For bulk loads on the server itself, `python -m swayambhu_worker.ingest FILE --title ...` skips HTTP entirely.
 
+After changing the embedding model (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` or `EMBEDDING_DIMENSIONS`) on both api and worker, run `python -m swayambhu_worker.reindex` in the worker pod. It queues an index job for every transcribed interview that has no vectors from the new model (`--dry-run` lists them first). Until those jobs finish, semantic search can't find those interviews, but keyword search still can.
+
 Admins publish or hide an interview with `PATCH /api/interviews/{id}` `{"visibility": "public"}`, follow its processing with `GET /api/interviews/{id}/jobs`, and list by status with `GET /api/interviews?status=processing`.
 
 ## Logs and request IDs

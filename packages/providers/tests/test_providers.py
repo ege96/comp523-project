@@ -12,6 +12,7 @@ from swayambhu_providers.factory import (
     build_embedder,
     build_transcriber,
     build_translator,
+    embedder_name,
 )
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber
 from swayambhu_providers.google_provider import GoogleNmtTranslator
@@ -175,7 +176,9 @@ def test_factory_picks_providers_from_settings() -> None:
         google_translate_api_key=SecretStr("k"),
     )
     assert build_transcriber(settings).name == "elevenlabs:scribe-model"
-    assert build_embedder(settings).name == "openai:embed-model@1024"
+    assert build_embedder(settings).name == embedder_name(settings) == "openai:embed-model@1024"
+    unsized = settings.model_copy(update={"embedding_dimensions": None})
+    assert build_embedder(unsized).name == embedder_name(unsized) == "openai:embed-model"
     assert build_translator(settings).name == "google:nmt"
 
     fake = ProviderSettings(
@@ -183,7 +186,7 @@ def test_factory_picks_providers_from_settings() -> None:
     )
     assert isinstance(build_transcriber(fake), FakeTranscriber)
     assert build_translator(fake).name == "fake:translator"
-    assert build_embedder(fake).name == "fake:hash@8"
+    assert build_embedder(fake).name == embedder_name(fake) == "fake:hash@8"
 
 
 @pytest.mark.parametrize(
@@ -256,7 +259,7 @@ def test_local_embedder_mean_pools_with_prefixes(tmp_path: Path) -> None:
         local_embedding_batch_size=1,
     )
     embedder = build_embedder(settings)
-    assert embedder.name == "local:org/tiny"
+    assert embedder.name == embedder_name(settings) == "local:org/tiny"
 
     # "query: a" -> mean(x, x) = x. "query: a b b" -> mean(x, x, z, z) -> (1, 0, 1)/sqrt2.
     # Batch size 1 and different lengths also check that padding never enters the mean.

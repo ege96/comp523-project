@@ -57,6 +57,19 @@ def build_embedder(settings: ProviderSettings) -> Embedder:
     return OpenAIEmbedder(client, model, settings.embedding_dimensions)
 
 
+def embedder_name(settings: ProviderSettings) -> str:
+    """The `name` the configured embedder will have, without loading a model or needing a key.
+    Must match each Embedder's own `name` (tests check that)."""
+    provider = settings.embedding_provider
+    if provider == "fake":
+        return f"fake:hash@{settings.embedding_dimensions or 8}"
+    model = _required(settings.embedding_model, "EMBEDDING_MODEL", provider)
+    if provider == "local":
+        return f"local:{model}"
+    dimensions = settings.embedding_dimensions
+    return f"openai:{model}" + (f"@{dimensions}" if dimensions else "")
+
+
 def _build_local_embedder(settings: ProviderSettings, model: str) -> Embedder:
     # Imported here so the other providers don't load ONNX Runtime.
     from swayambhu_providers.local_provider import LocalOnnxEmbedder, find_model_file
