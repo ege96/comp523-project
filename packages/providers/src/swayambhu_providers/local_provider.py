@@ -58,6 +58,10 @@ class LocalOnnxEmbedder:
         # Without this ONNX Runtime sizes its thread pool from the node's cores, not the pod's.
         options.intra_op_num_threads = threads
         options.inter_op_num_threads = 1
+        # The arena keeps the largest batch's working memory for good: measured 1,677 vs
+        # 1,172 MiB peak with e5-small at batch 16, same vectors.
+        options.enable_cpu_mem_arena = False
+        options.enable_mem_pattern = False
         self._session = ort.InferenceSession(
             str(model_file), options, providers=["CPUExecutionProvider"]
         )
