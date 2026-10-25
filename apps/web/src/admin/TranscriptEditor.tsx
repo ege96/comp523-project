@@ -15,7 +15,7 @@ import type { AdminSegment, InterviewDetail } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
 import { TextLink } from "../components/links";
 import { formatClock } from "../format";
-import { adminQueries, useEditSegment } from "./api";
+import { adminQueries, useEditSegment, useRetranslate } from "./api";
 import { buildEdit } from "./segmentEdit";
 
 type Interview = Pick<InterviewDetail, "id" | "primary_language">;
@@ -46,6 +46,10 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
             Saved. Search will find the corrected words once the line is re-indexed, usually within
             a minute.
           </Typography>
+        ) : null}
+        {/* Unmounted at zero, so a later batch of edits starts with a fresh button. */}
+        {data?.items.some((line) => line.english_stale) ? (
+          <StaleEnglish interviewId={interview.id} lines={data.items} />
         ) : null}
         {isError ? (
           <Alert severity="error">The transcript couldn&apos;t be loaded.</Alert>
@@ -133,6 +137,15 @@ function LineView({
             {english ?? "No English translation"}
           </Typography>
         )}
+        {line.english_edit_stale ? (
+          <Typography variant="caption" color="warning.main">
+            The original changed after this English was edited. Check the English and save it.
+          </Typography>
+        ) : line.english_stale ? (
+          <Typography variant="caption" color="text.secondary">
+            English update pending
+          </Typography>
+        ) : null}
         {edited ? (
           <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
             <Chip size="small" variant="outlined" label="Edited" />
@@ -178,7 +191,9 @@ function LineForm({
       english: line.english_edited ?? line.english_machine ?? "",
     },
     onSubmit: async ({ value }) => {
-      const edit = buildEdit(line, englishSpeech ? { ...value, english: "" } : value);
+      const edit = englishSpeech
+        ? buildEdit(line, { ...value, english: "" })
+        : buildEdit(line, value, { confirmEnglish: line.english_edit_stale });
       if (edit === null) {
         onDone(false);
         return;
@@ -320,5 +335,39 @@ function MachineAware({
         </Stack>
       ) : null}
     </Stack>
+  );
+}
+
+/** How many lines' English is out of date, with a way to refresh it without waiting. */
+function StaleEnglish({ interviewId, lines }: { interviewId: string; lines: AdminSegment[] }) {
+  const retranslate = useRetranslate(interviewId);
+  const stale = lines.filter((line) => line.english_stale).length;
+  return (
+    <Alert
+      severity="info"
+      action={
+        <Button
+          color="inherit"
+          size="small"
+          disabled={retranslate.isPending || retranslate.isSuccess}
+          onClick={() => {
+            retranslate.mutate();
+          }}
+        >
+          Update English now
+        </Button>
+      }
+    >
+      {retranslate.isSuccess
+        ? "Updating the English now. It appears here in a moment."
+        : `The English of ${stale === 1 ? "1 line is" : `${String(stale)} lines are`} out of date because the original changed. It updates on its own a few minutes after the last edit.`}
+      {retranslate.isError ? (
+        <Typography variant="body2" color="error" role="alert">
+          {retranslate.error instanceof ApiError && retranslate.error.status === 409
+            ? "This interview is being transcribed again. Try once that has finished."
+            : "Couldn't start the update. Try again."}
+        </Typography>
+      ) : null}
+    </Alert>
   );
 }

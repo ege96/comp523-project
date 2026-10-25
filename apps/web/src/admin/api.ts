@@ -6,6 +6,7 @@ import {
   AdminSegmentSchema,
   InterviewListSchema,
   JobListSchema,
+  RetranslateResultSchema,
   type AdminSegment,
   type InterviewSummary,
   type InterviewUpdate,
@@ -57,6 +58,9 @@ export const adminQueries = {
           token: await viewer.getToken(),
           signal,
         }),
+      // Out-of-date English is refreshed by the worker a few minutes after the last edit.
+      refetchInterval: (q) =>
+        q.state.data?.items.some((line) => line.english_stale) ? PROCESSING_POLL_MS : false,
     }),
 };
 
@@ -134,5 +138,27 @@ export function useEditSegment(interviewId: string) {
           queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
         ),
       ),
+  });
+}
+
+/** Re-translate the lines whose English is out of date now, instead of after the delay. */
+export function useRetranslate(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await viewer.getToken();
+      const url = `${API_BASE_URL}/api/interviews/${encodeURIComponent(interviewId)}/retranslate`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new ApiError(res.status, url);
+      const parsed = RetranslateResultSchema.safeParse(await res.json().catch(() => undefined));
+      if (!parsed.success) throw new ApiError(res.status, url);
+      return parsed.data;
+    },
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["interviews", viewer.key, interviewId] }),
   });
 }

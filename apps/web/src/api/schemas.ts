@@ -103,10 +103,16 @@ export const AdminSegmentListSchema = z.object({
       english_machine: z.string().nullable(),
       english_edited: z.string().nullable(),
       edited_at: z.string().nullable(),
+      english_stale: z.boolean(),
+      english_edit_stale: z.boolean(),
       edited_by: z.string().nullable(),
     }),
   ),
 }) satisfies z.ZodType<Schemas["AdminSegmentList"]>;
+
+export const RetranslateResultSchema = z.object({
+  stale_lines: z.number().int(),
+}) satisfies z.ZodType<Schemas["RetranslateResult"]>;
 
 export const AdminSegmentSchema = AdminSegmentListSchema.shape.items.element;
 

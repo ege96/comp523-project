@@ -53,6 +53,9 @@ class Settings(ProviderSettings):
     # How long an unfinished upload can be resumed before it is deleted. Keep the worker's
     # UPLOAD_RETENTION_DAYS the same: the worker does the deleting.
     upload_retention_days: int = 3
+    # After an admin edits a line's original text, wait this long after their last edit
+    # before re-translating the edited lines, so a burst of edits is one translation batch.
+    retranslate_delay_seconds: int = 300
 
 
 @lru_cache
