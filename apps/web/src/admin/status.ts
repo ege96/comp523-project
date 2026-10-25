@@ -31,6 +31,7 @@ const JOB_LABELS: Record<string, string> = {
   translate: "English translation",
   index: "Search indexing",
   playback: "Playback copy",
+  retranslate: "Updating English after edits",
 };
 
 export function jobLabel(job: Pick<Job, "kind">): string {

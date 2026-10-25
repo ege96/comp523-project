@@ -43,6 +43,24 @@ def enqueue(session: Session, kind: str, interview_id: uuid.UUID) -> None:
     )
 
 
+def schedule(session: Session, kind: str, interview_id: uuid.UUID, delay: timedelta) -> None:
+    """Queue a step to run after `delay`, moving an already-queued one to that time.
+
+    Used to batch bursts of edits: each save pushes the step back, so it runs once, `delay`
+    after the last save. A zero delay runs it as soon as a worker is free.
+    """
+    run_after = func.now() + delay
+    session.execute(
+        insert(JobRow)
+        .values(kind=kind, interview_id=interview_id, run_after=run_after)
+        .on_conflict_do_update(
+            index_elements=["interview_id", "kind"],
+            index_where=text("state = 'queued'"),
+            set_={"run_after": run_after},
+        )
+    )
+
+
 def _to_job(row: JobRow) -> Job:
     return Job(row.id, row.kind, row.interview_id, row.attempts, row.max_attempts)
 

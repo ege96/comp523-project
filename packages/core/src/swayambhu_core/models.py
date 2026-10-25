@@ -78,7 +78,7 @@ TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")
 REPRESENTATIONS = ("original", "english")
-JOB_KINDS = ("transcribe", "translate", "index", "playback")
+JOB_KINDS = ("transcribe", "translate", "index", "playback", "retranslate")
 JOB_STATES = ("queued", "running", "done", "failed")
 
 
@@ -258,6 +258,11 @@ class SegmentRow(Base):
             persisted=True,
         ),
     )
+    # `text.translation_fingerprint` of the original the machine English was made from. When
+    # an edit changes the original's words, the English is stale until re-translated.
+    english_source_hash: Mapped[str | None] = mapped_column(Text)
+    # The same, for the original an admin saw when they last saved `english_edited`.
+    english_edit_source_hash: Mapped[str | None] = mapped_column(Text)
     english_tsv: Mapped[Any] = mapped_column(
         TSVECTOR,
         Computed(
@@ -340,7 +345,7 @@ class JobRow(Base):
     covers a pod killed mid-job. A queued job waits while the same step runs for the same
     interview, so one step never runs twice at once on one interview. Each kind enqueues the
     next: transcribe, translate, index; `playback` (the browser-playable copy) runs alongside
-    them.
+    them. `retranslate` refreshes the English of lines whose original an admin edited.
     See `swayambhu_core.jobs`.
     """
 

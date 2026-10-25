@@ -31,6 +31,7 @@ from swayambhu_core.models import (
     SegmentRow,
 )
 from swayambhu_core.storage import MediaStore, file_sha256
+from swayambhu_core.text import english_is_stale, translation_fingerprint
 from swayambhu_providers import AudioClip, Embedder, Transcriber, Translator
 
 from swayambhu_worker import audio
@@ -195,24 +196,24 @@ def _source_language(segment: SegmentRow, interview: InterviewRow) -> str | None
     return segment.language or interview.language_confirmed or interview.language_detected
 
 
-def translate(
+def _translate_lines(
     session: Session,
-    interview_id: uuid.UUID,
+    interview: InterviewRow,
+    segments: list[SegmentRow],
     providers: Providers,
-    store: MediaStore,
     heartbeat: Heartbeat,
-) -> None:
-    interview = _interview(session, interview_id)
-    interview.status_detail = "Translating"
-    session.commit()
+) -> bool:
+    """Machine-translate `segments` to English, grouped by language. Returns False when none
+    needed it (all English speech). Records what each English was made from, so an edit to
+    the original later shows it as stale (`swayambhu_core.text.english_is_stale`)."""
     known = set(session.scalars(select(LanguageRow.code)))
-    segments = _segments(session, interview_id)
     by_language: dict[str | None, list[SegmentRow]] = {}
     for segment in segments:
         # Unknown (None) when the transcriber didn't say and no admin has confirmed it.
         source = segment.language or interview.language_confirmed
         if source == "en":
             segment.english_machine = None  # English speech: english_text stays NULL
+            segment.english_source_hash = None
         else:
             by_language.setdefault(source, []).append(segment)
 
@@ -223,20 +224,55 @@ def translate(
         )
         for segment, translation in zip(group, translations, strict=True):
             segment.english_machine = translation.text.strip() or None
+            segment.english_source_hash = translation_fingerprint(segment.original_text)
             if source is None:
                 segment.language = _known_language(known, translation.detected_language)
                 if segment.language == "en":
-                    segment.english_machine = None
+                    segment.english_machine = segment.english_source_hash = None
         heartbeat()
     if None in by_language:
-        _record_languages(session, interview, segments)
+        _record_languages(session, interview, _segments(session, interview.id))
+    return bool(by_language)
 
-    if by_language:
+
+def translate(
+    session: Session,
+    interview_id: uuid.UUID,
+    providers: Providers,
+    store: MediaStore,
+    heartbeat: Heartbeat,
+) -> None:
+    interview = _interview(session, interview_id)
+    interview.status_detail = "Translating"
+    session.commit()
+    if _translate_lines(session, interview, _segments(session, interview_id), providers, heartbeat):
         interview.translation_status = "done"
         interview.translated_by = providers.translator.name
     else:
         interview.translation_status = "not_needed"
         interview.translated_by = None
+    jobs.enqueue(session, "index", interview_id)
+
+
+def retranslate(
+    session: Session,
+    interview_id: uuid.UUID,
+    providers: Providers,
+    store: MediaStore,
+    heartbeat: Heartbeat,
+) -> None:
+    """Refresh the machine English of lines whose original an admin edited since it was made.
+
+    The API queues this a few minutes after the last edit, so a burst of edits costs one
+    batch. A human English edit is kept as it is: the machine English under it is refreshed,
+    and the edit stays flagged for review (`english_edit_is_stale`) until an admin saves it.
+    """
+    interview = _interview(session, interview_id)
+    stale = [s for s in _segments(session, interview_id) if english_is_stale(s)]
+    if not stale:
+        return
+    _translate_lines(session, interview, stale, providers, heartbeat)
+    interview.translated_by = providers.translator.name
     jobs.enqueue(session, "index", interview_id)
 
 
@@ -318,10 +354,15 @@ def index(
         )
     session.flush()  # assigns new chunk ids
 
-    stored = {
-        (e.chunk_id, e.representation): e
-        for e in session.scalars(
-            select(ChunkEmbeddingRow).where(
+    # Hashes only: the vectors themselves aren't needed to tell what changed.
+    stored: dict[tuple[int, str], str] = {
+        (chunk_id, representation): source_hash
+        for chunk_id, representation, source_hash in session.execute(
+            select(
+                ChunkEmbeddingRow.chunk_id,
+                ChunkEmbeddingRow.representation,
+                ChunkEmbeddingRow.source_hash,
+            ).where(
                 ChunkEmbeddingRow.model == model,
                 ChunkEmbeddingRow.chunk_id.in_(row.id for row, _ in planned),
             )
@@ -330,11 +371,16 @@ def index(
     pending: list[tuple[int, str, str]] = []  # chunk id, representation, text
     for row, texts in planned:
         for representation, text in texts.items():
-            current = stored.pop((row.id, representation), None)
-            if current is None or current.source_hash != _sha256(text):
+            if stored.pop((row.id, representation), None) != _sha256(text):
                 pending.append((row.id, representation, text))
-    for leftover in stored.values():  # e.g. the English text is now empty
-        session.delete(leftover)
+    for chunk_id, representation in stored:  # e.g. the English text is now empty
+        session.execute(
+            delete(ChunkEmbeddingRow).where(
+                ChunkEmbeddingRow.chunk_id == chunk_id,
+                ChunkEmbeddingRow.model == model,
+                ChunkEmbeddingRow.representation == representation,
+            )
+        )
 
     if pending:
         vectors = providers.embedder.embed([text for _, _, text in pending], "passage")
@@ -405,6 +451,13 @@ def playback(
     )
 
 
+def give_up_retranslating(session: Session, interview_id: uuid.UUID, error: str) -> None:
+    """The edited lines keep their old English and still show as out of date, so an admin
+    can retry with "Update English now"."""
+    interview = _interview(session, interview_id)
+    interview.status_detail = f"Updating the English failed: {error}"
+
+
 def give_up_playback(session: Session, interview_id: uuid.UUID, error: str) -> None:
     """The transcript is still usable without a player, so the status stays as it is."""
     interview = _interview(session, interview_id)
@@ -425,10 +478,12 @@ STEPS: dict[str, Step] = {
     "translate": translate,
     "index": index,
     "playback": playback,
+    "retranslate": retranslate,
 }
 GIVE_UP: dict[str, Callable[[Session, uuid.UUID, str], None]] = {
     "transcribe": give_up,
     "translate": give_up_translating,
     "index": give_up,
     "playback": give_up_playback,
+    "retranslate": give_up_retranslating,
 }
