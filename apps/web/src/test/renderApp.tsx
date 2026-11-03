@@ -8,7 +8,7 @@ import { SignInError, type AuthClient, type AuthUser } from "../auth/authClient"
 import { AuthProvider } from "../auth/AuthProvider";
 import { createAppRouter } from "../router";
 
-type Routes = Record<string, { status?: number; body: unknown }>;
+type Routes = Record<string, { status?: number; body?: unknown }>;
 
 /** Fake API: answers by path, records the Authorization header of every request. */
 export function stubApi(routes: Routes) {
@@ -20,7 +20,10 @@ export function stubApi(routes: Routes) {
       const headers = new Headers(init?.headers);
       calls.push({ path, auth: headers.get("Authorization") });
       const route = routes[path] ?? { status: 404, body: { detail: "Not Found" } };
-      return Promise.resolve(Response.json(route.body, { status: route.status ?? 200 }));
+      const status = route.status ?? 200;
+      return Promise.resolve(
+        status === 204 ? new Response(null, { status }) : Response.json(route.body, { status }),
+      );
     }),
   );
   return calls;

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { formatClock, formatRecordedOn, transcriptLabel } from "./format";
+import { formatBytes, formatClock, formatRecordedOn, transcriptLabel } from "./format";
 
 it("formats clock times and dates only as precisely as they are known", () => {
   expect([formatClock(5_000), formatClock(754_000), formatClock(3_723_000)]).toEqual([
@@ -25,5 +25,14 @@ it("labels every transcript that isn't reviewed yet (D-008)", () => {
     "Machine-generated transcript",
     "Transcript unavailable",
     null,
+  ]);
+});
+
+it("formats file sizes in binary units", () => {
+  expect([512, 1536, 310 * 1024 ** 2, 3 * 1024 ** 3].map(formatBytes)).toEqual([
+    "512 bytes",
+    "1.5 KB",
+    "310 MB",
+    "3 GB",
   ]);
 });
