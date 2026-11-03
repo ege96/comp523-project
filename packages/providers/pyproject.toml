@@ -6,6 +6,10 @@ requires-python = ">=3.12"
 dependencies = [
     "pydantic-settings>=2.4",
     "httpx2>=2.13",
+    # `local` embedder: ONNX Runtime on CPU, no torch (keeps the images small).
+    "onnxruntime>=1.22",
+    "tokenizers>=0.21",
+    "numpy>=2.0",
 ]
 
 [dependency-groups]
@@ -14,6 +18,7 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.6",
     "pytest-cov>=5",
+    "onnx>=1.18",  # builds a tiny model for the local embedder tests
 ]
 
 [build-system]

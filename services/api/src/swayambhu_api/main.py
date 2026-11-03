@@ -11,6 +11,7 @@ from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
 from swayambhu_api.interviews import router as interviews_router
 from swayambhu_api.logging_setup import install_request_context, setup_logging
+from swayambhu_api.search import get_embedder
 from swayambhu_api.search import router as search_router
 from swayambhu_api.transcript_edits import router as transcript_edits_router
 from swayambhu_api.uploads import require_upload_admin
@@ -21,6 +22,9 @@ from swayambhu_api.uploads import router as uploads_router
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(settings.log_format, settings.log_level)
+    # Builds the embedder now, so a local model loads at startup instead of on the first
+    # search (and a misconfigured one is logged straight away).
+    get_embedder()
     yield
 
 
