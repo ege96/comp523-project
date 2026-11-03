@@ -292,3 +292,29 @@ def test_local_embedder_needs_model_files_and_no_dimension(tmp_path: Path) -> No
     sized = settings.model_copy(update={"embedding_model": "tiny", "embedding_dimensions": 384})
     with pytest.raises(ProviderConfigError, match="EMBEDDING_DIMENSIONS"):
         build_embedder(sized)
+
+
+def test_prepare_model_moves_weights_out_and_keeps_vectors(tmp_path: Path) -> None:
+    import onnx
+    from onnx import numpy_helper
+
+    from swayambhu_providers.local_provider import LocalOnnxEmbedder
+    from swayambhu_providers.prepare_model import DATA_FILE, externalize
+
+    _tiny_local_model(tmp_path / "tiny")
+    # Widen the lookup table past the 1 KiB threshold so it goes to the data file.
+    path = tmp_path / "tiny" / "onnx" / "model.onnx"
+    model = onnx.load(str(path))
+    [table] = model.graph.initializer
+    wide = numpy_helper.to_array(table).repeat(100, axis=1)
+    table.CopyFrom(numpy_helper.from_array(wide, "table"))
+    model.graph.output[0].type.tensor_type.shape.dim[2].dim_value = wide.shape[1]
+    onnx.save(model, str(path))
+    [before] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
+
+    externalize(tmp_path / "tiny")
+
+    assert (path.parent / DATA_FILE).stat().st_size >= wide.nbytes
+    assert path.stat().st_size < wide.nbytes
+    [after] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
+    assert after == pytest.approx(before)

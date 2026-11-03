@@ -11,10 +11,15 @@ FROM python:3.12-slim AS model
 COPY --from=uv /uv /usr/local/bin/uv
 ARG EMBEDDING_MODEL=intfloat/multilingual-e5-small
 ARG EMBEDDING_MODEL_REVISION=main
+# Moves the weights to model.onnx.data, which ONNX Runtime memory-maps (about half the
+# memory, no load spike). Keep the onnxruntime pin equal to the version in uv.lock.
+COPY packages/providers/src/swayambhu_providers/prepare_model.py /tmp/prepare_model.py
 RUN mkdir -p /opt/models && if [ -n "$EMBEDDING_MODEL" ]; then \
         uv tool run --from huggingface-hub==2.2.0 hf download "$EMBEDDING_MODEL" \
             onnx/model.onnx tokenizer.json --revision "$EMBEDDING_MODEL_REVISION" \
             --local-dir "/opt/models/$EMBEDDING_MODEL" \
+        && uv run --no-project --with onnxruntime==1.31.0 python /tmp/prepare_model.py \
+            "/opt/models/$EMBEDDING_MODEL" \
         && rm -rf "/opt/models/$EMBEDDING_MODEL/.cache" /root/.cache; \
     fi
 

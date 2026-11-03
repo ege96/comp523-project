@@ -218,7 +218,7 @@ jobs:
             build_context: .
             smoke: |
               docker run --rm --user 1000680000:0 "$IMAGE" python -c "import swayambhu_worker.__main__"
-              docker run --rm --user 1000680000:0 "$IMAGE" test -s /opt/models/intfloat/multilingual-e5-small/onnx/model.onnx
+              docker run --rm --user 1000680000:0 "$IMAGE" test -s /opt/models/intfloat/multilingual-e5-small/onnx/model.onnx.data
               docker run --rm --user 1000680000:0 "$IMAGE" ffmpeg -hide_banner -version
               docker run --rm --user 1000680000:0 "$IMAGE" ffprobe -hide_banner -version
     name: docker (${{ matrix.context }})
