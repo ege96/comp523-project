@@ -450,6 +450,9 @@ def test_the_reindex_command_queues_interviews_missing_the_configured_model(
     providers = Providers(ScriptedTranscriber(), FakeTranslator(), FakeEmbedder(4))
     assert drain(JobRunner(new_session, providers, store, lease=timedelta(minutes=10))) == 1
     with new_session() as session:
-        assert set(session.scalars(select(ChunkEmbeddingRow.model))) == {"fake:hash@4"}
+        # The old model's vectors stay beside the new ones (index is incremental).
+        assert set(session.scalars(select(ChunkEmbeddingRow.model))) == {
+            "fake:hash@4", "fake:hash@8",
+        }  # fmt: skip
     assert run().startswith("Queued 0")
     assert run("--all").startswith(f"{interview_id}\nQueued 1")
