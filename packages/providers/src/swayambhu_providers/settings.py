@@ -31,7 +31,8 @@ class ProviderSettings(BaseSettings):
     local_model_dir: Path = Path("/opt/models")
     local_embedding_max_tokens: int = 512
     local_embedding_threads: int = 4
-    local_embedding_batch_size: int = 16
+    # 4 keeps the worker's peak at ~540 MiB on CloudApps (16 hit ~860 MiB) at the same speed.
+    local_embedding_batch_size: int = 4
     provider_timeout_seconds: float = 120.0
 
     openai_api_key: SecretStr | None = None

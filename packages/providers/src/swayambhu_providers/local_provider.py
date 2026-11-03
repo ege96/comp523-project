@@ -39,7 +39,7 @@ class LocalOnnxEmbedder:
         passage_prefix: str = "",
         max_tokens: int = 512,
         threads: int = 4,
-        batch_size: int = 16,
+        batch_size: int = 4,
     ) -> None:
         model_file = find_model_file(model_dir)
         if model_file is None:
