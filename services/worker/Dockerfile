@@ -3,6 +3,26 @@
 FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
 FROM mwader/static-ffmpeg:9.0.2-1 AS ffmpeg
 
+# ---- model: the local embedding model (EMBEDDING_PROVIDER=local), baked in so pods never
+# download it. Lands in /opt/models/<EMBEDDING_MODEL> (LOCAL_MODEL_DIR's default). Build
+# with --build-arg EMBEDDING_MODEL= to leave it out. Pin the revision to a commit once
+# the model is settled; verify the repo still ships onnx/model.onnx.
+FROM python:3.12-slim AS model
+COPY --from=uv /uv /usr/local/bin/uv
+ARG EMBEDDING_MODEL=intfloat/multilingual-e5-small
+ARG EMBEDDING_MODEL_REVISION=main
+# Moves the weights to model.onnx.data, which ONNX Runtime memory-maps (about half the
+# memory, no load spike). Keep the onnxruntime pin equal to the version in uv.lock.
+COPY packages/providers/src/swayambhu_providers/prepare_model.py /tmp/prepare_model.py
+RUN mkdir -p /opt/models && if [ -n "$EMBEDDING_MODEL" ]; then \
+        uv tool run --from huggingface-hub==2.2.0 hf download "$EMBEDDING_MODEL" \
+            onnx/model.onnx tokenizer.json --revision "$EMBEDDING_MODEL_REVISION" \
+            --local-dir "/opt/models/$EMBEDDING_MODEL" \
+        && uv run --no-project --with onnxruntime==1.31.0 python /tmp/prepare_model.py \
+            "/opt/models/$EMBEDDING_MODEL" \
+        && rm -rf "/opt/models/$EMBEDDING_MODEL/.cache" /root/.cache; \
+    fi
+
 # ---- build: resolve and install dependencies into /opt/venv ----
 FROM python:3.12-slim AS build
 COPY --from=uv /uv /usr/local/bin/uv
@@ -36,6 +56,8 @@ FROM python:3.12-slim
 COPY --from=ffmpeg /ffmpeg /ffprobe /usr/local/bin/
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1
+# The model changes less often than the code, so its layer comes first.
+COPY --from=model /opt/models /opt/models
 # Files are world-readable, so OpenShift's arbitrary UID (group 0) can run them.
 # No chmod/chgrp pass: that would copy the whole venv into a second layer.
 COPY --from=build /opt/venv /opt/venv
