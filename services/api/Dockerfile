@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # Image tags are written out in full (no ARGs) so Dependabot can read and bump them.
-FROM ghcr.io/astral-sh/uv:0.13.6 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.7 AS uv
 
 # ---- model: the local embedding model (EMBEDDING_PROVIDER=local), baked in so pods never
 # download it. Lands in /opt/models/<EMBEDDING_MODEL> (LOCAL_MODEL_DIR's default). Build
