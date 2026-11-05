@@ -135,5 +135,12 @@ export type AdminSegment = z.infer<typeof AdminSegmentSchema>;
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
 export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
 export type Segment = z.infer<typeof Segment>;
+export type RerunStep = Schemas["Rerun"]["step"];
+
+// The 409 a re-transcription gets when admins have corrected lines (P-013).
+export const RerunConflictSchema = z.object({
+  detail: z.object({ message: z.string(), corrected_lines: z.number().int() }),
+});
+
 export type Job = z.infer<typeof JobListSchema>["items"][number];
 export type Moment = z.infer<typeof SearchResultsSchema>["items"][number];

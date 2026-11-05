@@ -258,6 +258,17 @@ def test_edited_transcripts_are_not_replaced(
         first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
         assert session.scalar(first) == "सच्याइएको"
 
+    # After the admin confirms losing the corrections (P-013), it transcribes again.
+    with new_session() as session:
+        jobs.enqueue(session, "retranscribe", interview_id)
+        session.commit()
+    assert drain(runner) == 3  # retranscribe, translate, index
+    with new_session() as session:
+        interview = session.get_one(InterviewRow, interview_id)
+        assert (interview.status, interview.status_detail) == ("done", None)
+        assert session.scalar(first) != "सच्याइएको"
+        assert session.scalar(select(func.count()).where(SegmentRow.edited_at.is_not(None))) == 0
+
 
 class CountingEmbedder(FakeEmbedder):
     def __init__(self) -> None:
@@ -416,6 +427,20 @@ def job_states(session: Session, kind: str) -> list[str]:
     return list(
         session.scalars(select(JobRow.state).where(JobRow.kind == kind).order_by(JobRow.id))
     )
+
+
+def test_a_retried_playback_copy_clears_its_old_failure(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        session.get_one(InterviewRow, interview_id).status_detail = "Playback copy failed: x"
+        jobs.enqueue(session, "playback", interview_id)
+        session.commit()
+    assert drain(runner) == 1
+    with new_session() as session:
+        assert session.get_one(InterviewRow, interview_id).status_detail is None
 
 
 def test_unreadable_media_fails_without_retrying(

@@ -1,5 +1,5 @@
 """Admin-only interview routes: publish or hide an interview, correct its details, and follow
-its processing (Proposal: paths and shapes). Recordings arrive through `uploads` (tus).
+or re-run its processing (Proposal: paths and shapes). Recordings arrive through `uploads` (tus).
 
 Every route here takes `CurrentAdmin`, so anonymous visitors get a 401 and signed-in
 non-admins a 403 before anything else runs.
@@ -11,9 +11,10 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import delete, exists, select
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
+from swayambhu_core import jobs
 from swayambhu_core.models import (
     IntervieweeRow,
     InterviewLanguageRow,
@@ -158,3 +159,88 @@ def list_jobs(interview_id: uuid.UUID, _admin: CurrentAdmin, session: DbSession)
         select(JobRow).where(JobRow.interview_id == interview_id).order_by(JobRow.id)
     )
     return JobList(items=[Job.model_validate(j) for j in rows])
+
+
+class Rerun(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # transcribe: a new transcript from the audio, then English and search again.
+    # translate: new machine English (corrections to it are kept), then search again.
+    # index: search again. playback: a new copy for the player.
+    step: Literal["transcribe", "translate", "index", "playback"]
+    # Transcribe again even though admins corrected lines; the corrections are lost (P-013).
+    replace_corrections: bool = False
+
+
+# The job kinds that do each step, and what the admin sees while it waits.
+_RERUN_KINDS = {
+    "transcribe": ("transcribe", "retranscribe"),
+    "translate": ("translate",),
+    "index": ("index",),
+    "playback": ("playback",),
+}
+_WAITING = {
+    "transcribe": "Waiting to transcribe",
+    "translate": "Waiting to translate",
+    "index": "Waiting to index for search",
+}
+
+
+@router.post(
+    "/api/interviews/{interview_id}/rerun",
+    status_code=status.HTTP_202_ACCEPTED,
+    responses={409: {"description": "Already queued or running, or would replace corrections"}},
+)
+def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: DbSession) -> None:
+    """Run a processing step again: to retry one that failed, or to redo the transcript or
+    English after the language was corrected. The later steps follow, as after an upload.
+
+    Transcribing again replaces every line, so when admins have corrected any it is refused
+    (409, with `corrected_lines`) unless `replace_corrections` says to go ahead.
+    """
+    interview = _interview(session, interview_id)
+    kinds = _RERUN_KINDS[body.step]
+    if session.scalar(
+        select(
+            exists().where(
+                JobRow.interview_id == interview_id,
+                JobRow.kind.in_(kinds),
+                JobRow.state.in_(("queued", "running")),
+            )
+        )
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "This step is already waiting or running")
+    lines = SegmentRow.interview_id == interview_id
+    kind: str = body.step
+    if body.step == "transcribe":
+        corrected = session.scalar(
+            select(func.count()).where(lines, SegmentRow.edited_at.is_not(None))
+        )
+        if corrected and not body.replace_corrections:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                {
+                    "message": "Transcribing again would replace corrected lines",
+                    "corrected_lines": corrected,
+                },
+            )
+        if corrected:
+            kind = "retranscribe"
+    if body.step == "translate":
+        if not session.scalar(select(exists().where(lines))):
+            raise HTTPException(status.HTTP_409_CONFLICT, "There is no transcript to translate")
+        # The admin's language wins over what the machine guessed for each line, so a
+        # corrected Nepal Bhasa interview is translated from Nepal Bhasa. English stays English.
+        if interview.language_confirmed and interview.language_confirmed != "en":
+            session.execute(
+                update(SegmentRow)
+                .where(lines, or_(SegmentRow.language.is_(None), SegmentRow.language != "en"))
+                .values(language=interview.language_confirmed)
+            )
+            _sync_languages(session, interview)
+        interview.translation_status = "pending"
+    if body.step != "playback":
+        interview.status = "processing"
+        interview.status_detail = _WAITING[body.step]
+    jobs.enqueue(session, kind, interview_id)
+    session.commit()

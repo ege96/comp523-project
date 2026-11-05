@@ -50,6 +50,9 @@ _LANGUAGE_ALIASES = {
 }
 
 
+PLAYBACK_FAILED = "Playback copy failed"
+
+
 class StepError(Exception):
     """A failure that retrying won't fix, with a message an admin can act on."""
 
@@ -134,9 +137,11 @@ def transcribe(
     providers: Providers,
     store: MediaStore,
     heartbeat: Heartbeat,
+    *,
+    replace_edits: bool = False,
 ) -> None:
     interview = _interview(session, interview_id)
-    if session.scalar(
+    if not replace_edits and session.scalar(
         select(SegmentRow.id).where(
             SegmentRow.interview_id == interview_id, SegmentRow.edited_at.is_not(None)
         )
@@ -190,6 +195,18 @@ def transcribe(
     interview.translation_status = "pending"
     interview.translated_by = None
     jobs.enqueue(session, "translate", interview_id)
+
+
+def retranscribe(
+    session: Session,
+    interview_id: uuid.UUID,
+    providers: Providers,
+    store: MediaStore,
+    heartbeat: Heartbeat,
+) -> None:
+    """Transcribe again although admins corrected lines: they confirmed losing the
+    corrections (P-013), say after fixing the language."""
+    transcribe(session, interview_id, providers, store, heartbeat, replace_edits=True)
 
 
 def _source_language(segment: SegmentRow, interview: InterviewRow) -> str | None:
@@ -418,7 +435,7 @@ def playback(
     heartbeat: Heartbeat,
 ) -> None:
     """Make the copy the player streams. Independent of the transcript steps."""
-    _interview(session, interview_id)
+    interview = _interview(session, interview_id)
     original = _original_media(session, interview_id)
     session.commit()
     with store.local_copy(original.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
@@ -438,6 +455,8 @@ def playback(
             store.delete(old.storage_key)
         session.delete(old)
         session.flush()
+    if interview.status_detail and interview.status_detail.startswith(PLAYBACK_FAILED):
+        interview.status_detail = None  # the failure this replaces
     session.add(
         MediaFileRow(
             interview_id=interview_id,
@@ -460,7 +479,7 @@ def give_up_retranslating(session: Session, interview_id: uuid.UUID, error: str)
 def give_up_playback(session: Session, interview_id: uuid.UUID, error: str) -> None:
     """The transcript is still usable without a player, so the status stays as it is."""
     interview = _interview(session, interview_id)
-    interview.status_detail = f"Playback copy failed: {error}"
+    interview.status_detail = f"{PLAYBACK_FAILED}: {error}"
 
 
 def give_up(session: Session, interview_id: uuid.UUID, error: str) -> None:
@@ -478,6 +497,7 @@ STEPS: dict[str, Step] = {
     "index": index,
     "playback": playback,
     "retranslate": retranslate,
+    "retranscribe": retranscribe,
 }
 GIVE_UP: dict[str, Callable[[Session, uuid.UUID, str], None]] = {
     "transcribe": give_up,
@@ -485,4 +505,5 @@ GIVE_UP: dict[str, Callable[[Session, uuid.UUID, str], None]] = {
     "index": give_up,
     "playback": give_up_playback,
     "retranslate": give_up_retranslating,
+    "retranscribe": give_up,
 }

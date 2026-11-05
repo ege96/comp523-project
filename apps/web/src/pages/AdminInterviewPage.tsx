@@ -18,6 +18,8 @@ import { useState } from "react";
 
 import { adminQueries, PROCESSING_POLL_MS } from "../admin/api";
 import { DetailsDialog } from "../admin/DetailsDialog";
+import { retryableJobs } from "../admin/rerun";
+import { RerunActions, RetryButton } from "../admin/RerunActions";
 import { TranscriptEditor } from "../admin/TranscriptEditor";
 import { jobLabel, STATUS_COLORS, STATUS_LABELS, TRANSLATION_LABELS } from "../admin/status";
 import { VisibilitySwitch } from "../admin/VisibilitySwitch";
@@ -175,10 +177,12 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
     enabled: viewer.ready,
     refetchInterval: interview.status === "processing" ? PROCESSING_POLL_MS : false,
   });
+  const retryable = retryableJobs(data?.items ?? []);
   return (
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={2}>
         <Typography variant="h2">Processing steps</Typography>
+        <RerunActions interview={interview} />
         {isError ? (
           <Alert severity="error">The processing steps couldn&apos;t be loaded.</Alert>
         ) : isPending ? (
@@ -194,6 +198,7 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
                   <TableCell>State</TableCell>
                   <TableCell>Attempts</TableCell>
                   <TableCell>Last error</TableCell>
+                  <TableCell>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -206,6 +211,9 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
                     </TableCell>
                     <TableCell sx={{ overflowWrap: "anywhere", maxWidth: 360 }}>
                       {job.last_error ?? "None"}
+                    </TableCell>
+                    <TableCell>
+                      {retryable.has(job) ? <RetryButton interview={interview} job={job} /> : null}
                     </TableCell>
                   </TableRow>
                 ))}
