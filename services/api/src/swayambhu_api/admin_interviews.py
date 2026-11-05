@@ -24,7 +24,7 @@ router = APIRouter()
 class InterviewUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # D-008: publishing is allowed at any time, even while processing; review isn't required.
+    # D-008: publishing is allowed at any time, even while processing; there is no review step.
     visibility: Literal["public", "private"]
 
 

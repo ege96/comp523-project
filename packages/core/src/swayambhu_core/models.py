@@ -73,7 +73,8 @@ class AdminRow(Base):
 # Status-like columns are text + CHECK rather than Postgres ENUMs: a value can be added or
 # dropped with an ordinary migration. Proposal P-012, see notes/schema_proposal.md.
 VISIBILITIES = ("public", "private")
-STATUSES = ("processing", "needs_review", "reviewed", "failed")  # D-008
+# No manual review step: a finished transcript is "done" (amends D-008, Eric 2026-11-05).
+STATUSES = ("processing", "done", "failed")
 TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")

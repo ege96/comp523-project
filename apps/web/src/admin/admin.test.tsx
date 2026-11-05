@@ -72,7 +72,7 @@ describe("admin page", () => {
     const row = (await screen.findByRole("link", { name: "Test interview B" }, SLOW)).closest("li");
     if (!row) throw new Error("no row");
     expect(within(row).getByText("Processing")).toBeTruthy();
-    expect(screen.getByText("Needs review", { selector: ".MuiChip-label" })).toBeTruthy();
+    expect(screen.getByText("Done", { selector: ".MuiChip-label" })).toBeTruthy();
 
     await userEvent.click(within(row).getByRole("switch", { name: "Public: Test interview B" }));
     expect(requests()).toContainEqual({

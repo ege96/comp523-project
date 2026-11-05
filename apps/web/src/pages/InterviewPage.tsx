@@ -215,6 +215,9 @@ function Transcript({
     return <Typography color="text.secondary">No transcript yet.</Typography>;
   }
   const englishNote = tab === "english" ? translationMissing[translation] : null;
+  const corrected = (s: Segment) =>
+    tab === "english" && s.english_text !== null ? s.english_edited : s.original_edited;
+  const anyCorrected = segments.some(corrected);
   return (
     <>
       <Tabs
@@ -230,49 +233,64 @@ function Transcript({
       {englishNote ? (
         <Typography color="text.secondary">{englishNote}</Typography>
       ) : (
-        <Stack component="ol" sx={{ listStyle: "none", p: 0, m: 0 }}>
-          {segments.map((s) => {
-            const highlighted =
-              highlightMs !== undefined && highlightMs >= s.start_ms && highlightMs < s.end_ms;
-            // content-visibility lets the browser skip laying out segments that are off screen.
-            return (
-              <Box
-                component="li"
-                key={s.seq}
-                ref={highlighted ? scrollToHighlight : undefined}
-                aria-current={highlighted ? "true" : undefined}
-                sx={{
-                  display: "flex",
-                  gap: 2,
-                  py: 1.5,
-                  px: 1,
-                  mx: -1,
-                  borderRadius: 1,
-                  bgcolor: highlighted ? "rgba(150, 58, 53, 0.08)" : undefined,
-                  contentVisibility: "auto",
-                  containIntrinsicSize: "auto 3rem",
-                }}
-              >
-                <ButtonBase
-                  onClick={() => {
-                    onSeek(s.start_ms);
-                  }}
-                  aria-label={`Play from ${formatClock(s.start_ms)}`}
+        <>
+          {/* There's no manual review step, so every transcript carries this note. */}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            {tab === "english" ? "Transcribed and translated" : "Transcribed"} by machine, so it may
+            contain errors.
+            {anyCorrected ? " Lines marked “Corrected” were fixed by the archive team." : null}
+          </Typography>
+          <Stack component="ol" sx={{ listStyle: "none", p: 0, m: 0 }}>
+            {segments.map((s) => {
+              const highlighted =
+                highlightMs !== undefined && highlightMs >= s.start_ms && highlightMs < s.end_ms;
+              // content-visibility lets the browser skip laying out segments that are off screen.
+              return (
+                <Box
+                  component="li"
+                  key={s.seq}
+                  ref={highlighted ? scrollToHighlight : undefined}
+                  aria-current={highlighted ? "true" : undefined}
                   sx={{
-                    color: "primary.main",
-                    alignSelf: "start",
-                    fontVariantNumeric: "tabular-nums",
+                    display: "flex",
+                    gap: 2,
+                    py: 1.5,
+                    px: 1,
+                    mx: -1,
+                    borderRadius: 1,
+                    bgcolor: highlighted ? "rgba(150, 58, 53, 0.08)" : undefined,
+                    contentVisibility: "auto",
+                    containIntrinsicSize: "auto 3rem",
                   }}
                 >
-                  {formatClock(s.start_ms)}
-                </ButtonBase>
-                <Typography>
-                  {tab === "english" ? (s.english_text ?? s.original_text) : s.original_text}
-                </Typography>
-              </Box>
-            );
-          })}
-        </Stack>
+                  <ButtonBase
+                    onClick={() => {
+                      onSeek(s.start_ms);
+                    }}
+                    aria-label={`Play from ${formatClock(s.start_ms)}`}
+                    sx={{
+                      color: "primary.main",
+                      alignSelf: "start",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {formatClock(s.start_ms)}
+                  </ButtonBase>
+                  <Box>
+                    <Typography>
+                      {tab === "english" ? (s.english_text ?? s.original_text) : s.original_text}
+                    </Typography>
+                    {corrected(s) ? (
+                      <Typography variant="caption" color="text.secondary">
+                        Corrected
+                      </Typography>
+                    ) : null}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Stack>
+        </>
       )}
     </>
   );

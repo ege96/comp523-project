@@ -126,7 +126,7 @@ function Summary({ interview }: { interview: InterviewDetail }) {
         </Stack>
         <Typography variant="body2" color="text.secondary">
           {interview.visibility === "public"
-            ? "Visitors can find and play this interview. Until it's reviewed, they see the transcript labelled as in progress or machine-generated."
+            ? "Visitors can find and play this interview. They see the transcript labelled as machine-generated, with your corrections marked."
             : "Only admins can see this interview."}{" "}
           <TextLink to="/interviews/$interviewId" params={{ interviewId: interview.id }}>
             Open in the archive viewer

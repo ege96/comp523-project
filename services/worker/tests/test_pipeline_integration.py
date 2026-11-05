@@ -129,7 +129,7 @@ def test_a_recording_becomes_segments_translations_embeddings_and_playback(
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.status_detail, interview.duration_ms) == (
-            "needs_review", None, 130_000,
+            "done", None, 130_000,
         )  # fmt: skip
         assert (interview.language_detected, interview.language_detected_confidence) == ("ne", 1)
         assert (interview.translation_status, interview.transcribed_by) == (
@@ -218,7 +218,7 @@ def test_a_translator_outage_is_retried(
     assert drain(runner) == 2  # translate, index
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "done")
+        assert (interview.status, interview.translation_status) == ("done", "done")
 
 
 def test_a_permanent_translation_failure_still_indexes_the_original(
@@ -230,7 +230,7 @@ def test_a_permanent_translation_failure_still_indexes_the_original(
     assert drain(runner) == 4
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "failed")
+        assert (interview.status, interview.translation_status) == ("done", "failed")
         assert interview.status_detail == "Translation failed: translator down"
         assert set(session.scalars(select(ChunkEmbeddingRow.representation))) == {"original"}
 
@@ -456,7 +456,7 @@ def test_a_job_whose_worker_vanished_is_taken_over_then_given_up(
     assert drain(runner) == 2  # the stale playback job, then index
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "failed")
+        assert (interview.status, interview.translation_status) == ("done", "failed")
         assert job(session, "translate").state == "failed"
 
 

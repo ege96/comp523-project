@@ -398,7 +398,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "processing" | "needs_review" | "reviewed" | "failed";
+            status: "processing" | "done" | "failed";
             /**
              * Translation Status
              * @enum {string}
@@ -457,7 +457,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "processing" | "needs_review" | "reviewed" | "failed";
+            status: "processing" | "done" | "failed";
             /**
              * Translation Status
              * @enum {string}
@@ -653,7 +653,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
-                status?: ("processing" | "needs_review" | "reviewed" | "failed") | null;
+                status?: ("processing" | "done" | "failed") | null;
             };
             header?: never;
             path?: never;

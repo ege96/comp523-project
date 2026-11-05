@@ -405,8 +405,7 @@ def index(
             )
         heartbeat()
 
-    if interview.status != "reviewed":
-        interview.status = "needs_review"
+    interview.status = "done"
     if interview.translation_status != "failed":
         interview.status_detail = None
 

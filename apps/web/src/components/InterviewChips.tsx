@@ -4,7 +4,7 @@ import Stack from "@mui/material/Stack";
 import type { InterviewSummary } from "../api/schemas";
 import { transcriptLabel } from "../format";
 
-/** Private (admins only ever see it) and how far along the transcript is (D-008). */
+/** Private (admins only ever see it), and whether the transcript is still being made. */
 export function InterviewChips({
   interview,
 }: {

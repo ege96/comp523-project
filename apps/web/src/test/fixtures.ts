@@ -8,7 +8,7 @@ export const interviewSummary = {
   recorded_on: "2001-05-01",
   recorded_on_precision: "month",
   visibility: "public",
-  status: "needs_review",
+  status: "done",
   translation_status: "pending",
   created_at: "2026-10-14T00:00:00Z",
 } as const;

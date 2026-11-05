@@ -17,7 +17,7 @@ const InterviewSummary = z.object({
   recorded_on: z.iso.date().nullable(),
   recorded_on_precision: z.enum(["year", "month", "day"]).nullable(),
   visibility: z.enum(["public", "private"]),
-  status: z.enum(["processing", "needs_review", "reviewed", "failed"]),
+  status: z.enum(["processing", "done", "failed"]),
   translation_status: z.enum(["not_needed", "pending", "done", "failed"]),
   created_at: z.string(),
 }) satisfies z.ZodType<Schemas["InterviewSummary"]>;
