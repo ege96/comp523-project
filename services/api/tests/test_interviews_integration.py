@@ -5,7 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from swayambhu_core.models import (
     IntervieweeRow,
@@ -130,18 +130,61 @@ def test_media_links_stream_with_ranges_and_refuse_tampering(
     assert (res.status_code, res.content) == (206, PLAYBACK[10:20])
 
     media_id = int(urlsplit(url).path.rsplit("/", 1)[1])
-    expires, sig = (v[0] for v in parse_qs(urlsplit(url).query).values())
+    query = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
+    expires, sig = query["expires"], query["sig"]
+    assert query["scope"] == "public"
 
-    def status(media: int, exp: int | str, signature: str | None = None) -> int:
-        signature = signature or media_urls._signature(settings, media, int(exp))
-        return anonymous.get(f"/api/media/{media}?expires={exp}&sig={signature}").status_code
+    def status(
+        media: int, exp: int | str, signature: str | None = None, scope: str = "public"
+    ) -> int:
+        signature = signature or media_urls._signature(settings, media, int(exp), scope)  # type: ignore[arg-type]
+        path = f"/api/media/{media}?expires={exp}&scope={scope}&sig={signature}"
+        return anonymous.get(path).status_code
 
     assert status(media_id + 1, expires, sig) == 403  # another file
     assert status(media_id, int(expires) + 3600, sig) == 403  # a later expiry
+    assert status(media_id, expires, sig, scope="admin") == 403  # an admin's link
     assert status(media_id, expires, "0" * 64) == 403
-    assert status(media_id, media_urls.signed_url(settings, media_id, now=0)[1]) == 403  # expired
+    expired = media_urls.signed_url(settings, media_id, "public", now=0)[1]
+    assert status(media_id, expired) == 403
     assert status(media_id + 10**6, expires) == 404  # no such media
     assert anonymous.get(f"/api/media/{media_id}").status_code == 422
     for path in settings.media_root.rglob("*.m4a"):
         path.unlink()
     assert anonymous.get(url).status_code == 404  # file gone from the volume
+
+
+def test_hiding_an_interview_stops_visitor_media_links_at_once(
+    client: TestClient, interviews: dict[str, InterviewRow], db_session: Session
+) -> None:
+    path = f"/api/interviews/{interviews['public'].id}"
+    visitor_url = as_viewer(client).get(path).json()["media"]["url"]
+    admin_url = as_viewer(client, ADMIN).get(path).json()["media"]["url"]
+    assert "scope=admin" in admin_url
+
+    interviews["public"].visibility = "private"
+    db_session.commit()
+    anonymous = as_viewer(client)
+    assert anonymous.get(visitor_url).status_code == 404  # same answer as no such media
+    assert anonymous.get(admin_url).status_code == 200  # admins can play Private interviews
+
+
+def test_a_visitor_link_to_a_private_interviews_media_is_refused(
+    client: TestClient, interviews: dict[str, InterviewRow], db_session: Session, settings: Settings
+) -> None:
+    """Even a correctly signed visitor link can't reach a Private interview's media."""
+    media_id = db_session.scalar(
+        select(MediaFileRow.id).where(MediaFileRow.interview_id == interviews["private"].id)
+    )
+    assert media_id is not None
+    url, _ = media_urls.signed_url(settings, media_id, "public")
+    assert as_viewer(client).get(url).status_code == 404
+
+
+def test_status_filter_never_shows_visitors_private_interviews(
+    client: TestClient, interviews: dict[str, InterviewRow]
+) -> None:
+    for state in ("processing", "done", "failed"):
+        body = as_viewer(client).get(f"/api/interviews?status={state}").json()
+        assert str(interviews["private"].id) not in {i["id"] for i in body["items"]}
+        assert body["total"] <= 1
