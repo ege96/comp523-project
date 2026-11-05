@@ -231,7 +231,10 @@ def test_a_permanent_translation_failure_still_indexes_the_original(
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.translation_status) == ("done", "failed")
-        assert interview.status_detail == "Translation failed: translator down"
+        detail = interview.status_detail or ""
+        assert detail.startswith("English translation failed. The translation service couldn't")
+        assert "translator down" not in detail  # the raw error stays on the job
+        assert job(session, "translate").last_error == "translator down"
         assert set(session.scalars(select(ChunkEmbeddingRow.representation))) == {"original"}
 
 
@@ -254,7 +257,7 @@ def test_edited_transcripts_are_not_replaced(
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
         assert interview.status == "failed"
-        assert "edited" in (interview.status_detail or "")
+        assert "Transcribe again" in (interview.status_detail or "")
         first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
         assert session.scalar(first) == "सच्याइएको"
 
@@ -452,7 +455,11 @@ def test_unreadable_media_fails_without_retrying(
 
     assert drain(runner) == 2  # transcribe and playback
     with new_session() as session:
-        assert session.get_one(InterviewRow, interview_id).status == "failed"
+        interview = session.get_one(InterviewRow, interview_id)
+        assert interview.status == "failed"
+        assert (interview.status_detail or "").startswith(
+            "Transcription failed. The recording couldn't be read."
+        )
         transcribe = job(session, "transcribe")
         assert (transcribe.state, transcribe.attempts) == ("failed", 1)
 

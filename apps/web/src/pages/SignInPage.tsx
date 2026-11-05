@@ -73,8 +73,8 @@ export function SignInPage() {
               </Alert>
             ) : state.emailVerified ? (
               <Alert severity="warning">
-                {state.email ?? "This account"} isn&apos;t an archive admin. Ask an existing admin
-                to add this email, then sign in again.
+                {state.email ?? "This account"} isn&apos;t an archive admin. Admins are added by the
+                archive&apos;s operator: ask them to add this email, then sign in again.
               </Alert>
             ) : (
               <Alert

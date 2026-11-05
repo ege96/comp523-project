@@ -94,6 +94,7 @@ describe("app shell and sign-in", () => {
     stubApi({ "/api/auth/me": { status: 403, body: { detail: "This account is not an admin" } } });
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText(/someone@example.org isn't an archive admin/)).toBeTruthy();
+    expect(screen.getByText(/added by the archive's operator/)).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Admin sign-in" })).toBeTruthy();
 
     // An unverified email can't claim an admin invite yet, so offer the verification link.

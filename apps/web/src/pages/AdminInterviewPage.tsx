@@ -210,7 +210,7 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
                       {job.attempts} of {job.max_attempts}
                     </TableCell>
                     <TableCell sx={{ overflowWrap: "anywhere", maxWidth: 360 }}>
-                      {job.last_error ?? "None"}
+                      {job.last_error === null ? "None" : <TechnicalDetail text={job.last_error} />}
                     </TableCell>
                     <TableCell>
                       {retryable.has(job) ? <RetryButton interview={interview} job={job} /> : null}
@@ -223,6 +223,32 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
         )}
       </Stack>
     </Paper>
+  );
+}
+
+/**
+ * A failure's raw text (often a provider's JSON), folded away: the plain message and what to
+ * do are in the status line above. Shown on request, for passing on to the operator.
+ */
+function TechnicalDetail({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return open ? (
+    <Typography
+      component="pre"
+      variant="caption"
+      sx={{ m: 0, whiteSpace: "pre-wrap", fontFamily: "monospace" }}
+    >
+      {text}
+    </Typography>
+  ) : (
+    <Button
+      size="small"
+      onClick={() => {
+        setOpen(true);
+      }}
+    >
+      Show technical details
+    </Button>
   );
 }
 
