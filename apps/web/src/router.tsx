@@ -18,6 +18,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 //                              search results (transcript moments)
 //   /interviews?page=          all interviews, newest first
 //   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
+//   /about                     About & Help: what the archive is, and an FAQ for visitors
 //   /signin                    admin sign-in
 //   /admin?status=&page=       upload, processing status and publishing (admins only)
 //   /admin/interviews/$interviewId
@@ -63,6 +64,12 @@ const interviewRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/InterviewPage"), "InterviewPage"),
 });
 
+const aboutRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "about",
+  component: lazyRouteComponent(() => import("./pages/AboutPage"), "AboutPage"),
+});
+
 const signInRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "signin",
@@ -97,6 +104,7 @@ const routeTree = rootRoute.addChildren([
   searchRoute,
   interviewsRoute,
   interviewRoute,
+  aboutRoute,
   signInRoute,
   adminRoute.addChildren([adminHomeRoute, adminInterviewRoute]),
 ]);
