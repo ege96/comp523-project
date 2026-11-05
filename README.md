@@ -80,6 +80,17 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 
 `EMBEDDING_PROVIDER=local` (Proposal) embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
 
+### Measuring search quality (Proposal)
+
+`python -m swayambhu_api.search_eval <set.json>` (in `services/api`) runs a labelled query set through keyword, semantic and hybrid search and prints Recall@5 and MRR per mode, overall and by query language and kind (`--k` changes the cut-off, `--json` prints every query). A set can carry its own interviews, which are chunked and embedded like the worker does, searched on their own and rolled back, so nothing is saved; otherwise its labels name existing interview ids and the whole archive is searched as an admin sees it. It uses the configured `EMBEDDING_*` settings and refuses `openai` without `--allow-paid`. `services/api/eval/search_synthetic.json` is a small **synthetic** set (made-up English and AI-written Nepali, no Nepal Bhasa) that only checks the harness: replace it with queries labelled against real or consented pilot transcripts before tuning anything.
+
+```bash
+cd services/api
+EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small \
+  EMBEDDING_QUERY_PREFIX="query: " EMBEDDING_PASSAGE_PREFIX="passage: " \
+  uv run python -m swayambhu_api.search_eval eval/search_synthetic.json
+```
+
 ## Sign-in and admins
 
 Public visitors don't sign in. Admins sign in with Firebase Authentication, and the web app sends the Firebase ID token as `Authorization: Bearer <token>`. The API checks the token's signature against Google's published keys and that it was issued for `FIREBASE_PROJECT_ID`. Firebase only says who someone is. Whether they are an admin is decided by the `admins` table in Postgres.

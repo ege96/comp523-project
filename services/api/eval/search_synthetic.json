@@ -1,0 +1,344 @@
+{
+  "synthetic": true,
+  "description": "Made-up interviews and queries for testing the evaluation harness. Not archive content and not real speech. The Nepali lines were written by an AI assistant and are not a verified translation. There is no Nepal Bhasa: add it only from a speaker or a consented recording. Replace with queries labelled against real (or consented pilot) transcripts before drawing conclusions.",
+  "interviews": [
+    {
+      "key": "circuit",
+      "title": "Walking the stupa circuit (synthetic)",
+      "language": "ne",
+      "lines": [
+        {
+          "start_s": 0,
+          "end_s": 15,
+          "text": "बिहान सबेरै हामी स्तूपको परिक्रमा गर्थ्यौं।",
+          "english": "Early in the morning we used to walk around the stupa."
+        },
+        {
+          "start_s": 15,
+          "end_s": 30,
+          "text": "बाटोमा धेरै बाँदरहरू हुन्थे, उनीहरूले खाना खोसेर लैजान्थे।",
+          "english": "There were many monkeys on the path, they would snatch food away."
+        },
+        {
+          "start_s": 30,
+          "end_s": 45,
+          "text": "मेरी हजुरआमाले माने घुमाउँदै मन्त्र जप्नुहुन्थ्यो।",
+          "english": "My grandmother would chant mantras while turning the prayer wheels."
+        },
+        {
+          "start_s": 45,
+          "end_s": 60,
+          "text": "हामी केटाकेटीहरू सिँढीहरू गन्दै माथि दौडन्थ्यौं।",
+          "english": "We children would run up counting the steps."
+        },
+        {
+          "start_s": 60,
+          "end_s": 75,
+          "text": "बर्खामा सिँढी चिप्लो हुन्थ्यो, त्यसैले बिस्तारै हिँड्नुपर्थ्यो।",
+          "english": "In the monsoon the steps were slippery, so we had to walk slowly."
+        },
+        {
+          "start_s": 75,
+          "end_s": 90,
+          "text": "पसलेहरूले धूप र बत्ती बेच्थे।",
+          "english": "Shopkeepers sold incense and lamps."
+        },
+        {
+          "start_s": 90,
+          "end_s": 105,
+          "text": "साँझ परेवाहरूलाई दाना खुवाउन मानिसहरू जम्मा हुन्थे।",
+          "english": "In the evening people gathered to feed grain to the pigeons."
+        },
+        {
+          "start_s": 105,
+          "end_s": 120,
+          "text": "त्यो दृश्य अहिले पनि मेरो आँखामा छ।",
+          "english": "That scene is still in my eyes."
+        }
+      ]
+    },
+    {
+      "key": "repairs",
+      "title": "Repairs after the earthquake (synthetic)",
+      "language": "ne",
+      "lines": [
+        {
+          "start_s": 0,
+          "end_s": 15,
+          "text": "भूकम्पपछि हर्मिकाको माथिल्लो भाग चर्किएको थियो।",
+          "english": "After the earthquake the upper part of the harmika had cracked."
+        },
+        {
+          "start_s": 15,
+          "end_s": 30,
+          "text": "गुठीका मानिसहरूले मर्मतका लागि चन्दा उठाए।",
+          "english": "People from the guthi collected donations for the repairs."
+        },
+        {
+          "start_s": 30,
+          "end_s": 45,
+          "text": "कालिगढहरूले नयाँ सुनको जलप चढाए।",
+          "english": "Craftsmen applied a new gold plating."
+        },
+        {
+          "start_s": 45,
+          "end_s": 60,
+          "text": "काम सकिन झन्डै एक वर्ष लाग्यो।",
+          "english": "It took almost a year to finish the work."
+        },
+        {
+          "start_s": 60,
+          "end_s": 75,
+          "text": "पुनः अभिषेकको दिन ठूलो पूजा भयो।",
+          "english": "On the day of reconsecration there was a big puja."
+        },
+        {
+          "start_s": 75,
+          "end_s": 90,
+          "text": "टाढा टाढाबाट भक्तहरू आएका थिए।",
+          "english": "Devotees had come from far away."
+        },
+        {
+          "start_s": 90,
+          "end_s": 105,
+          "text": "त्यस दिन आकाशमा इन्द्रेणी देखियो।"
+        },
+        {
+          "start_s": 105,
+          "end_s": 120,
+          "text": "सबैले त्यसलाई शुभ सङ्केत माने।",
+          "english": "Everyone took it as an auspicious sign."
+        }
+      ]
+    },
+    {
+      "key": "festival",
+      "title": "Festival memories (synthetic)",
+      "language": "en",
+      "lines": [
+        {
+          "start_s": 0,
+          "end_s": 15,
+          "text": "During Buddha Jayanti the whole hill was covered in prayer flags."
+        },
+        {
+          "start_s": 15,
+          "end_s": 30,
+          "text": "My father hung new flags every year with our neighbours."
+        },
+        {
+          "start_s": 30,
+          "end_s": 45,
+          "text": "There was music from the monastery all through the night."
+        },
+        {
+          "start_s": 45,
+          "end_s": 60,
+          "text": "We ate beaten rice and drank tea at a small stall."
+        },
+        {
+          "start_s": 60,
+          "end_s": 75,
+          "text": "Later I moved abroad for work and missed the festival for ten years."
+        },
+        {
+          "start_s": 75,
+          "end_s": 90,
+          "text": "When I came back the stalls had become proper shops."
+        },
+        {
+          "start_s": 90,
+          "end_s": 105,
+          "text": "Tourists photographed the eyes painted on the stupa."
+        },
+        {
+          "start_s": 105,
+          "end_s": 120,
+          "text": "But for us it was always a place of worship, not a sight."
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "q": "monkeys snatching food",
+      "language": "en",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 20
+        }
+      ]
+    },
+    {
+      "q": "prayer flags",
+      "language": "en",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "festival",
+          "at_s": 5
+        }
+      ]
+    },
+    {
+      "q": "gold plating",
+      "language": "en",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "repairs",
+          "at_s": 35
+        }
+      ]
+    },
+    {
+      "q": "feeding the pigeons",
+      "language": "en",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 95
+        }
+      ]
+    },
+    {
+      "q": "steps",
+      "language": "en",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 50
+        },
+        {
+          "interview": "circuit",
+          "at_s": 65
+        }
+      ]
+    },
+    {
+      "q": "animals stealing snacks from visitors",
+      "language": "en",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 20
+        }
+      ]
+    },
+    {
+      "q": "fixing damage after the quake",
+      "language": "en",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "repairs",
+          "at_s": 5
+        }
+      ]
+    },
+    {
+      "q": "living overseas and missing celebrations",
+      "language": "en",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "festival",
+          "at_s": 65
+        }
+      ]
+    },
+    {
+      "q": "rain made the stairs dangerous",
+      "language": "en",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 65
+        }
+      ]
+    },
+    {
+      "q": "tourists taking pictures",
+      "language": "en",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "festival",
+          "at_s": 95
+        }
+      ]
+    },
+    {
+      "q": "चन्दा",
+      "language": "ne",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "repairs",
+          "at_s": 20
+        }
+      ]
+    },
+    {
+      "q": "मन्त्र",
+      "language": "ne",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 35
+        }
+      ]
+    },
+    {
+      "q": "इन्द्रेणी",
+      "language": "ne",
+      "kind": "keyword",
+      "expect": [
+        {
+          "interview": "repairs",
+          "at_s": 95
+        }
+      ]
+    },
+    {
+      "q": "परेवा",
+      "language": "ne",
+      "kind": "inflected",
+      "expect": [
+        {
+          "interview": "circuit",
+          "at_s": 95
+        }
+      ]
+    },
+    {
+      "q": "मन्दिरको मर्मत",
+      "language": "ne",
+      "kind": "inflected",
+      "expect": [
+        {
+          "interview": "repairs",
+          "at_s": 20
+        }
+      ]
+    },
+    {
+      "q": "चाडपर्वमा झण्डा",
+      "language": "ne",
+      "kind": "paraphrase",
+      "expect": [
+        {
+          "interview": "festival",
+          "at_s": 5
+        }
+      ]
+    }
+  ]
+}

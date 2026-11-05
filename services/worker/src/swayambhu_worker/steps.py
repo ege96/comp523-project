@@ -20,6 +20,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs
+from swayambhu_core.chunking import Timed, chunk_segments, chunk_texts
 from swayambhu_core.models import (
     CHUNKER,
     ChunkEmbeddingRow,
@@ -35,7 +36,6 @@ from swayambhu_core.text import english_is_stale, translation_fingerprint
 from swayambhu_providers import AudioClip, Embedder, Transcriber, Translator
 
 from swayambhu_worker import audio
-from swayambhu_worker.chunking import Timed, chunk_segments
 
 # Providers report languages as ISO 639-1 ("ne"), ISO 639-3 ("nep") or English names.
 _LANGUAGE_ALIASES = {
@@ -192,10 +192,6 @@ def transcribe(
     jobs.enqueue(session, "translate", interview_id)
 
 
-def _source_language(segment: SegmentRow, interview: InterviewRow) -> str | None:
-    return segment.language or interview.language_confirmed or interview.language_detected
-
-
 def _translate_lines(
     session: Session,
     interview: InterviewRow,
@@ -288,22 +284,6 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
-def _chunk_texts(members: list[SegmentRow], interview: InterviewRow) -> dict[str, str]:
-    """The text each representation embeds for one chunk. English speech counts as English;
-    "original" is left out when the chunk is all English."""
-    english_speech = [_source_language(s, interview) == "en" for s in members]
-    english = " ".join(
-        s.original_text if is_en else (s.english_text or "")
-        for s, is_en in zip(members, english_speech, strict=True)
-    ).strip()
-    texts = {}
-    if english:
-        texts["english"] = english
-    if not all(english_speech):
-        texts["original"] = " ".join(s.original_text for s in members)
-    return texts
-
-
 def index(
     session: Session,
     interview_id: uuid.UUID,
@@ -347,7 +327,7 @@ def index(
             )
             session.add(row)
         members = [by_seq[seq] for seq in range(chunk.first_seq, chunk.last_seq + 1)]
-        planned.append((row, _chunk_texts(members, interview)))
+        planned.append((row, chunk_texts(members, interview)))
     if existing:  # chunks that no longer match the segments, with all their embeddings
         session.execute(
             delete(SearchChunkRow).where(SearchChunkRow.id.in_(c.id for c in existing.values()))

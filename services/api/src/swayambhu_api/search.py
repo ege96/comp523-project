@@ -193,7 +193,7 @@ def _filters(
     return where
 
 
-def _keyword_hits(
+def keyword_hits(
     session: DbSession,
     viewer: CurrentViewer,
     q: str,
@@ -236,7 +236,7 @@ def _keyword_hits(
     return [Hit(i, c, s) for i, c, s in rows]
 
 
-def _semantic_hits(
+def semantic_hits(
     session: DbSession,
     viewer: CurrentViewer,
     embedder: Embedder | None,
@@ -331,10 +331,10 @@ def search(
     SEARCH_CANDIDATES hits from each search."""
     where = _filters(language, interviewee, recorded_from, recorded_to, undated)
     n = settings.search_candidates
-    semantic = _semantic_hits(session, viewer, embedder, q, where, n)
+    semantic = semantic_hits(session, viewer, embedder, q, where, n)
     mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
     ranked = fuse(
-        {"keyword": _keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
+        {"keyword": keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
         settings.search_rrf_k,
     )
     page = ranked[offset : offset + limit]

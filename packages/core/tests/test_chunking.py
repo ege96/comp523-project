@@ -1,4 +1,4 @@
-from swayambhu_worker.chunking import Chunk, Timed, chunk_segments
+from swayambhu_core.chunking import Chunk, Timed, chunk_segments
 
 
 def segments(*bounds: tuple[int, int]) -> list[Timed]:
