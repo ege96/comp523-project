@@ -6,9 +6,12 @@ import {
   AdminSegmentSchema,
   InterviewListSchema,
   JobListSchema,
+  ReplaceResultSchema,
   type AdminSegment,
+  type FindReplace,
   type InterviewSummary,
   type InterviewUpdate,
+  type ReplaceResult,
   type SegmentEdit,
 } from "../api/schemas";
 import { API_BASE_URL } from "../config";
@@ -128,6 +131,52 @@ export function useEditSegment(interviewId: string) {
       );
     },
     // The public transcript, the job list and search results change too.
+    onSettled: () =>
+      Promise.all(
+        ["interviews", "search"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      ),
+  });
+}
+
+async function postReplace(
+  token: string | null,
+  id: string,
+  body: FindReplace,
+): Promise<ReplaceResult> {
+  const url = `${API_BASE_URL}/api/interviews/${encodeURIComponent(id)}/transcript/replace`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new ApiError(res.status, url);
+  const parsed = ReplaceResultSchema.safeParse(await res.json().catch(() => undefined));
+  if (!parsed.success) throw new ApiError(res.status, url);
+  return parsed.data;
+}
+
+/**
+ * Replace a word or phrase in every line of one interview (say, a name the speech recognition
+ * always gets wrong). Each changed line becomes an edit, so "Use machine text" still undoes it.
+ */
+export function useReplaceText(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: FindReplace) =>
+      postReplace(await viewer.getToken(), interviewId, body),
+    onSuccess: ({ items }) => {
+      const changed = new Map(items.map((line) => [line.seq, line]));
+      queryClient.setQueryData(
+        adminQueries.transcript(viewer, interviewId).queryKey,
+        (old) => old && { items: old.items.map((line) => changed.get(line.seq) ?? line) },
+      );
+    },
     onSettled: () =>
       Promise.all(
         ["interviews", "search"].map((prefix) =>

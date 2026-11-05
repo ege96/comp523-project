@@ -186,6 +186,26 @@ export interface paths {
         patch: operations["edit_segment_api_interviews__interview_id__segments__seq__patch"];
         trace?: never;
     };
+    "/api/interviews/{interview_id}/transcript/replace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace In Transcript
+         * @description Replace a word or phrase in every line of one interview, kept apart from machine text.
+         */
+        post: operations["replace_in_transcript_api_interviews__interview_id__transcript_replace_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/uploads/{uuid}": {
         parameters: {
             query?: never;
@@ -341,6 +361,26 @@ export interface components {
         AdminSegmentList: {
             /** Items */
             items: components["schemas"]["AdminSegment"][];
+        };
+        /**
+         * FindReplace
+         * @description Replace every occurrence of `find` in one text of every line. Plain text, not a pattern.
+         */
+        FindReplace: {
+            /** Find */
+            find: string;
+            /** Replace */
+            replace: string;
+            /**
+             * Field
+             * @enum {string}
+             */
+            field: "original" | "english";
+            /**
+             * Match Case
+             * @default false
+             */
+            match_case: boolean;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -538,6 +578,13 @@ export interface components {
             database: boolean;
             /** Pgvector */
             pgvector: boolean;
+        };
+        /** ReplaceResult */
+        ReplaceResult: {
+            /** Items */
+            items: components["schemas"]["AdminSegment"][];
+            /** Skipped */
+            skipped: number;
         };
         /**
          * SearchFilters
@@ -932,6 +979,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSegment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_in_transcript_api_interviews__interview_id__transcript_replace_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FindReplace"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplaceResult"];
                 };
             };
             /** @description Validation Error */
