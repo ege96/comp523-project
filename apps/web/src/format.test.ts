@@ -17,12 +17,9 @@ it("formats clock times and dates only as precisely as they are known", () => {
   expect(formatRecordedOn({ recorded_on: null, recorded_on_precision: null })).toBeNull();
 });
 
-it("labels every transcript that isn't reviewed yet (D-008)", () => {
-  expect(
-    (["processing", "needs_review", "failed", "reviewed"] as const).map(transcriptLabel),
-  ).toEqual([
+it("labels cards only while the transcript isn't there yet", () => {
+  expect((["processing", "failed", "done"] as const).map(transcriptLabel)).toEqual([
     "Transcript in progress",
-    "Machine-generated transcript",
     "Transcript unavailable",
     null,
   ]);

@@ -34,7 +34,7 @@ from swayambhu_api.visibility import visible_to
 router = APIRouter()
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
-Status = Literal["processing", "needs_review", "reviewed", "failed"]
+Status = Literal["processing", "done", "failed"]
 TranslationStatus = Literal["not_needed", "pending", "done", "failed"]
 
 

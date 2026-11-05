@@ -4,18 +4,16 @@ import type { InterviewSummary, Job } from "../api/schemas";
 
 type Status = InterviewSummary["status"];
 
-/** Admin-facing names for processing status (D-008). Visitors see `transcriptLabel` instead. */
+/** Admin-facing names for processing status (no review step; amends D-008). Visitors see `transcriptLabel` instead. */
 export const STATUS_LABELS = {
   processing: "Processing",
-  needs_review: "Needs review",
-  reviewed: "Reviewed",
+  done: "Done",
   failed: "Failed",
 } as const satisfies Record<Status, string>;
 
 export const STATUS_COLORS = {
   processing: "default",
-  needs_review: "warning",
-  reviewed: "success",
+  done: "success",
   failed: "error",
 } as const satisfies Record<Status, ChipProps["color"]>;
 
@@ -31,6 +29,7 @@ const JOB_LABELS: Record<string, string> = {
   translate: "English translation",
   index: "Search indexing",
   playback: "Playback copy",
+  retranslate: "Updating English after edits",
 };
 
 export function jobLabel(job: Pick<Job, "kind">): string {

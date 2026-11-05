@@ -80,10 +80,7 @@ const adminHomeRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: "/",
   validateSearch: z.object({
-    status: z
-      .enum(["processing", "needs_review", "reviewed", "failed"])
-      .optional()
-      .catch(undefined),
+    status: z.enum(["processing", "done", "failed"]).optional().catch(undefined),
     page: z.number().int().min(2).optional().catch(undefined),
   }),
   component: lazyRouteComponent(() => import("./pages/AdminPage"), "AdminPage"),

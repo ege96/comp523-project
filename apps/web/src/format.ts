@@ -27,16 +27,17 @@ export function formatRecordedOn(
   });
 }
 
-/** The label visitors see for a transcript that isn't reviewed yet (D-008), or null. */
+/**
+ * The label visitors see on a card for a transcript that isn't there yet, or null. A finished
+ * transcript says it's machine-generated in the viewer instead, next to the text.
+ */
 export function transcriptLabel(status: InterviewSummary["status"]): string | null {
   switch (status) {
     case "processing":
       return "Transcript in progress";
-    case "needs_review":
-      return "Machine-generated transcript";
     case "failed":
       return "Transcript unavailable";
-    case "reviewed":
+    case "done":
       return null;
   }
 }

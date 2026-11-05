@@ -20,7 +20,7 @@ import { STATUS_COLORS, STATUS_LABELS } from "./status";
 import { VisibilitySwitch } from "./VisibilitySwitch";
 
 const PAGE_SIZE = 20;
-const FILTERS = ["processing", "needs_review", "failed", "reviewed"] as const satisfies Status[];
+const FILTERS = ["processing", "done", "failed"] as const satisfies Status[];
 
 /**
  * Every interview, Private included, with its processing status and a publish toggle.

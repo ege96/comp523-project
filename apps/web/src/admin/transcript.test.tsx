@@ -30,6 +30,8 @@ const nepali: AdminSegment = {
   english_machine: "Machine english A",
   english_edited: null,
   edited_at: null,
+  english_stale: false,
+  english_edit_stale: false,
   edited_by: null,
 };
 const english: AdminSegment = {
@@ -164,6 +166,61 @@ describe("transcript editor", () => {
   });
 });
 
+describe("out-of-date English", () => {
+  it("counts stale lines, flags English edits to check, and updates on request", async () => {
+    const stale = { ...nepali, original_edited: "Edited original A", english_stale: true };
+    const toCheck = {
+      ...untranslated,
+      english_machine: "Machine english C",
+      english_edited: "Human english C",
+      english_stale: true,
+      english_edit_stale: true,
+    };
+    const routes = {
+      ...api([stale, english, toCheck], { body: stale }),
+      [`${base}/retranslate`]: { status: 202, body: { stale_lines: 2 } },
+      [`${base}/segments/2`]: { body: { ...toCheck, english_edit_stale: false } },
+    };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    expect(
+      await screen.findByText(/The English of 2 lines are out of date/, {}, SLOW),
+    ).toBeTruthy();
+    expect(screen.getByText("English update pending")).toBeTruthy();
+    expect(screen.getByText(/The original changed after this English was edited/)).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Update English now" }));
+    expect(await screen.findByText(/Updating the English now/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Update English now" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST");
+    expect(posts.map(([url]) => url)).toEqual([`${base}/retranslate`]);
+
+    // Saving a flagged English edit unchanged confirms it was checked.
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 1:10" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(patches()).toEqual([
+      { url: `${base}/segments/2`, body: { english_text: "Human english C" } },
+    ]);
+  });
+
+  it("explains when the update can't start", async () => {
+    const stale = { ...nepali, original_edited: "Edited original A", english_stale: true };
+    stubApi({
+      ...api([stale], {}),
+      [`${base}/retranslate`]: { status: 409, body: { detail: "transcribing" } },
+    });
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByText(/The English of 1 line is out of date/, {}, SLOW)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Update English now" }));
+    expect(await screen.findByText(/This interview is being transcribed again/)).toBeTruthy();
+  });
+});
+
 describe("buildEdit", () => {
   it("sends only what changed, and null when it's back to the machine text", () => {
     const edited = { ...nepali, original_edited: "X", english_edited: "Y" };
@@ -178,6 +235,9 @@ describe("buildEdit", () => {
     });
     expect(buildEdit(edited, { original: "X", english: "Machine english A" })).toEqual({
       english_text: null,
+    });
+    expect(buildEdit(edited, { original: "X", english: "Y" }, { confirmEnglish: true })).toEqual({
+      english_text: "Y",
     });
   });
 });
