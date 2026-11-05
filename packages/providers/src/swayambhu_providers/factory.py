@@ -1,5 +1,7 @@
 """Builds the configured providers. Swapping a provider is a settings change, not a code change."""
 
+import logging
+
 import httpx2 as httpx
 
 from swayambhu_providers import Embedder, Transcriber, Translator
@@ -12,6 +14,8 @@ from swayambhu_providers.openai_provider import (
     openai_client,
 )
 from swayambhu_providers.settings import ProviderSettings
+
+log = logging.getLogger(__name__)
 
 
 class ProviderConfigError(ValueError):
@@ -77,6 +81,16 @@ def _build_local_embedder(settings: ProviderSettings, model: str) -> Embedder:
     if settings.embedding_dimensions is not None:
         raise ProviderConfigError(
             "EMBEDDING_DIMENSIONS must be empty for the local provider: the model fixes it"
+        )
+    if "e5" in model.lower() and not (
+        settings.embedding_query_prefix and settings.embedding_passage_prefix
+    ):
+        # E5 models are trained with "query: " / "passage: " in front; without them search
+        # still works but matches worse, so nothing fails to point at the cause.
+        log.warning(
+            "EMBEDDING_QUERY_PREFIX and EMBEDDING_PASSAGE_PREFIX look unset for %s; "
+            'E5 models expect "query: " and "passage: "',
+            model,
         )
     model_dir = settings.local_model_dir / model
     if find_model_file(model_dir) is None or not (model_dir / "tokenizer.json").is_file():

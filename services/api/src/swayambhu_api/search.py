@@ -3,7 +3,10 @@
 Two searches run on every query and are merged with reciprocal rank fusion (Q-14):
 - keyword: Postgres full-text search over display segments (P-016), with English stemming on
   English text and the `simple` configuration on original text, so a Devanagari query
-  matches Nepali or Nepal Bhasa words directly;
+  matches Nepali or Nepal Bhasa words directly. Both languages attach postpositions and
+  endings to the word (मन्दिरमा, "in the temple"), and there is no stemmer for either, so a
+  non-Latin query word of 3+ characters also matches words that start with it (Proposal);
+  exact words rank higher. Queries are folded like the stored text (`FOLD_SQL`);
 - semantic: the query's embedding against the stored chunk embeddings of the configured model
   (both the original and English representations), by exact cosine distance (P-015).
 
@@ -16,11 +19,12 @@ Every query joins `interviews` and filters with `visible_to`, like the rest of t
 """
 
 import logging
+import unicodedata
 import uuid
 from dataclasses import dataclass
 from datetime import date
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -28,6 +32,7 @@ from sqlalchemy import (
     TIMESTAMP,
     ColumnElement,
     Date,
+    Text,
     and_,
     case,
     cast,
@@ -38,6 +43,7 @@ from sqlalchemy import (
     or_,
     select,
 )
+from sqlalchemy.dialects.postgresql import TSQUERY
 from swayambhu_core.models import (
     CHUNKER,
     ChunkEmbeddingRow,
@@ -71,6 +77,25 @@ EXCERPT_MAX_SEGMENTS = 10
 
 _ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
 _SIMPLE: ColumnElement[str] = literal_column("'simple'::regconfig")
+
+# The same folding as FOLD_SQL, which the stored original text gets.
+_FOLD = str.maketrans({**{0x0966 + d: str(d) for d in range(10)}, 0x200C: None, 0x200D: None})
+# A quoted lexeme in a tsquery's text form with 3+ characters, one of them not ASCII. Lexemes
+# never contain quotes (the parser splits on them), and operators between them are ASCII.
+_PREFIXABLE = r"'(?=[^']{3,}')([^']*[^\x01-\x7f][^']*)'"
+
+
+def fold_query(q: str) -> str:
+    """The query as the stored original text is indexed: NFC, ASCII digits, no zero-width
+    (non-)joiners. Keep in step with FOLD_SQL."""
+    return unicodedata.normalize("NFC", q).translate(_FOLD)
+
+
+def _prefix_tsquery(query: ColumnElement[Any]) -> ColumnElement[Any]:
+    """`query` with each non-Latin lexeme of 3+ characters turned into a prefix (`'x':*`).
+    English already has a stemmer, so Latin-script words stay exact."""
+    text = func.regexp_replace(cast(query, Text), _PREFIXABLE, r"'\1':*", "g")
+    return cast(text, TSQUERY)
 
 
 @lru_cache
@@ -200,14 +225,18 @@ def _keyword_hits(
     where: list[ColumnElement[bool]],
     candidates: int,
 ) -> list[Hit]:
+    q = fold_query(q)
     english_q = func.websearch_to_tsquery(_ENGLISH, q)
     simple_q = func.websearch_to_tsquery(_SIMPLE, q)
+    prefix_q = _prefix_tsquery(simple_q)
     # English speech has no english_text, and neither has text whose translation failed.
     untranslated = func.to_tsvector(_ENGLISH, SegmentRow.original_text)
     no_english = SegmentRow.english_text.is_(None)
     rank = func.greatest(
         func.ts_rank_cd(SegmentRow.english_tsv, english_q),
-        func.ts_rank_cd(SegmentRow.original_tsv, simple_q),
+        # A line with the exact words scores on both, so it ranks above a prefix-only match.
+        func.ts_rank_cd(SegmentRow.original_tsv, simple_q)
+        + func.ts_rank_cd(SegmentRow.original_tsv, prefix_q),
         case((no_english, func.ts_rank_cd(untranslated, english_q))),
     )
     rows = session.execute(
@@ -226,7 +255,7 @@ def _keyword_hits(
             *where,
             or_(
                 SegmentRow.english_tsv.op("@@")(english_q),
-                SegmentRow.original_tsv.op("@@")(simple_q),
+                SegmentRow.original_tsv.op("@@")(prefix_q),
                 and_(no_english, untranslated.op("@@")(english_q)),
             ),
         )

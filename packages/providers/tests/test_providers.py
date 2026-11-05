@@ -318,3 +318,12 @@ def test_prepare_model_moves_weights_out_and_keeps_vectors(tmp_path: Path) -> No
     assert path.stat().st_size < wide.nbytes
     [after] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
     assert after == pytest.approx(before)
+
+
+def test_local_e5_without_prefixes_warns(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    settings = ProviderSettings(
+        embedding_provider="local", embedding_model="org/my-e5-small", local_model_dir=tmp_path
+    )
+    with pytest.raises(ProviderConfigError):
+        build_embedder(settings)  # the model isn't there, but the warning comes first
+    assert "EMBEDDING_QUERY_PREFIX" in caplog.text

@@ -173,3 +173,41 @@ def test_filter_choices_only_come_from_visible_interviews(
     assert [lang["code"] for lang in body["languages"]] == ["en", "ne"]
     names = as_viewer(client, ADMIN).get("/api/search/filters").json()["interviewees"]
     assert [p["name"] for p in names] == ["Hidden", "Maya"]
+
+
+def test_nepali_queries_find_words_with_endings_and_folded_spellings(
+    client: TestClient, db_session: Session, archive: dict[str, uuid.UUID]
+) -> None:
+    """Made-up lines, not real transcript text. Nepal Bhasa goes through the same matching;
+    this only checks it is found, not how well it ranks."""
+    db_session.add_all(
+        SegmentRow(
+            interview_id=archive["public"], seq=seq, start_ms=start, end_ms=start + 5000,
+            language=lang, original_machine=text,
+        )
+        for seq, start, lang, text in (
+            (10, 100_000, "ne", "हामी बिहान मन्दिरमा गयौं"),  # temple + "in"
+            (11, 105_000, "ne", "२०७२ सालको भूकम्प"),
+            (12, 110_000, "ne", "मन्दिर पुरानो छ"),
+            (13, 115_000, "new", "थ्व चैत्य"),
+        )
+    )  # fmt: skip
+    db_session.add(SegmentRow(
+        interview_id=archive["private"], seq=10, start_ms=100_000, end_ms=105_000,
+        language="ne", original_machine="मन्दिरमा",
+    ))  # fmt: skip
+    db_session.commit()
+    visitor = as_viewer(client)
+
+    def starts(query: str) -> list[int]:
+        return [f[1] for f in moments(visitor, query) if f[0] == "public" and "keyword" in f[3]]
+
+    # The bare word finds the word with a postposition; the exact word ranks first.
+    assert starts("मन्दिर")[:2] == [110_000, 100_000]
+    assert "private" not in {f[0] for f in moments(visitor, "मन्दिर")}
+    # Devanagari and ASCII digits, and a zero-width joiner in the query, match the same text.
+    assert 105_000 in starts("2072")
+    assert 105_000 in starts("भू‍कम्प")
+    assert 115_000 in starts("चैत्य")
+    # Short words stay exact: "म" (I) must not match every word that starts with म.
+    assert 100_000 not in starts("म")

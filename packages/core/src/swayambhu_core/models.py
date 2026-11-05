@@ -31,6 +31,16 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+# Keyword search folds spellings that mean the same before matching original text: Unicode
+# NFC, Devanagari digits to ASCII (२०७२ = 2072), and zero-width (non-)joiners, which only
+# change how Devanagari conjuncts are drawn. `swayambhu_api.search.fold_query` is the same
+# for queries; change both together, with a migration.
+FOLD_SQL = (
+    "translate(normalize({}, NFC), "
+    "U&'\\0966\\0967\\0968\\0969\\096A\\096B\\096C\\096D\\096E\\096F\\200C\\200D', "
+    "'0123456789')"
+)
+
 # Postgres's own default names, so constraints created by raw SQL before the ORM keep their names.
 NAMING_CONVENTION = {
     "pk": "%(table_name)s_pkey",
@@ -251,11 +261,14 @@ class SegmentRow(Base):
     )
     # Keyword search. A generated column can't read another one, so these repeat the COALESCE.
     # Generated columns are STORED (persisted) so they can be indexed.
-    # There is no Nepali or Nepal Bhasa stemmer; 'simple' splits Devanagari into words.
+    # There is no Nepali or Nepal Bhasa stemmer; 'simple' splits Devanagari into words. The
+    # text is folded first (FOLD_SQL), and search folds queries the same way.
     original_tsv: Mapped[Any] = mapped_column(
         TSVECTOR,
         Computed(
-            "to_tsvector('simple'::regconfig, COALESCE(original_edited, original_machine))",
+            "to_tsvector('simple'::regconfig, "
+            + FOLD_SQL.format("COALESCE(original_edited, original_machine)")
+            + ")",
             persisted=True,
         ),
     )
