@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,7 +69,13 @@ def segment(session: Session, interview_id: uuid.UUID, seq: int) -> SegmentRow:
 
 
 def index_jobs(session: Session) -> list[tuple[uuid.UUID, str]]:
-    return [tuple(r) for r in session.execute(select(JobRow.interview_id, JobRow.state))]
+    query = select(JobRow.interview_id, JobRow.state).where(JobRow.kind == "index")
+    return [tuple(r) for r in session.execute(query)]
+
+
+def retranslate_job(session: Session) -> JobRow | None:
+    session.expire_all()
+    return session.scalars(select(JobRow).where(JobRow.kind == "retranslate")).one_or_none()
 
 
 @pytest.mark.parametrize("visibility", ["public", "private"])
@@ -169,3 +176,64 @@ def test_lines_cannot_be_edited_while_the_transcript_is_being_replaced(
     path = f"/api/interviews/{interview_id}/segments/0"
     assert signed_in(client, admin).patch(path, json={"original_text": "x"}).status_code == 409
     assert segment(db_session, interview_id, 0).original_edited is None
+
+
+def test_changing_the_words_of_an_original_queues_a_delayed_retranslation(
+    client: TestClient, db_session: Session, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    path = f"/api/interviews/{interviews['public']}/segments/0"
+    client = signed_in(client, admin)
+
+    # Punctuation and spacing alone don't make the English out of date.
+    res = client.patch(path, json={"original_text": "पहिलो ।"})
+    assert (res.json()["original_edited"], res.json()["english_stale"]) == ("पहिलो ।", False)
+    assert retranslate_job(db_session) is None
+
+    res = client.patch(path, json={"original_text": "पहिलो कुरा"})
+    assert res.json()["english_stale"] is True
+    first = retranslate_job(db_session)
+    assert first is not None and first.state == "queued"
+    assert timedelta(minutes=4) < first.run_after - datetime.now(UTC) <= timedelta(minutes=5)
+    first_run = first.run_after
+
+    # Another edit pushes the same job back instead of queueing a second.
+    client.patch(path, json={"original_text": "पहिलो कुराकानी"})
+    second = retranslate_job(db_session)
+    assert second is not None and (second.id, second.run_after > first_run) == (first.id, True)
+
+    transcript = client.get(f"/api/interviews/{interviews['public']}/transcript").json()
+    assert [line["english_stale"] for line in transcript["items"]] == [True, False]
+
+
+def test_update_english_now_runs_the_retranslation_at_once(
+    client: TestClient, db_session: Session, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    interview_id = interviews["private"]
+    client = signed_in(client, admin)
+    path = f"/api/interviews/{interview_id}/retranslate"
+    res = client.post(path)
+    assert (res.status_code, res.json()) == (202, {"stale_lines": 0})
+    assert retranslate_job(db_session) is None
+
+    client.patch(f"/api/interviews/{interview_id}/segments/0", json={"original_text": "नयाँ"})
+    res = client.post(path)
+    assert (res.status_code, res.json()) == (202, {"stale_lines": 1})
+    job = retranslate_job(db_session)
+    assert job is not None
+    assert job.run_after <= datetime.now(UTC)
+
+    jobs.enqueue(db_session, "transcribe", interview_id)
+    db_session.commit()
+    assert client.post(path).status_code == 409
+
+
+def test_an_english_edit_is_flagged_when_the_original_changes_until_it_is_saved_again(
+    client: TestClient, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    path = f"/api/interviews/{interviews['public']}/segments/0"
+    client = signed_in(client, admin)
+    assert client.patch(path, json={"english_text": "First"}).json()["english_edit_stale"] is False
+    res = client.patch(path, json={"original_text": "पहिलो कुरा"}).json()
+    assert (res["english_stale"], res["english_edit_stale"]) == (True, True)
+    res = client.patch(path, json={"english_text": "First"}).json()  # checked, unchanged
+    assert (res["english_edited"], res["english_edit_stale"]) == ("First", False)

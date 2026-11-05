@@ -186,6 +186,26 @@ export interface paths {
         patch: operations["edit_segment_api_interviews__interview_id__segments__seq__patch"];
         trace?: never;
     };
+    "/api/interviews/{interview_id}/retranslate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retranslate Now
+         * @description Re-translate the out-of-date lines now, instead of waiting for the delayed batch.
+         */
+        post: operations["retranslate_now_api_interviews__interview_id__retranslate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/interviews/{interview_id}/transcript/replace": {
         parameters: {
             query?: never;
@@ -354,6 +374,10 @@ export interface components {
             english_edited: string | null;
             /** Edited At */
             edited_at: string | null;
+            /** English Stale */
+            english_stale: boolean;
+            /** English Edit Stale */
+            english_edit_stale: boolean;
             /** Edited By */
             edited_by: string | null;
         };
@@ -414,7 +438,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "processing" | "needs_review" | "reviewed" | "failed";
+            status: "processing" | "done" | "failed";
             /**
              * Translation Status
              * @enum {string}
@@ -473,7 +497,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "processing" | "needs_review" | "reviewed" | "failed";
+            status: "processing" | "done" | "failed";
             /**
              * Translation Status
              * @enum {string}
@@ -586,6 +610,11 @@ export interface components {
             /** Skipped */
             skipped: number;
         };
+        /** RetranslateResult */
+        RetranslateResult: {
+            /** Stale Lines */
+            stale_lines: number;
+        };
         /**
          * SearchFilters
          * @description Filter choices drawn only from interviews the viewer may see. Interviews with no
@@ -671,7 +700,7 @@ export interface operations {
             query?: {
                 limit?: number;
                 offset?: number;
-                status?: ("processing" | "needs_review" | "reviewed" | "failed") | null;
+                status?: ("processing" | "done" | "failed") | null;
             };
             header?: never;
             path?: never;
@@ -979,6 +1008,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSegment"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retranslate_now_api_interviews__interview_id__retranslate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetranslateResult"];
                 };
             };
             /** @description Validation Error */

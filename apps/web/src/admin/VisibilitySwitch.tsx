@@ -7,7 +7,7 @@ import { useSetVisibility } from "./api";
 
 /**
  * Public / Private toggle. Publishing is allowed at any time, even while processing (D-008);
- * visitors then see the transcript labelled as in progress or machine-generated.
+ * visitors see the transcript labelled as in progress, then as machine-generated.
  */
 export function VisibilitySwitch({
   interview,

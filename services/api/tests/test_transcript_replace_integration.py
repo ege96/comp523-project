@@ -147,6 +147,8 @@ def test_lines_that_would_be_blank_are_skipped_and_undo_restores_machine_text(
     assert (res.json()["items"], res.json()["skipped"]) == ([], 1)
 
     client.post(path(interview_id), json={"find": "स्वयम्बु", "replace": "स्वयम्भू", "field": "original"})
+    # The Nepali original's words changed, so its English is re-translated in one delayed batch.
+    assert sorted(kind for _, kind, _ in queued_jobs(db_session)) == ["index", "retranslate"]
     # Replacing back to the machine's words drops the edit rather than storing a copy.
     res = client.post(
         path(interview_id), json={"find": "स्वयम्भू", "replace": "स्वयम्बु", "field": "original"}

@@ -19,6 +19,7 @@ from swayambhu_core.models import (
     SegmentRow,
 )
 from swayambhu_core.storage import LocalMediaStore
+from swayambhu_core.text import english_is_stale
 from swayambhu_providers import (
     AudioClip,
     EmbeddingKind,
@@ -128,7 +129,7 @@ def test_a_recording_becomes_segments_translations_embeddings_and_playback(
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
         assert (interview.status, interview.status_detail, interview.duration_ms) == (
-            "needs_review", None, 130_000,
+            "done", None, 130_000,
         )  # fmt: skip
         assert (interview.language_detected, interview.language_detected_confidence) == ("ne", 1)
         assert (interview.translation_status, interview.transcribed_by) == (
@@ -217,7 +218,7 @@ def test_a_translator_outage_is_retried(
     assert drain(runner) == 2  # translate, index
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "done")
+        assert (interview.status, interview.translation_status) == ("done", "done")
 
 
 def test_a_permanent_translation_failure_still_indexes_the_original(
@@ -229,7 +230,7 @@ def test_a_permanent_translation_failure_still_indexes_the_original(
     assert drain(runner) == 4
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "failed")
+        assert (interview.status, interview.translation_status) == ("done", "failed")
         assert interview.status_detail == "Translation failed: translator down"
         assert set(session.scalars(select(ChunkEmbeddingRow.representation))) == {"original"}
 
@@ -304,6 +305,64 @@ def test_an_edit_reembeds_only_its_own_chunk(
         session.commit()
     assert drain(runner) == 1
     assert len(embedder.texts) == 1
+
+
+class RecordingTranslator(FakeTranslator):
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+
+    def translate_to_english(
+        self, texts: Sequence[str], source_language: str | None
+    ) -> list[Translation]:
+        self.texts += texts
+        return super().translate_to_english(texts, source_language)
+
+
+def test_retranslation_refreshes_only_lines_whose_original_changed(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        assert (
+            session.scalar(select(func.count()).where(SegmentRow.english_source_hash.is_(None)))
+            == 0
+        )
+        # Line 0: new words. Line 1: new words, and a human English that must survive.
+        # Line 2: punctuation only, so its English is still current.
+        for seq, original in ((0, "नयाँ शब्द"), (1, "अर्को शब्द"), (2, None)):
+            values: dict[str, object] = {"edited_at": func.now()}
+            if original:
+                values["original_edited"] = original
+            else:
+                values["original_edited"] = SegmentRow.original_machine + " ।"
+            if seq == 1:
+                values["english_edited"] = "Human English"
+            session.execute(update(SegmentRow).where(SegmentRow.seq == seq).values(**values))
+        jobs.enqueue(session, "retranslate", interview_id)
+        session.commit()
+
+    translator = RecordingTranslator()
+    providers = Providers(ScriptedTranscriber(), translator, FakeEmbedder(8))
+    runner = JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
+    assert drain(runner) == 2  # retranslate, then index
+    assert sorted(translator.texts) == ["अर्को शब्द", "नयाँ शब्द"]
+    with new_session() as session:
+        lines = session.scalars(
+            select(SegmentRow).where(SegmentRow.seq < 3).order_by(SegmentRow.seq)
+        ).all()
+        assert lines[0].english_text == "[fake ne->en] नयाँ शब्द"
+        assert (lines[1].english_machine, lines[1].english_text) == (
+            "[fake ne->en] अर्को शब्द", "Human English",
+        )  # fmt: skip
+        assert not any(english_is_stale(line) for line in lines)
+
+    # Nothing out of date: no translation and no re-indexing.
+    with new_session() as session:
+        jobs.enqueue(session, "retranslate", interview_id)
+        session.commit()
+    assert drain(runner) == 1
+    assert len(translator.texts) == 2
 
 
 def test_switching_embedder_adds_its_vectors_beside_the_old_ones(
@@ -397,7 +456,7 @@ def test_a_job_whose_worker_vanished_is_taken_over_then_given_up(
     assert drain(runner) == 2  # the stale playback job, then index
     with new_session() as session:
         interview = session.get_one(InterviewRow, interview_id)
-        assert (interview.status, interview.translation_status) == ("needs_review", "failed")
+        assert (interview.status, interview.translation_status) == ("done", "failed")
         assert job(session, "translate").state == "failed"
 
 

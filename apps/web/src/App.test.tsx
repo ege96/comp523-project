@@ -11,7 +11,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const list = { "/api/interviews": { body: { items: [interviewSummary], total: 1 } } };
+const processing = { ...interviewSummary, status: "processing" } as const;
+const list = { "/api/interviews": { body: { items: [processing], total: 1 } } };
 
 describe("app shell and sign-in", () => {
   it("shows visitors the archive without loading sign-in, and sends /admin to sign-in", async () => {
@@ -22,7 +23,7 @@ describe("app shell and sign-in", () => {
     expect(await screen.findByRole("link", { name: "Test interview A" })).toBeTruthy();
     expect(screen.getByText("Interviewee: Unknown · Nepali · 1:02:03")).toBeTruthy();
     expect(screen.getByText("May 2001")).toBeTruthy();
-    expect(screen.getByText("Machine-generated transcript")).toBeTruthy();
+    expect(screen.getByText("Transcript in progress")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Upload & review" })).toBeNull();
     expect(calls).toEqual([{ path: "/api/interviews", auth: null }]);
     expect(loadClient).not.toHaveBeenCalled();
@@ -216,6 +217,10 @@ describe("interview viewer", () => {
     expect(screen.getByText("Interviewee B · Nepali · Recorded May 2001")).toBeTruthy();
     expect(screen.getByText("Interviewer C")).toBeTruthy();
     expect(await screen.findByText("Original text A")).toBeTruthy();
+    expect(screen.getByText(/Transcribed by machine, so it may contain errors/)).toBeTruthy();
+    expect(screen.queryByText("Corrected")).toBeNull();
+    // Cards and the header only label a transcript that isn't there yet.
+    expect(screen.queryByText(/Transcript in progress|Machine-generated/)).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Play from 12:34" }));
     expect(play).toHaveBeenCalled();
     expect(document.querySelector("audio")?.currentTime).toBe(754);
@@ -239,7 +244,9 @@ describe("interview viewer", () => {
         },
       },
       [`/api/interviews/${id}/segments`]: {
-        body: { items: [{ ...segments.items[0], english_text: "English text A" }] },
+        body: {
+          items: [{ ...segments.items[0], english_text: "English text A", english_edited: true }],
+        },
       },
     });
     renderApp(`/interviews/${id}`, fakeAuthClient({ signedIn: true }));
@@ -249,6 +256,11 @@ describe("interview viewer", () => {
     expect(document.querySelector("video")).toBeTruthy();
     await userEvent.click(await screen.findByRole("tab", { name: "English" }));
     expect(screen.getByText("English text A")).toBeTruthy();
+    // Only the English of this line was corrected.
+    expect(screen.getByText(/translated by machine.*Lines marked “Corrected”/)).toBeTruthy();
+    expect(screen.getByText("Corrected")).toBeTruthy();
+    await userEvent.click(screen.getByRole("tab", { name: "Original" }));
+    expect(screen.queryByText("Corrected")).toBeNull();
   });
 
   it("treats a 404 as missing or private, without saying which", async () => {

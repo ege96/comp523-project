@@ -12,17 +12,26 @@ before anything else runs, whatever the interview's visibility.
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select
 from swayambhu_core import jobs
-from swayambhu_core.models import JobRow, SegmentRow
+from swayambhu_core.models import SegmentRow
+from swayambhu_core.text import english_is_stale
 
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.db import DbSession
-from swayambhu_api.transcript_edits import AdminSegment, _interview, _merged, _to_admin_segment
+from swayambhu_api.transcript_edits import (
+    AdminSegment,
+    SettingsDep,
+    _interview,
+    _merged,
+    _refuse_while_transcribing,
+    _to_admin_segment,
+)
 
 router = APIRouter()
 log = logging.getLogger("swayambhu_api")
@@ -68,23 +77,15 @@ def _current(segment: SegmentRow, field: str, primary_language: str | None) -> s
 
 @router.post("/api/interviews/{interview_id}/transcript/replace", response_model=ReplaceResult)
 def replace_in_transcript(
-    interview_id: uuid.UUID, body: FindReplace, admin: CurrentAdmin, session: DbSession
+    interview_id: uuid.UUID,
+    body: FindReplace,
+    admin: CurrentAdmin,
+    session: DbSession,
+    settings: SettingsDep,
 ) -> ReplaceResult:
     """Replace a word or phrase in every line of one interview, kept apart from machine text."""
     interview = _interview(session, interview_id)
-    transcribing = session.scalar(
-        select(JobRow.id).where(
-            JobRow.interview_id == interview_id,
-            JobRow.kind == "transcribe",
-            JobRow.state.in_(("queued", "running")),
-        )
-    )
-    if transcribing is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "This interview is being transcribed, which replaces every line. "
-            "Edit it once transcription has finished.",
-        )
+    _refuse_while_transcribing(session, interview_id)
 
     pattern = re.compile(re.escape(body.find), 0 if body.match_case else re.IGNORECASE)
     # Locked, so a line saved by hand at the same moment is applied before or after, not lost.
@@ -110,6 +111,10 @@ def replace_in_transcript(
             segment.original_edited = _merged(segment.original_machine, new)
         else:
             segment.english_edited = _merged(segment.english_machine, new)
+            if segment.english_edited is None:
+                segment.english_edit_source_hash = None
+            # Otherwise the check mark stays as it was: replacing a word isn't checking the
+            # whole English against the original.
         if segment.original_edited is None and segment.english_edited is None:
             segment.edited_by = segment.edited_at = None
         else:
@@ -120,6 +125,10 @@ def replace_in_transcript(
     if changed:
         # One re-index for the whole batch; it re-embeds only the chunks whose text changed.
         jobs.enqueue(session, "index", interview_id)
+        if any(english_is_stale(s) for s in changed):
+            # Like a hand edit: one delayed batch, pushed back by further edits.
+            delay = timedelta(seconds=settings.retranslate_delay_seconds)
+            jobs.schedule(session, "retranslate", interview_id, delay)
         session.commit()
         log.info(
             "admin %s replaced text in %d lines of interview %s",

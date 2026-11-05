@@ -139,6 +139,8 @@ After changing the embedding model (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` or `
 
 Admins publish or hide an interview with `PATCH /api/interviews/{id}` `{"visibility": "public"}`, follow its processing with `GET /api/interviews/{id}/jobs`, and list by status with `GET /api/interviews?status=processing`.
 
+Admins correct transcripts with `PATCH /api/interviews/{id}/segments/{seq}` (machine text is kept beside the edit) and see both with `GET /api/interviews/{id}/transcript`. Editing the words of an original makes its English out of date: a `retranslate` job refreshes those lines in one batch `RETRANSLATE_DELAY_SECONDS` (300) after the last edit, or at once with `POST /api/interviews/{id}/retranslate`. Spacing and punctuation alone don't count, and an admin's English edit is never overwritten; it's flagged for checking instead.
+
 ## Logs and request IDs
 
 The API writes one JSON object per line to stdout (`LOG_FORMAT=json`, the default), which OpenShift collects. Set `LOG_FORMAT=text` for readable local output and `LOG_LEVEL` to change the level. Every response carries an `X-Request-ID`: the caller's own if it is a short token of letters, digits, `.`, `_` or `-`, otherwise a new one. Every log line written during that request includes it. Each request gets one access line with the method, path (no query string), status, duration and client IP. Headers, tokens and search terms are never logged. An unhandled error is logged with its stack and returns `500 {"detail": "Internal error", "request_id": "..."}`, so a reported ID leads straight to the trace.
