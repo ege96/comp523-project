@@ -39,7 +39,8 @@ from swayambhu_api.db import DbSession
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 INTERVIEW_ID_HEADER = "Upload-Interview-Id"
-_DATE = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?")
+# A recording date: YYYY, YYYY-MM or YYYY-MM-DD, as much of it as is known.
+DATE_PATTERN = r"^\d{4}(-\d{2}(-\d{2})?)?$"
 
 
 class UploadMetadata(BaseModel):
@@ -61,7 +62,7 @@ class UploadMetadata(BaseModel):
     interviewee_id: int | None = None
     interviewee_name: str | None = Field(default=None, min_length=1, max_length=500)
     # YYYY, YYYY-MM or YYYY-MM-DD: as much of the date as is known.
-    recorded_on: str | None = Field(default=None, pattern=_DATE.pattern)
+    recorded_on: str | None = Field(default=None, pattern=DATE_PATTERN)
 
     @model_validator(mode="after")
     def _consistent(self) -> "UploadMetadata":

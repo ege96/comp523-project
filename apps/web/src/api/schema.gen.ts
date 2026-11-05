@@ -41,7 +41,11 @@ export interface paths {
         head?: never;
         /**
          * Update Interview
-         * @description Publish (Public) or hide (Private) an interview. Takes effect on the next request.
+         * @description Publish or hide an interview, or correct its details. Takes effect on the next request.
+         *
+         *     Changing the language doesn't redo the transcript or the English on its own: both cost
+         *     provider calls, and transcribing again would replace corrections. The admin page offers
+         *     those as separate actions.
          */
         patch: operations["update_interview_api_interviews__interview_id__patch"];
         trace?: never;
@@ -422,6 +426,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -462,6 +468,12 @@ export interface components {
             media: components["schemas"]["Media"] | null;
             /** Status Detail */
             status_detail: string | null;
+            /** Language Detected */
+            language_detected: string | null;
+            /** Language Detected Confidence */
+            language_detected_confidence: number | null;
+            /** Language Confirmed */
+            language_confirmed: string | null;
         };
         /** InterviewList */
         InterviewList: {
@@ -481,6 +493,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -509,13 +523,23 @@ export interface components {
              */
             created_at: string;
         };
-        /** InterviewUpdate */
+        /**
+         * InterviewUpdate
+         * @description Only the fields sent change. For the optional details (D-004), null means unknown.
+         */
         InterviewUpdate: {
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "public" | "private";
+            /** Visibility */
+            visibility?: ("public" | "private") | null;
+            /** Title */
+            title?: string | null;
+            /** Interviewee Id */
+            interviewee_id?: number | null;
+            /** Interviewee Name */
+            interviewee_name?: string | null;
+            /** Recorded On */
+            recorded_on?: string | null;
+            /** Language */
+            language?: string | null;
         };
         /** Interviewee */
         Interviewee: {

@@ -106,10 +106,13 @@ def test_detail_and_transcript_of_a_public_interview(
 ) -> None:
     path = f"/api/interviews/{interviews['public'].id}"
     detail = as_viewer(client).get(path).json()
-    assert detail["status_detail"] is None  # admins only
+    admin_only = ("status_detail", "language_detected", "language_confirmed")
+    assert [detail[k] for k in admin_only] == [None, None, None]
+    assert detail["interviewee_id"] == interviews["public"].interviewee_id
     assert detail["languages"] == [{"code": "ne", "name": "Nepali"}]
     assert detail["media"]["content_type"] == "audio/mp4"
-    assert as_viewer(client, ADMIN).get(path).json()["status_detail"] == "Translating"
+    as_admin = as_viewer(client, ADMIN).get(path).json()
+    assert [as_admin[k] for k in admin_only] == ["Translating", None, "ne"]
 
     segments = as_viewer(client).get(f"{path}/segments").json()["items"]
     assert [

@@ -47,6 +47,7 @@ class InterviewSummary(BaseModel):
     id: uuid.UUID
     title: str
     interviewee: str | None
+    interviewee_id: int | None
     primary_language: Language | None
     duration_ms: int | None
     recorded_on: date | None
@@ -78,6 +79,12 @@ class InterviewDetail(InterviewSummary):
     media: Media | None
     # Which step is running or why it failed. Admins only; always None for visitors.
     status_detail: str | None
+    # What primary_language is made of (D-004), for the admin's language correction.
+    # Admins only; always None for visitors.
+    language_detected: str | None
+    # The detected language's share of the speech whose language is known, 0 to 1.
+    language_detected_confidence: float | None
+    language_confirmed: str | None
 
 
 class Segment(BaseModel):
@@ -130,6 +137,7 @@ def to_summary(
         "id": row.id,
         "title": row.title,
         "interviewee": interviewee,
+        "interviewee_id": row.interviewee_id,
         "primary_language": (
             Language(code=row.primary_language, name=language or row.primary_language)
             if row.primary_language
@@ -213,7 +221,15 @@ def get_interview(
             "consent_note": interview.consent_note,
             "languages": [Language(code=c, name=n) for c, n in languages],
             "media": media,
-            "status_detail": interview.status_detail if viewer.is_admin else None,
+            **{
+                key: getattr(interview, key) if viewer.is_admin else None
+                for key in (
+                    "status_detail",
+                    "language_detected",
+                    "language_detected_confidence",
+                    "language_confirmed",
+                )
+            },
         }
     )
 

@@ -12,6 +12,7 @@ const InterviewSummary = z.object({
   id: z.string(),
   title: z.string(),
   interviewee: z.string().nullable(),
+  interviewee_id: z.number().int().nullable(),
   primary_language: Language.nullable(),
   duration_ms: z.number().int().nullable(),
   recorded_on: z.iso.date().nullable(),
@@ -35,6 +36,10 @@ export const InterviewDetailSchema = InterviewSummary.extend({
   languages: z.array(Language),
   media: z.object({ url: z.string(), content_type: z.string(), expires_at: z.string() }).nullable(),
   status_detail: z.string().nullable(),
+  // Admins only (null for visitors): what primary_language is made of (D-004).
+  language_detected: z.string().nullable(),
+  language_detected_confidence: z.number().nullable(),
+  language_confirmed: z.string().nullable(),
 }) satisfies z.ZodType<Schemas["InterviewDetail"]>;
 
 const Segment = z.object({

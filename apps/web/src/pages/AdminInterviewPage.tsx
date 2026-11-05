@@ -1,4 +1,5 @@
 import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import Container from "@mui/material/Container";
 import Paper from "@mui/material/Paper";
@@ -13,8 +14,10 @@ import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { adminQueries, PROCESSING_POLL_MS } from "../admin/api";
+import { DetailsDialog } from "../admin/DetailsDialog";
 import { TranscriptEditor } from "../admin/TranscriptEditor";
 import { jobLabel, STATUS_COLORS, STATUS_LABELS, TRANSLATION_LABELS } from "../admin/status";
 import { VisibilitySwitch } from "../admin/VisibilitySwitch";
@@ -62,10 +65,17 @@ export function AdminInterviewPage() {
   );
 }
 
+function languageFact(interview: InterviewDetail): string {
+  const name = interview.primary_language?.name;
+  if (!name) return "Not detected yet";
+  return interview.language_confirmed ? `${name} (set by an admin)` : `${name} (detected)`;
+}
+
 function Summary({ interview }: { interview: InterviewDetail }) {
+  const [editing, setEditing] = useState(false);
   const facts: [string, string][] = [
     ["Interviewee", interview.interviewee ?? "Unknown"],
-    ["Original language", interview.primary_language?.name ?? "Not detected yet"],
+    ["Original language", languageFact(interview)],
     ["Recorded", formatRecordedOn(interview) ?? "Unknown"],
     [
       "Duration",
@@ -85,7 +95,18 @@ function Summary({ interview }: { interview: InterviewDetail }) {
           <Typography variant="h1" sx={{ overflowWrap: "anywhere" }}>
             {interview.title}
           </Typography>
-          <VisibilitySwitch interview={interview} />
+          <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexShrink: 0 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                setEditing(true);
+              }}
+            >
+              Edit details
+            </Button>
+            <VisibilitySwitch interview={interview} />
+          </Stack>
         </Stack>
         <Stack
           direction="row"
@@ -133,6 +154,16 @@ function Summary({ interview }: { interview: InterviewDetail }) {
           </TextLink>
         </Typography>
       </Stack>
+      {/* Mounted only while open, so the form starts from the latest details each time. */}
+      {editing ? (
+        <DetailsDialog
+          interview={interview}
+          open
+          onClose={() => {
+            setEditing(false);
+          }}
+        />
+      ) : null}
     </Paper>
   );
 }

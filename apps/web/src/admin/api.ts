@@ -80,14 +80,36 @@ async function patchInterview(token: string | null, id: string, update: Intervie
   if (!res.ok) throw new ApiError(res.status, url);
 }
 
+type Visibility = InterviewSummary["visibility"];
+
 /** Publish (Public) or hide (Private) an interview. Allowed at any time (D-008). */
 export function useSetVisibility() {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, visibility }: { id: string } & InterviewUpdate) =>
+    mutationFn: async ({ id, visibility }: { id: string; visibility: Visibility }) =>
       patchInterview(await viewer.getToken(), id, { visibility }),
     // Search results and filters change too, so refresh everything this viewer has cached.
+    onSettled: () =>
+      Promise.all(
+        ["interviews", "search"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      ),
+  });
+}
+
+/**
+ * Correct an interview's details after upload (D-004). Only the fields given change; null
+ * clears an optional one, and `language: null` goes back to the detected language.
+ */
+export function useUpdateInterview(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (update: InterviewUpdate) =>
+      patchInterview(await viewer.getToken(), interviewId, update),
+    // The title, interviewee and language show in lists, filters and search results too.
     onSettled: () =>
       Promise.all(
         ["interviews", "search"].map((prefix) =>
