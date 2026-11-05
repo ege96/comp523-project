@@ -35,3 +35,11 @@ export function PlayIcon(props: SvgIconProps) {
     </SvgIcon>
   );
 }
+
+export function StopIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M6 6h12v12H6z" />
+    </SvgIcon>
+  );
+}

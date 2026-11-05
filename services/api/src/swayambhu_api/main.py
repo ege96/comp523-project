@@ -14,6 +14,7 @@ from swayambhu_api.logging_setup import install_request_context, setup_logging
 from swayambhu_api.search import get_embedder
 from swayambhu_api.search import router as search_router
 from swayambhu_api.transcript_edits import router as transcript_edits_router
+from swayambhu_api.transcript_replace import router as transcript_replace_router
 from swayambhu_api.uploads import require_upload_admin
 from swayambhu_api.uploads import router as uploads_router
 
@@ -34,6 +35,7 @@ app.include_router(interviews_router)
 app.include_router(search_router)
 app.include_router(admin_interviews_router)
 app.include_router(transcript_edits_router)
+app.include_router(transcript_replace_router)
 # Router-level, so the admin check runs before tuspyserver's PATCH dependency starts reading
 # the body; its own `auth` dependency runs after that one.
 app.include_router(uploads_router, dependencies=[Depends(require_upload_admin)])

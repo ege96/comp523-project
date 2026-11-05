@@ -62,10 +62,10 @@ function api(lines: AdminSegment[], patch: { status?: number; body?: unknown }) 
   };
 }
 
-function patches() {
+function patches(method = "PATCH") {
   return vi
     .mocked(fetch)
-    .mock.calls.filter(([, init]) => init?.method === "PATCH")
+    .mock.calls.filter(([, init]) => init?.method === method)
     .map(([url, init]) => ({
       url: url as string,
       body: JSON.parse(init?.body as string) as unknown,
@@ -137,7 +137,7 @@ describe("transcript editor", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("form")).toBeNull();
+    expect(screen.queryByRole("form", { name: "Edit line at 0:00" })).toBeNull();
     expect(screen.queryByRole("status")).toBeNull();
     expect(patches()).toEqual([]);
   });
@@ -218,6 +218,100 @@ describe("out-of-date English", () => {
     expect(await screen.findByText(/The English of 1 line is out of date/, {}, SLOW)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Update English now" }));
     expect(await screen.findByText(/This interview is being transcribed again/)).toBeTruthy();
+  });
+});
+
+describe("faster editing", () => {
+  it("plays just one line's audio and stops at its end", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
+    stubApi(api([nepali, english], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Play line at 1:05" }, SLOW));
+    const audio = document.querySelector("audio");
+    expect(audio?.getAttribute("src")).toBe(interviewDetail.media.url);
+    expect(audio?.currentTime).toBe(65);
+    expect(play).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Stop line at 1:05" })).toBeTruthy();
+
+    // Past the line's end (70 s), playback stops by itself.
+    if (!audio) throw new Error("no audio element");
+    audio.currentTime = 70.1;
+    fireEvent.timeUpdate(audio);
+    expect(pause).toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Play line at 1:05" })).toBeTruthy();
+    play.mockRestore();
+    pause.mockRestore();
+  });
+
+  it("opens a line by clicking its text, saves with Enter and moves on with Tab", async () => {
+    const saved = { ...nepali, original_edited: "Machine original A fixed" };
+    const routes = api([nepali, english, untranslated], { body: saved });
+    routes[`${base}/segments/1`] = { body: english };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByText("Machine original A", {}, SLOW));
+    const form = screen.getByRole("form", { name: "Edit line at 0:00" });
+    const original = within(form).getByRole("textbox", { name: "Original" });
+    expect(document.activeElement).toBe(original);
+    routes[`${base}/transcript`] = { body: { items: [saved, english, untranslated] } };
+    await userEvent.type(original, " fixed{Enter}");
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(patches()).toEqual([
+      { url: `${base}/segments/0`, body: { original_text: "Machine original A fixed" } },
+    ]);
+    expect(screen.queryByRole("form", { name: "Edit line at 0:00" })).toBeNull();
+
+    // Tab from the last box saves (nothing changed here) and opens the next line.
+    await userEvent.click(screen.getByText("Machine original A fixed"));
+    await userEvent.click(screen.getByRole("textbox", { name: "English" }));
+    await userEvent.tab();
+    const next = await screen.findByRole("form", { name: "Edit line at 1:05" });
+    expect(document.activeElement).toBe(within(next).getByRole("textbox", { name: "Original" }));
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("form", { name: "Edit line at 1:05" })).toBeNull();
+    expect(patches()).toHaveLength(1);
+  });
+
+  it("finds a misspelling, highlights it and replaces it in every line at once", async () => {
+    const lineA = { ...nepali, english_machine: "Machine english Swayambu A" };
+    const lineC = { ...untranslated, english_machine: "swayambu machine C" };
+    const fixedA = { ...lineA, english_edited: "Machine english Swayambhu A" };
+    const fixedC = { ...lineC, english_edited: "Swayambhu machine C" };
+    const routes = {
+      ...api([lineA, english, lineC], {}),
+      [`${base}/transcript/replace`]: { body: { items: [fixedA, fixedC], skipped: 0 } },
+    };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    const panel = await screen.findByRole("form", { name: "Find and replace" }, SLOW);
+    await userEvent.type(within(panel).getByRole("textbox", { name: "Find" }), "SWAYAMBU");
+    // Searches the original by default, where it doesn't appear.
+    expect(within(panel).getByText("0 lines match")).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("button", { name: "English" }));
+    expect(within(panel).getByText("2 lines match")).toBeTruthy();
+    expect([...document.querySelectorAll("mark")].map((m) => m.textContent)).toEqual([
+      "Swayambu",
+      "swayambu",
+    ]);
+    await userEvent.click(within(panel).getByRole("checkbox", { name: "Match case" }));
+    expect(within(panel).getByText("0 lines match")).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("checkbox", { name: "Match case" }));
+
+    await userEvent.type(within(panel).getByRole("textbox", { name: "Replace with" }), "Swayambhu");
+    routes[`${base}/transcript`] = { body: { items: [fixedA, english, fixedC] } };
+    await userEvent.click(within(panel).getByRole("button", { name: "Replace in 2 lines" }));
+    expect((await within(panel).findByRole("status")).textContent).toMatch(/Replaced in 2 lines/);
+    expect(patches("POST")).toEqual([
+      {
+        url: `${base}/transcript/replace`,
+        body: { find: "SWAYAMBU", replace: "Swayambhu", field: "english", match_case: false },
+      },
+    ]);
+    expect(screen.getByText("Swayambhu machine C")).toBeTruthy();
   });
 });
 

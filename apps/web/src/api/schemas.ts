@@ -116,8 +116,15 @@ export const RetranslateResultSchema = z.object({
 
 export const AdminSegmentSchema = AdminSegmentListSchema.shape.items.element;
 
+export const ReplaceResultSchema = z.object({
+  items: z.array(AdminSegmentSchema),
+  skipped: z.number().int(),
+}) satisfies z.ZodType<Schemas["ReplaceResult"]>;
+
 export type InterviewUpdate = Schemas["InterviewUpdate"];
 export type SegmentEdit = Schemas["SegmentEdit"];
+export type FindReplace = Schemas["FindReplace"];
+export type ReplaceResult = z.infer<typeof ReplaceResultSchema>;
 export type AdminSegment = z.infer<typeof AdminSegmentSchema>;
 
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
