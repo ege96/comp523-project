@@ -12,6 +12,7 @@ from swayambhu_providers.factory import (
     build_embedder,
     build_transcriber,
     build_translator,
+    embedder_name,
 )
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber
 from swayambhu_providers.google_provider import GoogleNmtTranslator
@@ -175,7 +176,9 @@ def test_factory_picks_providers_from_settings() -> None:
         google_translate_api_key=SecretStr("k"),
     )
     assert build_transcriber(settings).name == "elevenlabs:scribe-model"
-    assert build_embedder(settings).name == "openai:embed-model@1024"
+    assert build_embedder(settings).name == embedder_name(settings) == "openai:embed-model@1024"
+    unsized = settings.model_copy(update={"embedding_dimensions": None})
+    assert build_embedder(unsized).name == embedder_name(unsized) == "openai:embed-model"
     assert build_translator(settings).name == "google:nmt"
 
     fake = ProviderSettings(
@@ -183,7 +186,7 @@ def test_factory_picks_providers_from_settings() -> None:
     )
     assert isinstance(build_transcriber(fake), FakeTranscriber)
     assert build_translator(fake).name == "fake:translator"
-    assert build_embedder(fake).name == "fake:hash@8"
+    assert build_embedder(fake).name == embedder_name(fake) == "fake:hash@8"
 
 
 @pytest.mark.parametrize(
@@ -210,3 +213,108 @@ def test_empty_env_values_count_as_unset(monkeypatch: pytest.MonkeyPatch) -> Non
     settings = ProviderSettings()
     assert settings.embedding_dimensions is None
     assert settings.openai_api_key is None
+
+
+def _tiny_local_model(model_dir: Path) -> None:
+    """A word-level tokenizer and an ONNX "encoder" whose token states are a lookup table,
+    so pooled vectors can be checked by hand."""
+    import onnx
+    from onnx import TensorProto, helper
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import WhitespaceSplit
+
+    vocab = {"[UNK]": 0, "query:": 1, "passage:": 2, "a": 3, "b": 4}
+    tokenizer = Tokenizer(WordLevel(vocab, unk_token="[UNK]"))  # noqa: S106
+    tokenizer.pre_tokenizer = WhitespaceSplit()  # type: ignore[assignment]
+    model_dir.mkdir(parents=True)
+    tokenizer.save(str(model_dir / "tokenizer.json"))
+
+    # Token states: query: -> x, passage: -> y, a -> x, b -> z.
+    table = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 0, 0], [0, 0, 1]]
+    graph = helper.make_graph(
+        [helper.make_node("Gather", ["table", "input_ids"], ["last_hidden_state"])],
+        "tiny",
+        [
+            helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["b", "s"]),
+            helper.make_tensor_value_info("attention_mask", TensorProto.INT64, ["b", "s"]),
+        ],
+        [helper.make_tensor_value_info("last_hidden_state", TensorProto.FLOAT, ["b", "s", 3])],
+        [helper.make_tensor("table", TensorProto.FLOAT, [5, 3], [x for row in table for x in row])],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    model.ir_version = 9
+    (model_dir / "onnx").mkdir()
+    onnx.save(model, str(model_dir / "onnx" / "model.onnx"))
+
+
+def test_local_embedder_mean_pools_with_prefixes(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "org" / "tiny")
+    settings = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="org/tiny",
+        local_model_dir=tmp_path,
+        embedding_query_prefix="query: ",
+        embedding_passage_prefix="passage: ",
+        local_embedding_batch_size=1,
+    )
+    embedder = build_embedder(settings)
+    assert embedder.name == embedder_name(settings) == "local:org/tiny"
+
+    # "query: a" -> mean(x, x) = x. "query: a b b" -> mean(x, x, z, z) -> (1, 0, 1)/sqrt2.
+    # Batch size 1 and different lengths also check that padding never enters the mean.
+    short, long = embedder.embed(["a", "a b b"], "query")
+    assert short == pytest.approx([1, 0, 0])
+    assert long == pytest.approx([2**-0.5, 0, 2**-0.5])
+    [passage] = embedder.embed(["a"], "passage")
+    assert passage == pytest.approx([2**-0.5, 2**-0.5, 0])
+
+
+def test_local_embedder_truncates_long_text(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "tiny")
+    settings = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="tiny",
+        local_model_dir=tmp_path,
+        local_embedding_max_tokens=2,
+    )
+    [vector] = build_embedder(settings).embed(["a a b b b"], "passage")
+    assert vector == pytest.approx([1, 0, 0])
+
+
+def test_local_embedder_needs_model_files_and_no_dimension(tmp_path: Path) -> None:
+    settings = ProviderSettings(
+        embedding_provider="local", embedding_model="missing", local_model_dir=tmp_path
+    )
+    with pytest.raises(ProviderConfigError, match=r"model\.onnx"):
+        build_embedder(settings)
+    _tiny_local_model(tmp_path / "tiny")
+    sized = settings.model_copy(update={"embedding_model": "tiny", "embedding_dimensions": 384})
+    with pytest.raises(ProviderConfigError, match="EMBEDDING_DIMENSIONS"):
+        build_embedder(sized)
+
+
+def test_prepare_model_moves_weights_out_and_keeps_vectors(tmp_path: Path) -> None:
+    import onnx
+    from onnx import numpy_helper
+
+    from swayambhu_providers.local_provider import LocalOnnxEmbedder
+    from swayambhu_providers.prepare_model import DATA_FILE, externalize
+
+    _tiny_local_model(tmp_path / "tiny")
+    # Widen the lookup table past the 1 KiB threshold so it goes to the data file.
+    path = tmp_path / "tiny" / "onnx" / "model.onnx"
+    model = onnx.load(str(path))
+    [table] = model.graph.initializer
+    wide = numpy_helper.to_array(table).repeat(100, axis=1)
+    table.CopyFrom(numpy_helper.from_array(wide, "table"))
+    model.graph.output[0].type.tensor_type.shape.dim[2].dim_value = wide.shape[1]
+    onnx.save(model, str(path))
+    [before] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
+
+    externalize(tmp_path / "tiny")
+
+    assert (path.parent / DATA_FILE).stat().st_size >= wide.nbytes
+    assert path.stat().st_size < wide.nbytes
+    [after] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
+    assert after == pytest.approx(before)

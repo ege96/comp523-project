@@ -478,3 +478,40 @@ def test_the_ingest_command_queues_a_file(
         assert session.scalars(select(JobRow.kind)).all() == ["transcribe", "playback"]
     assert capsys.readouterr().out == f"Queued interview {interview.id}\n"
     assert (tmp_path / "media" / "interviews" / str(interview.id) / "original.mp3").is_file()
+
+
+def test_the_reindex_command_queues_interviews_missing_the_configured_model(
+    new_session: SessionFactory,
+    store: LocalMediaStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from swayambhu_worker import reindex
+
+    def run(*args: str) -> str:
+        reindex.main(list(args))
+        return capsys.readouterr().out
+
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)  # embedded with fake:hash@8
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "fake")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "8")
+    assert run() == "Queued 0 interview(s) for indexing with fake:hash@8\n"
+
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "4")  # as if the model changed
+    assert run("--dry-run") == (
+        f"{interview_id}\nWould queue 1 interview(s) for indexing with fake:hash@4\n"
+    )
+    assert run() == f"{interview_id}\nQueued 1 interview(s) for indexing with fake:hash@4\n"
+    assert run().startswith("Queued 0")  # its index job is already waiting
+
+    providers = Providers(ScriptedTranscriber(), FakeTranslator(), FakeEmbedder(4))
+    assert drain(JobRunner(new_session, providers, store, lease=timedelta(minutes=10))) == 1
+    with new_session() as session:
+        # The old model's vectors stay beside the new ones (index is incremental).
+        assert set(session.scalars(select(ChunkEmbeddingRow.model))) == {
+            "fake:hash@4", "fake:hash@8",
+        }  # fmt: skip
+    assert run().startswith("Queued 0")
+    assert run("--all").startswith(f"{interview_id}\nQueued 1")
