@@ -25,6 +25,10 @@ services:
       # Offline stand-ins so local dev needs no API keys. Must match the worker's.
       EMBEDDING_PROVIDER: fake
     ports: ["8000:8080"]
+    # The API streams playback copies and receives uploads here, so it shares the worker's
+    # media volume (as the api and worker pods share one volume in CloudApps).
+    volumes:
+      - media:/data/media
     depends_on:
       db: { condition: service_healthy }
 
