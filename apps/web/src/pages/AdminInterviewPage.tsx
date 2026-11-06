@@ -1,4 +1,5 @@
 import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
 import Chip from "@mui/material/Chip";
 import Container from "@mui/material/Container";
 import Paper from "@mui/material/Paper";
@@ -13,8 +14,12 @@ import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import { useQuery } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
+import { useState } from "react";
 
 import { adminQueries, PROCESSING_POLL_MS } from "../admin/api";
+import { DetailsDialog } from "../admin/DetailsDialog";
+import { retryableJobs } from "../admin/rerun";
+import { RerunActions, RetryButton } from "../admin/RerunActions";
 import { TranscriptEditor } from "../admin/TranscriptEditor";
 import { jobLabel, STATUS_COLORS, STATUS_LABELS, TRANSLATION_LABELS } from "../admin/status";
 import { VisibilitySwitch } from "../admin/VisibilitySwitch";
@@ -62,10 +67,17 @@ export function AdminInterviewPage() {
   );
 }
 
+function languageFact(interview: InterviewDetail): string {
+  const name = interview.primary_language?.name;
+  if (!name) return "Not detected yet";
+  return interview.language_confirmed ? `${name} (set by an admin)` : `${name} (detected)`;
+}
+
 function Summary({ interview }: { interview: InterviewDetail }) {
+  const [editing, setEditing] = useState(false);
   const facts: [string, string][] = [
     ["Interviewee", interview.interviewee ?? "Unknown"],
-    ["Original language", interview.primary_language?.name ?? "Not detected yet"],
+    ["Original language", languageFact(interview)],
     ["Recorded", formatRecordedOn(interview) ?? "Unknown"],
     [
       "Duration",
@@ -85,7 +97,18 @@ function Summary({ interview }: { interview: InterviewDetail }) {
           <Typography variant="h1" sx={{ overflowWrap: "anywhere" }}>
             {interview.title}
           </Typography>
-          <VisibilitySwitch interview={interview} />
+          <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexShrink: 0 }}>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => {
+                setEditing(true);
+              }}
+            >
+              Edit details
+            </Button>
+            <VisibilitySwitch interview={interview} />
+          </Stack>
         </Stack>
         <Stack
           direction="row"
@@ -133,6 +156,16 @@ function Summary({ interview }: { interview: InterviewDetail }) {
           </TextLink>
         </Typography>
       </Stack>
+      {/* Mounted only while open, so the form starts from the latest details each time. */}
+      {editing ? (
+        <DetailsDialog
+          interview={interview}
+          open
+          onClose={() => {
+            setEditing(false);
+          }}
+        />
+      ) : null}
     </Paper>
   );
 }
@@ -144,10 +177,12 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
     enabled: viewer.ready,
     refetchInterval: interview.status === "processing" ? PROCESSING_POLL_MS : false,
   });
+  const retryable = retryableJobs(data?.items ?? []);
   return (
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={2}>
         <Typography variant="h2">Processing steps</Typography>
+        <RerunActions interview={interview} />
         {isError ? (
           <Alert severity="error">The processing steps couldn&apos;t be loaded.</Alert>
         ) : isPending ? (
@@ -163,6 +198,7 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
                   <TableCell>State</TableCell>
                   <TableCell>Attempts</TableCell>
                   <TableCell>Last error</TableCell>
+                  <TableCell>Action</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -174,7 +210,10 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
                       {job.attempts} of {job.max_attempts}
                     </TableCell>
                     <TableCell sx={{ overflowWrap: "anywhere", maxWidth: 360 }}>
-                      {job.last_error ?? "None"}
+                      {job.last_error === null ? "None" : <TechnicalDetail text={job.last_error} />}
+                    </TableCell>
+                    <TableCell>
+                      {retryable.has(job) ? <RetryButton interview={interview} job={job} /> : null}
                     </TableCell>
                   </TableRow>
                 ))}
@@ -184,6 +223,32 @@ function ProcessingSteps({ interview }: { interview: InterviewDetail }) {
         )}
       </Stack>
     </Paper>
+  );
+}
+
+/**
+ * A failure's raw text (often a provider's JSON), folded away: the plain message and what to
+ * do are in the status line above. Shown on request, for passing on to the operator.
+ */
+function TechnicalDetail({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return open ? (
+    <Typography
+      component="pre"
+      variant="caption"
+      sx={{ m: 0, whiteSpace: "pre-wrap", fontFamily: "monospace" }}
+    >
+      {text}
+    </Typography>
+  ) : (
+    <Button
+      size="small"
+      onClick={() => {
+        setOpen(true);
+      }}
+    >
+      Show technical details
+    </Button>
   );
 }
 

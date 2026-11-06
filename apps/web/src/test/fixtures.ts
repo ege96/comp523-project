@@ -3,6 +3,7 @@ export const interviewSummary = {
   id: "00000000-0000-4000-8000-000000000001",
   title: "Test interview A",
   interviewee: null,
+  interviewee_id: null,
   primary_language: { code: "ne", name: "Nepali" },
   duration_ms: 3_723_000,
   recorded_on: "2001-05-01",
@@ -16,6 +17,7 @@ export const interviewSummary = {
 export const interviewDetail = {
   ...interviewSummary,
   interviewee: "Interviewee B",
+  interviewee_id: 7,
   interviewer: "Interviewer C",
   location: null,
   description: "Description D",
@@ -27,6 +29,9 @@ export const interviewDetail = {
     expires_at: "2026-10-14T06:00:00Z",
   },
   status_detail: null,
+  language_detected: null,
+  language_detected_confidence: null,
+  language_confirmed: null,
 };
 
 export const segments = {

@@ -7,12 +7,14 @@ import {
   InterviewListSchema,
   JobListSchema,
   ReplaceResultSchema,
+  RerunConflictSchema,
   RetranslateResultSchema,
   type AdminSegment,
   type FindReplace,
   type InterviewSummary,
   type InterviewUpdate,
   type ReplaceResult,
+  type RerunStep,
   type SegmentEdit,
 } from "../api/schemas";
 import { API_BASE_URL } from "../config";
@@ -80,14 +82,36 @@ async function patchInterview(token: string | null, id: string, update: Intervie
   if (!res.ok) throw new ApiError(res.status, url);
 }
 
+type Visibility = InterviewSummary["visibility"];
+
 /** Publish (Public) or hide (Private) an interview. Allowed at any time (D-008). */
 export function useSetVisibility() {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, visibility }: { id: string } & InterviewUpdate) =>
+    mutationFn: async ({ id, visibility }: { id: string; visibility: Visibility }) =>
       patchInterview(await viewer.getToken(), id, { visibility }),
     // Search results and filters change too, so refresh everything this viewer has cached.
+    onSettled: () =>
+      Promise.all(
+        ["interviews", "search"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      ),
+  });
+}
+
+/**
+ * Correct an interview's details after upload (D-004). Only the fields given change; null
+ * clears an optional one, and `language: null` goes back to the detected language.
+ */
+export function useUpdateInterview(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (update: InterviewUpdate) =>
+      patchInterview(await viewer.getToken(), interviewId, update),
+    // The title, interviewee and language show in lists, filters and search results too.
     onSettled: () =>
       Promise.all(
         ["interviews", "search"].map((prefix) =>
@@ -209,5 +233,55 @@ export function useRetranslate(interviewId: string) {
     },
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ["interviews", viewer.key, interviewId] }),
+  });
+}
+
+/** Transcribing again was refused because this many lines have corrections (P-013). */
+export class CorrectionsWouldBeLost extends Error {
+  constructor(readonly correctedLines: number) {
+    super(`${String(correctedLines)} corrected lines would be replaced`);
+    this.name = "CorrectionsWouldBeLost";
+  }
+}
+
+/**
+ * Run a processing step again: retry one that failed, or redo the transcript or English after
+ * the language was corrected. Transcribing again over corrections fails with
+ * `CorrectionsWouldBeLost` unless `replaceCorrections` is set.
+ */
+export function useRerun(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      step,
+      replaceCorrections = false,
+    }: {
+      step: RerunStep;
+      replaceCorrections?: boolean;
+    }) => {
+      const token = await viewer.getToken();
+      const url = `${API_BASE_URL}/api/interviews/${encodeURIComponent(interviewId)}/rerun`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ step, replace_corrections: replaceCorrections }),
+      });
+      if (res.status === 409) {
+        const conflict = RerunConflictSchema.safeParse(await res.json().catch(() => undefined));
+        if (conflict.success)
+          throw new CorrectionsWouldBeLost(conflict.data.detail.corrected_lines);
+      }
+      if (!res.ok) throw new ApiError(res.status, url);
+    },
+    onSettled: () =>
+      Promise.all(
+        ["interviews", "search"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      ),
   });
 }
