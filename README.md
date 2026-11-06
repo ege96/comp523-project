@@ -112,7 +112,9 @@ EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 
 - `latency --url ...`: each of the 50 queries in `perf/queries.txt` (words, phrases, filtered), 20 times, over HTTP: median, p95, p99.
 - `split`: the keyword SQL and the vector SQL timed apart.
-- `hnsw`: exact nearest-neighbour search against a temporary HNSW index, with recall.
+- `ann`: exact vector search against temporary HNSW indexes (`vector` and `halfvec`) on the search's own query as a visitor: latency, overlap with exact search, index size and build time, and with `--corpus` the recall of labelled queries.
+
+For real text and vectors instead of placeholders: `perf/download_corpus_sources.sh data` fetches FLEURS transcripts (Nepali and English, CC BY 4.0) and Nepali and English Wikipedia (CC BY-SA 4.0), about 460 MB. `uv run --group perf python -m swayambhu_api.perf.corpus --fleurs data/fleurs --wiki-ne data/wiki/ne.parquet --wiki-en data/wiki/en0.parquet --vectors 90000 --out data/corpus` cuts them into 75-225 word passages (one 30-90 s chunk of speech each) and embeds them with e5-small. That takes about 75 minutes for 90,000 vectors on 4 CPUs, and an interrupted run continues where it stopped. `perf.seed --corpus data/corpus --vectors N` then loads the first N vectors' worth. FLEURS has the same ~2,000 sentences in both languages, so it supplies 654 labelled queries (Nepali and English, same-language and cross-language), and Wikipedia supplies the distractors. About 40% of the vectors are Nepali text, as in a two-thirds-Nepali archive. Run the seeder, the API and `bench` with `EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small` and the e5 prefixes.
 
 `perf/search_load.js` is a k6 load test (ramp to 50 users; `PROFILE=smoke` holds 10 users for a minute) for the API run with the CloudApps pod's limits, `perf/compose.perf.yaml` (1 CPU, 768 MiB). The optional `Performance` CI workflow runs the 1x latency check and the k6 smoke run. Don't load-test the live CloudApps site: it's a shared cluster.
 
@@ -127,7 +129,26 @@ Results on a development container (PostgreSQL 16, fake embedder, so these are d
 What it found:
 
 - **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0008 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
-- **Exact vector search is fast enough well past the expected archive.** 23 ms for the nearest 100 of 90,000 vectors. An HNSW index cut that to 8 ms but took 88 s to build, and on random vectors its recall was poor (0.23 of the exact top 10 with `ef_search` 200, 0.64 with 1000). Random vectors are a worst case for HNSW, so measure recall again with real embeddings before adding one; until then, keep exact search (P-015).
+- **On random vectors HNSW looked useless** (0.23 of the exact top 10 at `ef_search` 200). Real embeddings, below, tell a different story.
+
+Results with real text and e5-small vectors (same container, 4 CPUs; the API pinned to 1 CPU like the CloudApps pod; PostgreSQL defaults: `shared_buffers` 128 MB, `maintenance_work_mem` 64 MB; 2026-11-06). The vector query is the nearest 100 chunks as a visitor, over 699 queries (654 labelled sentences plus the 45 unfiltered queries in `perf/queries.txt`):
+
+| Archive | Vectors | Search p50 / p95 over HTTP (1 CPU, query embedding included) | Exact vector SQL p50 / p95 | HNSW halfvec p50 (`ef_search` 1000) | Overlap with exact top 10 | Labelled recall@10, exact / HNSW |
+|---|---|---|---|---|---|---|
+| 1x | 3,052 | 39 / 46 ms | 4.5 / 5.7 ms | 4.8 ms | 1.000 | 0.850 / 0.850 |
+| 10x | 30,012 | 64 / 79 ms | 31 / 36 ms | 10.7 ms | 0.995 | 0.763 / 0.758 |
+| 30x | 90,000 | 148 / 177 ms | 97 / 111 ms | 19.9 ms | 0.989 | 0.708 / 0.693 |
+| 30x, `m` 24, `ef_construction` 200 | 90,000 | | | 27.2 ms | 0.997 | 0.708 / 0.703 |
+
+Index sizes at 30x: 176 MB for `vector`, 100 MB for `halfvec` (104 MB with `m` 24); the vectors themselves take 133 MB, or 67 MB as `halfvec`. Builds took 29-38 s with the default settings and about 100-130 s with `m` 24, and passed `maintenance_work_mem` (64 MB) at about 28,000 vectors, so they slowed down. The API's peak memory during the 30x run was 613 MiB, inside the 768 MiB limit.
+
+What it found:
+
+- **Exact search stays well under the 5 s target at 30x.** The whole search's p95 is 177 ms. Keep exact search (P-015) for now.
+- **HNSW works on real embeddings, but only with a high `ef_search`.** At 100, the default-built index missed answers: labelled recall@10 fell from 0.708 to 0.62 at 30x. At 1000 it is within 0.015 of exact, and building with `m` 24 / `ef_construction` 200 closes most of the rest. Once a visitor filter applies, pgvector 0.8's iterative scan (`hnsw.iterative_scan = relaxed_order`) is needed so filtered-out Private rows don't empty the result.
+- **halfvec is the better index.** Recall matches `vector`, the index is 43% smaller and queries are faster. That matters with a 512 MiB database pod.
+- **The current search query can't use an index.** `semantic_hits` takes the minimum distance per chunk across both representations before sorting, so Postgres has to scan every vector. An HNSW version first takes the nearest 2 x N embeddings, then groups them by chunk (`perf/ann.py`'s `ann_chunks`). Switch to that when the archive passes roughly 10x, or when exact vector SQL passes about 100 ms.
+- **Recall falls as the archive grows,** even with exact search: from 0.85 at 1x to 0.71 at 30x, and Nepali query to English passage is the weakest (0.59 at 30x). That is e5-small's quality, not the index's. Use it as the baseline for the model and translation-pivot comparison (D-015).
 
 ## Sign-in and admins
 
