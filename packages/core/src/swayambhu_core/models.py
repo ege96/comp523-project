@@ -26,6 +26,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    literal_column,
     text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
@@ -280,6 +281,15 @@ class SegmentRow(Base):
         CheckConstraint("start_ms >= 0 AND start_ms < end_ms", name="times_valid"),
         Index("segments_original_tsv_idx", "original_tsv", postgresql_using="gin"),
         Index("segments_english_tsv_idx", "english_tsv", postgresql_using="gin"),
+        # Search matches English words in lines with no English text (English speech, or a
+        # failed translation) against the original. Without this, every search scans every
+        # line (found by the performance benchmark: 380 ms at 300 hours of audio).
+        Index(
+            "segments_untranslated_tsv_idx",
+            func.to_tsvector(literal_column("'english'::regconfig"), original_text),
+            postgresql_using="gin",
+            postgresql_where=english_text.is_(None),
+        ),
     )
 
 

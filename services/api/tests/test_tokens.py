@@ -1,4 +1,5 @@
 import time
+from collections.abc import Callable
 from typing import Any
 
 import jwt
@@ -59,30 +60,27 @@ def test_rejects_bad_claims(signer: TokenSigner, overrides: dict[str, Any]) -> N
         signer.verifier().verify(signer.token(**overrides))
 
 
-def test_rejects_token_signed_by_another_key(signer: TokenSigner) -> None:
+FORGED_CLAIMS = {
+    "aud": PROJECT_ID,
+    "iss": f"https://securetoken.google.com/{PROJECT_ID}",
+    "sub": "x",
+}
+
+
+@pytest.mark.parametrize(
+    "forge",
+    [
+        lambda: TokenSigner().token(),  # signed by another key
+        # HS256 with the right claims: a shared secret must never pass for Google's signature
+        lambda: jwt.encode(FORGED_CLAIMS, "a-shared-secret-long-enough-for-hs256", "HS256"),
+        lambda: jwt.encode(FORGED_CLAIMS, None, algorithm="none"),  # unsigned
+        lambda: "not-a-jwt",
+    ],
+    ids=["other-key", "hs256", "unsigned", "garbage"],
+)
+def test_rejects_forged_tokens(signer: TokenSigner, forge: Callable[[], str]) -> None:
     with pytest.raises(InvalidTokenError):
-        signer.verifier().verify(TokenSigner().token())
-
-
-def test_rejects_hs256_token_even_with_matching_claims(signer: TokenSigner) -> None:
-    forged = jwt.encode(
-        {"aud": PROJECT_ID, "iss": f"https://securetoken.google.com/{PROJECT_ID}", "sub": "x"},
-        "a-shared-secret-that-is-long-enough-for-hs256",
-        algorithm="HS256",
-    )
-    with pytest.raises(InvalidTokenError):
-        signer.verifier().verify(forged)
-
-
-def test_rejects_unsigned_token(signer: TokenSigner) -> None:
-    unsigned = jwt.encode({"sub": "x", "aud": PROJECT_ID}, None, algorithm="none")
-    with pytest.raises(InvalidTokenError):
-        signer.verifier().verify(unsigned)
-
-
-def test_rejects_garbage(signer: TokenSigner) -> None:
-    with pytest.raises(InvalidTokenError):
-        signer.verifier().verify("not-a-jwt")
+        signer.verifier().verify(forge())
 
 
 def test_key_fetch_failure_is_unavailable_not_invalid(signer: TokenSigner) -> None:

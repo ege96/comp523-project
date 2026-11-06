@@ -186,25 +186,24 @@ def viewer_client(signer: TokenSigner, store: FakeAdminStore) -> Iterator[TestCl
     viewer_app.dependency_overrides.clear()
 
 
-def test_viewer_anonymous(viewer_client: TestClient) -> None:
-    assert viewer_client.get("/whoami").json() == {"is_admin": False}
-
-
-def test_viewer_signed_in_non_admin_is_treated_as_public(
-    viewer_client: TestClient, signer: TokenSigner
-) -> None:
-    res = viewer_client.get("/whoami", headers=bearer(signer.token("stranger")))
-    assert res.json() == {"is_admin": False}
-
-
-def test_viewer_admin(
-    viewer_client: TestClient, signer: TokenSigner, store: FakeAdminStore
+@pytest.mark.parametrize(
+    ("token", "expected"),
+    [
+        (None, {"is_admin": False}),
+        ("stranger", {"is_admin": False}),  # signed in but not an admin: treated as public
+        ("uid-1", {"is_admin": True}),
+        ("garbage", 401),
+    ],
+)
+def test_viewer(
+    viewer_client: TestClient,
+    signer: TokenSigner,
+    store: FakeAdminStore,
+    token: str | None,
+    expected: dict[str, bool] | int,
 ) -> None:
     store.rows.append(Row(id=1, email="a@example.org", provider="firebase", subject="uid-1"))
-    assert viewer_client.get("/whoami", headers=bearer(signer.token("uid-1"))).json() == {
-        "is_admin": True
-    }
-
-
-def test_viewer_bad_token_is_401(viewer_client: TestClient) -> None:
-    assert viewer_client.get("/whoami", headers=bearer("garbage")).status_code == 401
+    raw = token == "garbage"  # noqa: S105 (a malformed token, not a secret)
+    headers = {} if token is None else bearer(token if raw else signer.token(token))
+    res = viewer_client.get("/whoami", headers=headers)
+    assert (res.status_code if isinstance(expected, int) else res.json()) == expected

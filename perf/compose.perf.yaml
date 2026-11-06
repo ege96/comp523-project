@@ -1,0 +1,20 @@
+# Load-test overrides: the API with the CloudApps pod's limits (1 CPU, 768 MiB), the fake
+# embedder at e5-small's size, and a separate *_perf database the seeder may wipe.
+#
+#   alias dc='docker compose -f compose.yaml -f perf/compose.perf.yaml'
+#   dc up -d db
+#   dc exec db createdb -U swayambhu swayambhu_perf
+#   dc exec db psql -U swayambhu -d swayambhu_perf -c 'CREATE EXTENSION vector'
+#   dc up -d api      # applies migrations on start
+#   dc exec api python -m swayambhu_api.perf.seed --scale 1
+#   k6 run -e API_URL=http://localhost:8000 perf/search_load.js
+#   docker stats   # the API's memory peak
+services:
+  api:
+    environment:
+      DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu_perf
+      EMBEDDING_PROVIDER: fake
+      EMBEDDING_DIMENSIONS: "384"
+      LOG_LEVEL: WARNING
+    cpus: 1
+    mem_limit: 768m

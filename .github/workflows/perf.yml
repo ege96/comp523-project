@@ -1,0 +1,74 @@
+name: Performance
+
+# Search latency on a seeded 1x archive (30 one-hour interviews), plus a short k6 load run.
+# Optional: not in the main ruleset's required checks. GitHub's machines vary in speed, so the
+# limits are loose: p95 under 1 s for single searches, and the plan's 5 s at 10 virtual users.
+on:
+  pull_request:
+    paths:
+      - "services/api/src/swayambhu_api/search.py"
+      - "services/api/src/swayambhu_api/perf/**"
+      - "services/api/src/swayambhu_api/migrations/**"
+      - "packages/core/src/swayambhu_core/models.py"
+      - "perf/**"
+      - ".github/workflows/perf.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: services/api
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: swayambhu
+          POSTGRES_DB: swayambhu_perf
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U swayambhu"
+          --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://swayambhu@localhost:5432/swayambhu_perf
+      EMBEDDING_PROVIDER: fake
+      EMBEDDING_DIMENSIONS: "384"
+      LOG_LEVEL: WARNING
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - name: Seed the 1x archive
+        run: |
+          for f in ../../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+          uv run python -m swayambhu_api.migrate upgrade head
+          uv run python -m swayambhu_api.perf.seed --scale 1
+      - name: Start the API
+        run: |
+          uv run uvicorn swayambhu_api.main:app --port 8000 &
+          for _ in $(seq 30); do curl -fs http://localhost:8000/api/health && exit 0; sleep 1; done
+          exit 1
+      - name: Search latency
+        shell: bash  # with pipefail, so a slow p95 fails the step through tee
+        run: |
+          {
+            echo '## Search latency, 1x archive'
+            echo '```'
+            uv run python -m swayambhu_api.perf.bench latency --url http://localhost:8000 \
+              --runs 10 --max-p95-ms 1000
+            uv run python -m swayambhu_api.perf.bench split --runs 3
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: grafana/setup-k6-action@v1
+      - name: Load test, 10 virtual users for a minute
+        run: k6 run -e API_URL=http://localhost:8000 -e PROFILE=smoke ../../perf/search_load.js
