@@ -173,3 +173,13 @@ def test_filter_choices_only_come_from_visible_interviews(
     assert [lang["code"] for lang in body["languages"]] == ["en", "ne"]
     names = as_viewer(client, ADMIN).get("/api/search/filters").json()["interviewees"]
     assert [p["name"] for p in names] == ["Hidden", "Maya"]
+
+
+def test_filtering_by_a_private_interviewee_finds_nothing_for_visitors(
+    client: TestClient, archive: dict[str, uuid.UUID], db_session: Session
+) -> None:
+    hidden = db_session.get(InterviewRow, archive["private"])
+    assert hidden is not None and hidden.interviewee_id is not None
+    path = f"/api/search?q=butter lamp&interviewee={hidden.interviewee_id}"
+    assert as_viewer(client).get(path).json()["items"] == []
+    assert [m["interview"]["title"] for m in as_viewer(client, ADMIN).get(path).json()["items"]]

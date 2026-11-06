@@ -107,6 +107,22 @@ describe("app shell and sign-in", () => {
   });
 });
 
+describe("about and help", () => {
+  it("is linked from every page and marks text the archive team still has to send", async () => {
+    stubApi(list);
+    renderApp("/");
+    const footer = await screen.findByRole("contentinfo");
+    await userEvent.click(within(footer).getByRole("link", { name: "About & Help" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "About & Help" })).toBeTruthy();
+    expect(
+      screen.getByRole("heading", {
+        name: "How do I ask for a correction or for an interview to be removed?",
+      }),
+    ).toBeTruthy();
+    expect(screen.getAllByText("Text to come from the archive team").length).toBeGreaterThan(0);
+  });
+});
+
 describe("all interviews", () => {
   it("pages through the list with the page number in the URL", async () => {
     stubApi({ "/api/interviews": { body: { items: [interviewSummary], total: 45 } } });
@@ -262,6 +278,58 @@ describe("interview viewer", () => {
     expect(screen.getByText("Corrected")).toBeTruthy();
     await userEvent.click(screen.getByRole("tab", { name: "Original" }));
     expect(screen.queryByText("Corrected")).toBeNull();
+  });
+
+  it("finds words in the transcript, steps through the lines and follows the tab", async () => {
+    const line = (seq: number, original: string, english: string | null) => ({
+      ...segments.items[0],
+      seq,
+      start_ms: seq * 10_000,
+      end_ms: seq * 10_000 + 10_000,
+      original_text: original,
+      english_text: english,
+    });
+    stubApi({
+      [`/api/interviews/${id}`]: { body: { ...interviewDetail, translation_status: "done" } },
+      [`/api/interviews/${id}/segments`]: {
+        body: {
+          items: [
+            line(0, "Stupa at dawn", "The stupa"),
+            line(1, "Nothing here", "Dawn prayers"),
+            line(2, "Back to the STUPA", null),
+          ],
+        },
+      },
+    });
+    renderApp(`/interviews/${id}`);
+    const find = await screen.findByRole("searchbox", { name: "Find in transcript" });
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+
+    await userEvent.type(find, "stupa");
+    expect(screen.getByRole("status").textContent).toBe("1 of 2 lines");
+    expect([...document.querySelectorAll("mark")].map((m) => m.textContent)).toEqual([
+      "Stupa",
+      "STUPA",
+    ]);
+    expect(scroll).toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("status").textContent).toBe("2 of 2 lines");
+    await userEvent.type(find, "{Enter}"); // wraps round to the first
+    expect(screen.getByRole("status").textContent).toBe("1 of 2 lines");
+
+    // The English tab searches what it shows (the original where a line has no English).
+    await userEvent.click(screen.getByRole("tab", { name: "English" }));
+    expect(screen.getByRole("status").textContent).toBe("1 of 2 lines");
+    await userEvent.clear(find);
+    await userEvent.type(find, "temple");
+    expect(screen.getByRole("status").textContent).toBe("No lines match");
+    expect(document.querySelector("mark")).toBeNull();
+
+    expect(screen.getByRole("link", { name: "Learn more" }).getAttribute("href")).toBe(
+      "/about#machine-transcripts",
+    );
   });
 
   it("treats a 404 as missing or private, without saying which", async () => {

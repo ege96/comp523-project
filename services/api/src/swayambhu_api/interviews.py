@@ -73,6 +73,7 @@ class InterviewDetail(InterviewSummary):
     interviewer: str | None
     location: str | None
     description: str | None
+    # Record-keeping for admins; always None for visitors.
     consent_note: str | None
     languages: list[Language]
     # None until the worker has made the browser-playable copy.
@@ -206,7 +207,8 @@ def get_interview(
     )
     media = None
     if playback is not None:
-        url, expires = media_urls.signed_url(settings, playback.id)
+        scope: media_urls.Scope = "admin" if viewer.is_admin else "public"
+        url, expires = media_urls.signed_url(settings, playback.id, scope)
         media = Media(
             url=url,
             content_type=playback.content_type,
@@ -218,7 +220,7 @@ def get_interview(
             "interviewer": interview.interviewer,
             "location": interview.location,
             "description": interview.description,
-            "consent_note": interview.consent_note,
+            "consent_note": interview.consent_note if viewer.is_admin else None,
             "languages": [Language(code=c, name=n) for c, n in languages],
             "media": media,
             **{
@@ -258,12 +260,20 @@ def get_media(
     settings: SettingsDep,
     expires: Annotated[int, Query()],
     sig: Annotated[str, Query()],
+    scope: Annotated[media_urls.Scope, Query()] = "public",
 ) -> FileResponse:
     """Stream a media file from a link made by the interview detail route. Supports HTTP
-    Range requests, so players can seek without downloading the whole file (NF5)."""
-    if not media_urls.is_valid(settings, media_id, expires, sig):
+    Range requests, so players can seek without downloading the whole file (NF5).
+
+    A visitor's link stops working as soon as its interview is made Private."""
+    if not media_urls.is_valid(settings, media_id, expires, scope, sig):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This media link is invalid or expired")
-    media = session.get(MediaFileRow, media_id)
+    query = select(MediaFileRow).where(MediaFileRow.id == media_id)
+    if scope == "public":
+        query = query.join(InterviewRow, InterviewRow.id == MediaFileRow.interview_id).where(
+            visible_to(None)
+        )
+    media = session.scalar(query)
     if media is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
     try:
