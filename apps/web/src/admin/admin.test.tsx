@@ -74,7 +74,18 @@ describe("admin page", () => {
     expect(within(row).getByText("Processing")).toBeTruthy();
     expect(screen.getByText("Done", { selector: ".MuiChip-label" })).toBeTruthy();
 
-    await userEvent.click(within(row).getByRole("switch", { name: "Public: Test interview B" }));
+    // Making it Public asks first; Cancel sends nothing.
+    const toggle = within(row).getByRole("switch", { name: "Public: Test interview B" });
+    await userEvent.click(toggle);
+    const dialog = await screen.findByRole("dialog", { name: "Make “Test interview B” Public?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(requests().some((r) => r.method === "PATCH")).toBe(false);
+    expect((toggle as HTMLInputElement).checked).toBe(false);
+
+    await userEvent.click(toggle);
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Make Public" }),
+    );
     expect(requests()).toContainEqual({
       url: `/api/interviews/${privateOne.id}`,
       method: "PATCH",
@@ -88,6 +99,23 @@ describe("admin page", () => {
     await userEvent.click(screen.getByRole("tab", { name: "Failed" }));
     await vi.waitFor(() => {
       expect(requests().some((r) => r.url.includes("status=failed"))).toBe(true);
+    });
+  });
+
+  it("makes an interview Private without asking", async () => {
+    stubApi(adminApi);
+    renderApp("/admin", fakeAuthClient({ signedIn: true }));
+    const toggle = await screen.findByRole(
+      "switch",
+      { name: `Public: ${interviewSummary.title}` },
+      SLOW,
+    );
+    await userEvent.click(toggle);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(requests()).toContainEqual({
+      url: `/api/interviews/${id}`,
+      method: "PATCH",
+      body: '{"visibility":"private"}',
     });
   });
 

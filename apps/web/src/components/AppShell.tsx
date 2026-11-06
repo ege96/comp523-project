@@ -55,6 +55,9 @@ export function AppShell() {
                 <ButtonLink to="/" activeOptions={{ exact: true }} activeProps={activeNav}>
                   Archive
                 </ButtonLink>
+                <ButtonLink to="/about" activeProps={activeNav}>
+                  About
+                </ButtonLink>
                 {signedIn && state.role === "admin" ? (
                   <ButtonLink to="/admin" activeProps={activeNav}>
                     Upload &amp; review
@@ -78,11 +81,16 @@ export function AppShell() {
           <Typography variant="body2" color="text.secondary">
             Swayambhu Stories · A living oral-history archive
           </Typography>
-          {signedIn ? null : (
-            <TextLink to="/signin" variant="body2" color="text.secondary">
-              Admin sign-in
+          <Stack direction="row" spacing={3}>
+            <TextLink to="/about" variant="body2" color="text.secondary">
+              About &amp; Help
             </TextLink>
-          )}
+            {signedIn ? null : (
+              <TextLink to="/signin" variant="body2" color="text.secondary">
+                Admin sign-in
+              </TextLink>
+            )}
+          </Stack>
         </Container>
       </Box>
     </Box>
