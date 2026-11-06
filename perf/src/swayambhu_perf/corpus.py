@@ -1,15 +1,15 @@
 """Build a real-text search corpus, embedded with the local model, for the performance tests.
 
-    uv run --group perf python -m swayambhu_api.perf.corpus \\
+    uv run python -m swayambhu_perf.corpus \\
         --fleurs data/fleurs --wiki-ne data/wiki/ne.parquet --wiki-en data/wiki/en0.parquet \\
         --vectors 150000 --out data/corpus
 
-The synthetic archive (`swayambhu_api.perf.seed --scale N`) has made-up words and random
+The synthetic archive (`swayambhu_perf.seed --scale N`) has made-up words and random
 vectors, which say nothing about how an approximate vector index behaves on real embeddings.
 This writes passages of real Nepali and English text and their vectors, which
 `perf.seed --corpus` then loads into the archive schema.
 
-Sources (download them first, see perf/README.md):
+Sources (download them first with download_corpus_sources.sh):
 - FLEURS transcripts (CC BY 4.0): the same ~2,000 FLORES sentences read in Nepali (`ne_np`)
   and English (`en_us`), joined by sentence id. Six consecutive sentences make one passage.
   Half the groups become "Nepali interviews" (a Nepali original vector and an English vector

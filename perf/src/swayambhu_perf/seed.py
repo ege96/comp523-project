@@ -1,8 +1,8 @@
 """Fill a scratch database with a synthetic archive for performance tests.
 
-    python -m swayambhu_api.perf.seed --scale 1      # 30 one-hour interviews
-    python -m swayambhu_api.perf.seed --scale 10     # 300
-    python -m swayambhu_api.perf.seed --interviews 3 --minutes 5   # tiny
+    python -m swayambhu_perf.seed --scale 1      # 30 one-hour interviews
+    python -m swayambhu_perf.seed --scale 10     # 300
+    python -m swayambhu_perf.seed --interviews 3 --minutes 5   # tiny
 
 It writes interviews, lines, search chunks and embeddings straight into Postgres with COPY,
 without the worker, so even the 30x archive is ready in minutes. Every run with the same
@@ -16,7 +16,7 @@ vectors named after the configured embedder (`EMBEDDING_PROVIDER=fake
 EMBEDDING_DIMENSIONS=384` matches e5-small's size), so the API's semantic search compares
 against them.
 
-`--corpus DIR` loads real text and e5-small vectors made by `swayambhu_api.perf.corpus`
+`--corpus DIR` loads real text and e5-small vectors made by `swayambhu_perf.corpus`
 instead (`--vectors N` keeps the first interviews up to about N vectors). Run it, and the
 API, with `EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small`.
 
@@ -39,13 +39,13 @@ import numpy as np
 import psycopg
 from sqlalchemy import Engine
 from sqlalchemy.engine import make_url
+from swayambhu_api.config import Settings
+from swayambhu_api.db import get_engine
 from swayambhu_core.chunking import Timed, chunk_segments
 from swayambhu_core.models import CHUNKER
 from swayambhu_providers.factory import embedder_name
 
-from swayambhu_api.config import Settings
-from swayambhu_api.db import get_engine
-from swayambhu_api.perf.corpus import load_vectors, read_corpus
+from swayambhu_perf.corpus import load_vectors, read_corpus
 
 LINE_MS = 2_000
 INTERVIEWS_PER_SCALE = 30

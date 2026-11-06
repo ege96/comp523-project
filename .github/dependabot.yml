@@ -9,7 +9,7 @@ multi-ecosystem-groups:
 
 updates:
   - package-ecosystem: uv
-    directories: [/services/api, /services/worker, /packages/core, /packages/providers]
+    directories: [/services/api, /services/worker, /packages/core, /packages/providers, /perf]
     patterns: ["*"]
     multi-ecosystem-group: weekly
   - package-ecosystem: npm

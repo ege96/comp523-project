@@ -5,11 +5,11 @@ import numpy as np
 import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
-from swayambhu_core.models import ChunkEmbeddingRow, IntervieweeRow, InterviewRow, SegmentRow
-
 from swayambhu_api.config import Settings
 from swayambhu_api.db import get_engine
-from swayambhu_api.perf import ann, bench, corpus, seed
+from swayambhu_core.models import ChunkEmbeddingRow, IntervieweeRow, InterviewRow, SegmentRow
+
+from swayambhu_perf import ann, bench, corpus, seed
 
 pytestmark = pytest.mark.integration
 

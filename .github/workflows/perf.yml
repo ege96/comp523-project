@@ -7,7 +7,6 @@ on:
   pull_request:
     paths:
       - "services/api/src/swayambhu_api/search.py"
-      - "services/api/src/swayambhu_api/perf/**"
       - "services/api/src/swayambhu_api/migrations/**"
       - "packages/core/src/swayambhu_core/models.py"
       - "perf/**"
@@ -27,7 +26,7 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: services/api
+        working-directory: perf
     services:
       db:
         image: pgvector/pgvector:pg16
@@ -50,9 +49,9 @@ jobs:
       - run: uv sync --frozen
       - name: Seed the 1x archive
         run: |
-          for f in ../../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+          for f in ../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
           uv run python -m swayambhu_api.migrate upgrade head
-          uv run python -m swayambhu_api.perf.seed --scale 1
+          uv run python -m swayambhu_perf.seed --scale 1
       - name: Start the API
         run: |
           uv run uvicorn swayambhu_api.main:app --port 8000 &
@@ -64,11 +63,11 @@ jobs:
           {
             echo '## Search latency, 1x archive'
             echo '```'
-            uv run python -m swayambhu_api.perf.bench latency --url http://localhost:8000 \
+            uv run python -m swayambhu_perf.bench latency --url http://localhost:8000 \
               --runs 10 --max-p95-ms 1000
-            uv run python -m swayambhu_api.perf.bench split --runs 3
+            uv run python -m swayambhu_perf.bench split --runs 3
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: grafana/setup-k6-action@v1
       - name: Load test, 10 virtual users for a minute
-        run: k6 run -e API_URL=http://localhost:8000 -e PROFILE=smoke ../../perf/search_load.js
+        run: k6 run -e API_URL=http://localhost:8000 -e PROFILE=smoke search_load.js

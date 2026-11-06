@@ -1,6 +1,6 @@
 """Exact vector search vs HNSW indexes (full and half precision), on the search's own query.
 
-Used by `python -m swayambhu_api.perf.bench ann`. For each variant it reports, on the real
+Used by `python -m swayambhu_perf.bench ann`. For each variant it reports, on the real
 search path as a visitor sees it (Public interviews only, nearest 100 chunks):
 
 - latency of the vector query,
@@ -31,16 +31,15 @@ import psycopg
 from pgvector.sqlalchemy import HALFVEC, VECTOR
 from sqlalchemy import cast, select, text
 from sqlalchemy.orm import Session
-from swayambhu_core.models import CHUNKER, ChunkEmbeddingRow, InterviewRow, SearchChunkRow
-from swayambhu_providers import EmbeddingKind
-from swayambhu_providers.factory import build_embedder
-
 from swayambhu_api.admins import Admin
 from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings
 from swayambhu_api.db import new_session
 from swayambhu_api.search import nearest_chunks, semantic_hits
 from swayambhu_api.visibility import visible_to
+from swayambhu_core.models import CHUNKER, ChunkEmbeddingRow, InterviewRow, SearchChunkRow
+from swayambhu_providers import EmbeddingKind
+from swayambhu_providers.factory import build_embedder
 
 VISITOR = Viewer(admin=None)
 ADMIN = Viewer(admin=Admin(0, "perf"))

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Download the open text sources for the real-text performance corpus (swayambhu_api.perf.corpus)
+# Download the open text sources for the real-text performance corpus (swayambhu_perf.corpus)
 # into DIR (default data/): about 460 MB. Needs huggingface.co and its CDN.
 #   FLEURS transcripts, Nepali and English (CC BY 4.0): google/fleurs on Hugging Face
 #   Wikipedia, Nepali (all) and English (first of 41 files), 2023-11-01 (CC BY-SA 4.0):

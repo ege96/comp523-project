@@ -53,7 +53,7 @@ Every PR runs the full suite in CI. Python tests run against a real PostgreSQL 1
 | Integration (`-m integration`) | `services/api/tests/*_integration.py`, `services/worker/tests/*_integration.py` | Each route against Postgres: visibility on every listing, search hit, transcript and media link (an anonymous visitor never reaches Private content), migrations up and down, the worker pipeline end to end on generated audio with FFmpeg |
 | Authorization sweep | `services/api/tests/test_auth.py` | Walks every registered route: anything not on the public list must answer 401 to anonymous and 403 to non-admin requests, so a new route can't ship unprotected |
 | Search quality | `python -m swayambhu_api.search_eval` | Recall@5 and MRR for keyword, semantic and hybrid search on a labelled query set ([below](#measuring-search-quality-proposal)) |
-| Performance | `python -m swayambhu_api.perf.*`, `perf/` | Latency at 1x/10x/30x archive sizes, an HNSW index experiment, and a k6 load test at the CloudApps pod size ([below](#performance-proposal)) |
+| Performance | `python -m swayambhu_perf.*`, `perf/` | Latency at 1x/10x/30x archive sizes, an HNSW index experiment, and a k6 load test at the CloudApps pod size ([below](#performance-proposal)) |
 
 Coverage gates: at least 80% (branch coverage) for each Python project and the web app; each CI job writes its coverage table to the job summary.
 
@@ -63,6 +63,7 @@ Coverage gates: at least 80% (branch coverage) for each Python project and the w
 | `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with coverage, `npm audit`, Vite build |
 | `pre-commit` | Every hook in `.pre-commit-config.yaml`, including private-key and large-file checks |
 | `docker` | hadolint, an image build with a layer cache, a smoke run as an arbitrary non-root UID (like OpenShift), image size in the job summary |
+| `perf` | ruff, mypy and the integration tests of the `perf/` tools (seeders, benchmarks, corpus loader); coverage is reported but not gated |
 | `Performance` (optional) | Seeds the 1x archive, fails if search p95 is over 1 s, then a 1-minute k6 load run |
 
 To run the checks before you commit:
@@ -79,6 +80,7 @@ export DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_test
 cd services/api    && uv run pytest --cov -m ""     # -m "" includes integration tests
 cd services/worker && uv run pytest --cov -m ""     # needs ffmpeg on PATH
 cd packages/core   && uv run pytest --cov
+cd perf            && uv run pytest -m ""         # the performance tools, against *_test
 cd apps/web        && npm run lint && npm run typecheck && npm run test:coverage
 ```
 
@@ -108,14 +110,14 @@ EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small \
 
 ### Performance (Proposal)
 
-`python -m swayambhu_api.perf.seed --scale N` fills a scratch `*_perf` database with N x 30 synthetic one-hour interviews (placeholder words, random 384-dim vectors, half Private) straight through COPY: 30x, 1.6 million lines, takes about 80 s. `python -m swayambhu_api.perf.bench` then measures:
+The tools are a separate development-only project in `perf/` (`cd perf && uv sync`), so none of it ships in the API image; run the commands below from there. `python -m swayambhu_perf.seed --scale N` fills a scratch `*_perf` database with N x 30 synthetic one-hour interviews (placeholder words, random 384-dim vectors, half Private) straight through COPY: 30x, 1.6 million lines, takes about 80 s. `python -m swayambhu_perf.bench` then measures:
 
 - `latency --url ...`: each of the 50 queries in `perf/queries.txt` (words, phrases, filtered), 20 times, over HTTP: median, p95, p99.
 - `split`: the keyword SQL and the vector SQL timed apart.
 - `k6 <csv>`: per-step results of a `k6 run -e PROFILE=ceiling --out csv=<csv> perf/search_load.js` run.
 - `ann`: exact vector search against temporary HNSW indexes (`vector` and `halfvec`) on the search's own query as a visitor: latency, overlap with exact search, index size and build time, and with `--corpus` the recall of labelled queries.
 
-For real text and vectors instead of placeholders: `perf/download_corpus_sources.sh data` fetches FLEURS transcripts (Nepali and English, CC BY 4.0) and Nepali and English Wikipedia (CC BY-SA 4.0), about 460 MB. `uv run --group perf python -m swayambhu_api.perf.corpus --fleurs data/fleurs --wiki-ne data/wiki/ne.parquet --wiki-en data/wiki/en0.parquet --vectors 90000 --out data/corpus` cuts them into 75-225 word passages (one 30-90 s chunk of speech each) and embeds them with e5-small. That takes about 75 minutes for 90,000 vectors on 4 CPUs, and an interrupted run continues where it stopped. `perf.seed --corpus data/corpus --vectors N` then loads the first N vectors' worth. FLEURS has the same ~2,000 sentences in both languages, so it supplies 654 labelled queries (Nepali and English, same-language and cross-language). Wikipedia supplies the distractors, plus short labelled queries: article titles, answered by any passage of that article. `--labels-only` rewrites the labels without embedding. About 40% of the vectors are Nepali text, as in a two-thirds-Nepali archive. Run the seeder, the API and `bench` with `EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small` and the e5 prefixes.
+For real text and vectors instead of placeholders: `./download_corpus_sources.sh data` fetches FLEURS transcripts (Nepali and English, CC BY 4.0) and Nepali and English Wikipedia (CC BY-SA 4.0), about 460 MB. `uv run python -m swayambhu_perf.corpus --fleurs data/fleurs --wiki-ne data/wiki/ne.parquet --wiki-en data/wiki/en0.parquet --vectors 90000 --out data/corpus` cuts them into 75-225 word passages (one 30-90 s chunk of speech each) and embeds them with e5-small. That takes about 75 minutes for 90,000 vectors on 4 CPUs, and an interrupted run continues where it stopped. `perf.seed --corpus data/corpus --vectors N` then loads the first N vectors' worth. FLEURS has the same ~2,000 sentences in both languages, so it supplies 654 labelled queries (Nepali and English, same-language and cross-language). Wikipedia supplies the distractors, plus short labelled queries: article titles, answered by any passage of that article. `--labels-only` rewrites the labels without embedding. About 40% of the vectors are Nepali text, as in a two-thirds-Nepali archive. Run the seeder, the API and `bench` with `EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small` and the e5 prefixes.
 
 `perf/search_load.js` is a k6 load test (ramp to 50 users; `PROFILE=smoke` holds 10 users for a minute) for the API run with the CloudApps pod's limits, `perf/compose.perf.yaml` (1 CPU, 768 MiB). The optional `Performance` CI workflow runs the 1x latency check and the k6 smoke run. Don't load-test the live CloudApps site: it's a shared cluster.
 

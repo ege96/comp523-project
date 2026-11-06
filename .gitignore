@@ -16,3 +16,4 @@ media/
 
 # Downloaded corpus sources and built corpora (perf/download_corpus_sources.sh)
 /data/
+/perf/data/

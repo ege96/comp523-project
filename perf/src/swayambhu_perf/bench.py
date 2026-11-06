@@ -1,11 +1,11 @@
-"""Search latency benchmark, on an archive filled by `swayambhu_api.perf.seed`.
+"""Search latency benchmark, on an archive filled by `swayambhu_perf.seed`.
 
     # End to end: each query from perf/queries.txt, 20 times, one at a time, over HTTP
-    python -m swayambhu_api.perf.bench latency --url http://localhost:8000 --runs 20
+    python -m swayambhu_perf.bench latency --url http://localhost:8000 --runs 20
     # Where the time goes: keyword SQL vs vector SQL, in process
-    python -m swayambhu_api.perf.bench split
+    python -m swayambhu_perf.bench split
     # Exact vs HNSW (vector and halfvec) on the search's vector query; builds, then drops
-    python -m swayambhu_api.perf.bench ann --corpus data/corpus --ef-search 40,100,200
+    python -m swayambhu_perf.bench ann --corpus data/corpus --ef-search 40,100,200
 
 Reports median, p95 and p99 in milliseconds, overall and by query kind (word, phrase,
 filter). `latency --max-p95-ms N` exits 1 when p95 is over N, for CI. Run the API with the
@@ -23,16 +23,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from swayambhu_providers import EmbeddingKind
-from swayambhu_providers.factory import build_embedder
-
 from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings
 from swayambhu_api.db import new_session
-from swayambhu_api.perf import ann
 from swayambhu_api.search import keyword_hits, semantic_hits
+from swayambhu_providers import EmbeddingKind
+from swayambhu_providers.factory import build_embedder
 
-DEFAULT_QUERIES = Path(__file__).parents[5] / "perf" / "queries.txt"
+from swayambhu_perf import ann
+
+DEFAULT_QUERIES = Path(__file__).parents[2] / "queries.txt"
 VISITOR = Viewer(admin=None)
 
 
