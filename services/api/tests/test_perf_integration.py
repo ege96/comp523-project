@@ -98,3 +98,10 @@ def test_query_file_and_stats(tmp_path: Path) -> None:
     assert all(q.extra for q in QUERIES if q.kind == "filter")
     s = bench.stats([float(ms) for ms in range(1, 101)])
     assert (s["p50"], round(s["p95"], 2), s["max"]) == (50.5, 95.05, 100.0)
+    # k6 --out csv: searches bucketed into one-minute steps, failures counted.
+    head = "metric_name,timestamp,metric_value,name\n"
+    rows = [f"http_req_duration,{t},{ms},search" for t, ms in ((0, 50), (30, 70), (60, 90))]
+    rows += ["http_req_failed,61,1,search", "http_req_duration,62,9999,interview", "vus,0,5,"]
+    (tmp_path / "k6.csv").write_text(head + "\n".join(rows) + "\n")
+    steps = bench.k6_steps(tmp_path / "k6.csv")
+    assert list(steps) == ["step 1"] and steps["step 1"]["p50"] == 60  # step 2 has one sample

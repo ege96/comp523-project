@@ -75,8 +75,10 @@ class Interview:
 @dataclass(frozen=True)
 class Label:
     query: str
-    kind: str  # "<query language>-><passage language>", e.g. ne->en
-    passage_id: int
+    # "<query language>-><passage language>", e.g. ne->en, for FLEURS sentences, or
+    # "title-<language>" for a Wikipedia article title, whose answers are its passages.
+    kind: str
+    passage_ids: list[int]
 
 
 def read_fleurs(directory: Path, language: str) -> dict[int, str]:
@@ -137,10 +139,22 @@ def fleurs_interviews(directory: Path) -> list[Interview]:
     return interviews
 
 
+TITLE_VECTORS = 3_000  # title queries come from articles in the first 1x worth of vectors
+
+
 def build_labels(interviews: Sequence[Interview], rng: random.Random, per_kind: int) -> list[Label]:
+    """Full FLEURS sentences (same- and cross-language), plus Wikipedia article titles: short
+    queries more like a visitor's, answered by any passage of the article. Titles are drawn
+    from the first 1x of the corpus, so every archive size loads their answers."""
     by_kind: dict[str, list[Label]] = {}
+    vectors = 0
     for interview in interviews:
+        vectors += vector_count(interview)
         if interview.source != "fleurs":
+            if vectors <= TITLE_VECTORS and 1 <= len(interview.title.split()) <= 4:
+                kind = f"title-{interview.language}"
+                ids = [p.id for p in interview.passages]
+                by_kind.setdefault(kind, []).append(Label(interview.title, kind, ids))
             continue
         for p in interview.passages:
             other = p.english_sentences or []  # the same sentences in the other language
@@ -149,7 +163,7 @@ def build_labels(interviews: Sequence[Interview], rng: random.Random, per_kind: 
             else:  # English passage; its Nepali versions are queries only
                 pairs = [("en->en", p.sentences), ("ne->en", other)]
             for kind, sentences in pairs:
-                by_kind.setdefault(kind, []).append(Label(rng.choice(sentences), kind, p.id))
+                by_kind.setdefault(kind, []).append(Label(rng.choice(sentences), kind, [p.id]))
     labels: list[Label] = []
     for kind in sorted(by_kind):
         labels += rng.sample(by_kind[kind], min(per_kind, len(by_kind[kind])))
@@ -298,6 +312,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     )
     parser.add_argument("--workers", type=int, help="embedding processes (default: all cores)")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--labels-only", action="store_true", help="rewrite labels, embed none")
     args = parser.parse_args(argv)
 
     interviews, labels = plan(args)
@@ -324,7 +339,8 @@ def main(argv: Sequence[str] | None = None) -> None:
         f"{len(all_texts)} texts to embed, {len(labels)} labelled queries",
         flush=True,
     )
-    embed_all(all_texts, args.out, args)
+    if not args.labels_only:
+        embed_all(all_texts, args.out, args)
 
 
 if __name__ == "__main__":

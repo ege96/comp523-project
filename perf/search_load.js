@@ -3,6 +3,11 @@
 //
 //   k6 run -e API_URL=http://localhost:8000 perf/search_load.js
 //   k6 run -e API_URL=http://localhost:8000 -e PROFILE=smoke perf/search_load.js   # CI
+//   k6 run -e API_URL=http://localhost:8000 -e PROFILE=ceiling perf/search_load.js
+//
+// `ceiling` drops the think time and raises the request rate step by step (1 to MAX_RPS,
+// default 20, searches per second), so the point where p95 or errors climb is the most one
+// API pod can serve. Read the per-step results with `--out json=...` or from the summary.
 //
 // Each virtual user searches with a query from perf/queries.txt, waits 1-3 s, and 1 in 10
 // times also opens an interview from the results, like a visitor reading a moment.
@@ -34,8 +39,33 @@ const profiles = {
   ],
 };
 
+const PROFILE = __ENV.PROFILE || "full";
+const MAX_RPS = Number(__ENV.MAX_RPS || 20);
+
+function ceilingStages() {
+  // 1 req/s, then steps up to MAX_RPS, a minute each, so each step settles.
+  const steps = [];
+  for (let rps = 1; rps <= MAX_RPS; rps = rps < 4 ? rps + 1 : rps + 2) {
+    steps.push({ duration: "10s", target: rps }, { duration: "50s", target: rps });
+  }
+  return steps;
+}
+
 export const options = {
-  stages: profiles[__ENV.PROFILE || "full"],
+  ...(PROFILE === "ceiling"
+    ? {
+        scenarios: {
+          ceiling: {
+            executor: "ramping-arrival-rate",
+            startRate: 1,
+            timeUnit: "1s",
+            preAllocatedVUs: 20,
+            maxVUs: 200,
+            stages: ceilingStages(),
+          },
+        },
+      }
+    : { stages: profiles[PROFILE] }),
   thresholds: {
     // Plan targets: 95% of searches within 5 s, under 1% errors.
     "http_req_duration{name:search}": ["p(95)<5000"],
@@ -57,5 +87,5 @@ export default function () {
     const page = http.get(`${API}/api/interviews/${id}`, { tags: { name: "interview" } });
     check(page, { "interview ok": (r) => r.status === 200 });
   }
-  sleep(1 + Math.random() * 2);
+  if (PROFILE !== "ceiling") sleep(1 + Math.random() * 2);
 }

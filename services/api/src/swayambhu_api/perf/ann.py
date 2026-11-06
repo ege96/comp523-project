@@ -11,11 +11,11 @@ search path as a visitor sees it (Public interviews only, nearest 100 chunks):
   answer is an English passage),
 - index size, build time and the bytes the vectors take.
 
-The production query (`search.semantic_hits`) groups every embedding by chunk before it
-sorts, so no index can serve it. The ANN variants first take the nearest 2 x N embeddings
-from the index, filtered by visibility as the index is walked (pgvector 0.8 iterative scan),
-then group them by chunk. The column has no fixed size, so each index is on an expression,
-`(embedding::vector(384))` or `(embedding::halfvec(384))`, and the query casts the same way.
+All variants use the search's own query (`search.nearest_chunks`): the nearest 2 x N
+embeddings, filtered by visibility, then grouped by chunk. With an index, the visibility
+filter is applied as the index is walked (pgvector 0.8 iterative scan). The column has no
+fixed size, so each index is on an expression, `(embedding::vector(384))` or
+`(embedding::halfvec(384))`, and the query's distance casts the same way.
 Each index is built inside a transaction that is rolled back, so it never stays behind.
 """
 
@@ -29,7 +29,7 @@ from typing import Any
 
 import psycopg
 from pgvector.sqlalchemy import HALFVEC, VECTOR
-from sqlalchemy import cast, func, select, text
+from sqlalchemy import cast, select, text
 from sqlalchemy.orm import Session
 from swayambhu_core.models import CHUNKER, ChunkEmbeddingRow, InterviewRow, SearchChunkRow
 from swayambhu_providers import EmbeddingKind
@@ -39,7 +39,7 @@ from swayambhu_api.admins import Admin
 from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings
 from swayambhu_api.db import new_session
-from swayambhu_api.search import semantic_hits
+from swayambhu_api.search import nearest_chunks, semantic_hits
 from swayambhu_api.visibility import visible_to
 
 VISITOR = Viewer(admin=None)
@@ -54,7 +54,7 @@ OPS = {
 class Query:
     text: str
     kind: str  # perf/queries.txt kind, or a label kind such as ne->en
-    answer: int | None = None  # chunk id of the labelled answer
+    answers: frozenset[int] = frozenset()  # chunk ids that count as a right answer
 
 
 @dataclass
@@ -91,39 +91,17 @@ class _Fixed:
 
 
 def ann_chunks(
-    session: Session,
-    viewer: Viewer,
-    model: str,
-    vector: list[float],
-    op: str,
-    dims: int,
+    session: Session, viewer: Viewer, model: str, vector: list[float], op: str, dims: int,
     candidates: int,
-) -> list[int]:
-    """The nearest `candidates` chunks through an index on `embedding::<op>(dims)`."""
+) -> list[int]:  # fmt: skip
+    """The search's nearest chunks, with the distance cast to match an index on
+    `embedding::<op>(dims)`."""
     _, kind, _ = OPS[op]
     distance = cast(ChunkEmbeddingRow.embedding, kind(dims)).cosine_distance(
         cast(vector, kind(dims))
     )
-    nearest = (
-        select(ChunkEmbeddingRow.chunk_id, distance.label("d"))
-        .join(SearchChunkRow, SearchChunkRow.id == ChunkEmbeddingRow.chunk_id)
-        .join(InterviewRow, InterviewRow.id == SearchChunkRow.interview_id)
-        .where(
-            visible_to(viewer.admin),
-            SearchChunkRow.chunker == CHUNKER,
-            ChunkEmbeddingRow.model == model,
-        )
-        .order_by(distance)
-        .limit(2 * candidates)  # a chunk has at most two embeddings (original, English)
-        .subquery()
-    )
-    rows = session.execute(
-        select(nearest.c.chunk_id)
-        .group_by(nearest.c.chunk_id)
-        .order_by(func.min(nearest.c.d), nearest.c.chunk_id)
-        .limit(candidates)
-    )
-    return [r[0] for r in rows]
+    hits = nearest_chunks(session, viewer, [], model, distance, candidates)
+    return [h.chunk_id for h in hits if h.chunk_id is not None]
 
 
 def _overlap(exact: list[list[int]], other: list[list[int]], k: int) -> float:
@@ -135,7 +113,7 @@ def _overlap(exact: list[list[int]], other: list[list[int]], k: int) -> float:
 def _task_recall(labelled: list[Query], results: list[list[int]], k: int) -> dict[str, float]:
     hits: dict[str, list[float]] = {}
     for q, ids in zip(labelled, results, strict=True):
-        found = 1.0 if q.answer in ids[:k] else 0.0
+        found = 1.0 if q.answers & set(ids[:k]) else 0.0
         hits.setdefault("all", []).append(found)
         hits.setdefault(q.kind, []).append(found)
     return {kind: statistics.mean(v) for kind, v in sorted(hits.items())}
@@ -154,8 +132,9 @@ def load_labels(corpus: Path, session: Session) -> list[Query]:
     with (corpus / "labels.jsonl").open(encoding="utf-8") as f:
         for line in f:
             label = json.loads(line)
-            if label["passage_id"] in chunk_of:  # only answers loaded into this archive
-                queries.append(Query(label["query"], label["kind"], chunk_of[label["passage_id"]]))
+            answers = frozenset(chunk_of[p] for p in label["passage_ids"] if p in chunk_of)
+            if answers:  # only labels whose answers are loaded into this archive
+                queries.append(Query(label["query"], label["kind"], answers))
     return queries
 
 

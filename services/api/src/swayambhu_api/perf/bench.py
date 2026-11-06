@@ -137,6 +137,39 @@ def split(settings: Settings, queries: list[PerfQuery], runs: int) -> dict[str, 
     }
 
 
+def k6_steps(csv_path: Path, step_s: int = 60) -> dict[str, dict[str, float]]:
+    """Searches per step of `search_load.js PROFILE=ceiling` (one step a minute), from k6's
+    `--out csv=` file: achieved rate, latency and failures for each step."""
+    import csv
+
+    rows: dict[int, list[float]] = {}
+    failed: dict[int, int] = {}
+    start = None
+    with csv_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row["name"] != "search" or row["metric_name"] not in (
+                "http_req_duration",
+                "http_req_failed",
+            ):
+                continue
+            t = int(row["timestamp"])
+            start = t if start is None else start
+            step = (t - start) // step_s
+            if row["metric_name"] == "http_req_duration":
+                rows.setdefault(step, []).append(float(row["metric_value"]))
+            elif float(row["metric_value"]):
+                failed[step] = failed.get(step, 0) + 1
+    out = {}
+    for step, samples in sorted(rows.items()):
+        if len(samples) > 1:
+            out[f"step {step + 1}"] = {
+                **stats(samples),
+                "rps": len(samples) / step_s,
+                "failed": failed.get(step, 0),
+            }
+    return out
+
+
 def ann_report(a: "ann.AnnResult", runs: int) -> str:
     out = [
         table(
@@ -175,6 +208,9 @@ def ann_report(a: "ann.AnnResult", runs: int) -> str:
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
+    k6 = sub.add_parser("k6", help="per-step results of a k6 PROFILE=ceiling run")
+    k6.add_argument("csv", type=Path, help="k6 --out csv= file")
+    k6.add_argument("--json", action="store_true")
     for name in ("latency", "split", "ann"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--queries", type=Path, default=DEFAULT_QUERIES)
@@ -189,6 +225,19 @@ def main(argv: Sequence[str] | None = None) -> None:
             cmd.add_argument("--m", type=int, default=16)
             cmd.add_argument("--ef-construction", type=int, default=64)
     args = parser.parse_args(argv)
+    if args.command == "k6":
+        steps = k6_steps(args.csv)
+        if args.json:
+            json.dump(steps, sys.stdout, indent=2)
+            print()
+            return
+        print(f"{'':<10}{'req/s':>7}{'p50 ms':>9}{'p95 ms':>9}{'max ms':>9}{'failed':>8}")
+        for name, s in steps.items():
+            print(
+                f"{name:<10}{s['rps']:>7.1f}{s['p50']:>9.0f}{s['p95']:>9.0f}{s['max']:>9.0f}"
+                f"{int(s['failed']):>8}"
+            )
+        return
     queries = load_queries(args.queries)
     settings = Settings()
 

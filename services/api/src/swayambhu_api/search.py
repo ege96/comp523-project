@@ -254,19 +254,46 @@ def semantic_hits(
         # text can echo the request, and search terms are never logged.
         log.warning("Query embedding failed (retryable=%s); keyword results only", exc.retryable)
         return None
-    distance = func.min(ChunkEmbeddingRow.embedding.cosine_distance(vector))
-    rows = session.execute(
-        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
-        .join(ChunkEmbeddingRow, ChunkEmbeddingRow.chunk_id == SearchChunkRow.id)
+    distance = ChunkEmbeddingRow.embedding.cosine_distance(vector)
+    return nearest_chunks(session, viewer, where, embedder.name, distance, candidates)
+
+
+def nearest_chunks(
+    session: DbSession,
+    viewer: CurrentViewer,
+    where: list[ColumnElement[bool]],
+    model: str,
+    distance: ColumnElement[float],
+    candidates: int,
+) -> list[Hit]:
+    """The `candidates` chunks with the nearest embedding, nearest first.
+
+    The inner query keeps only the nearest 2 x candidates embeddings. A chunk has at most two
+    (original and English), so the k-th best chunk's best embedding ranks at most 2k - 1, and
+    the result is still exact. Sorting just (chunk id, distance) pairs this way is far cheaper
+    than grouping every 1.5 KB vector row by chunk first, which spilled to disk (perf.bench
+    ann), and it is the shape an HNSW index on `distance` could serve.
+    """
+    nearest = (
+        select(ChunkEmbeddingRow.chunk_id, distance.label("distance"))
+        .join(SearchChunkRow, SearchChunkRow.id == ChunkEmbeddingRow.chunk_id)
         .join(InterviewRow, InterviewRow.id == SearchChunkRow.interview_id)
         .where(
             visible_to(viewer.admin),
             *where,
             SearchChunkRow.chunker == CHUNKER,
-            ChunkEmbeddingRow.model == embedder.name,
+            ChunkEmbeddingRow.model == model,
         )
+        .order_by(distance)
+        .limit(2 * candidates)
+        .subquery()
+    )
+    best = func.min(nearest.c.distance)
+    rows = session.execute(
+        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
+        .join(nearest, nearest.c.chunk_id == SearchChunkRow.id)
         .group_by(SearchChunkRow.id)
-        .order_by(distance, SearchChunkRow.id)
+        .order_by(best, SearchChunkRow.id)
         .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
