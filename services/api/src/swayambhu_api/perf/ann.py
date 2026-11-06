@@ -74,7 +74,6 @@ class AnnResult:
     vectors: int
     queries: int
     labelled: int
-    table_mb: float
     vector_mb: float
     halfvec_mb: float
     settings: dict[str, str]
@@ -205,8 +204,8 @@ def run(
 
         size_sql = (
             "SELECT count(*), sum(pg_column_size(embedding)), "  # noqa: S608 (int)
-            f"sum(pg_column_size(embedding::halfvec({int(dims)}))), "
-            "pg_total_relation_size('chunk_embeddings') FROM chunk_embeddings WHERE model = :m"
+            f"sum(pg_column_size(embedding::halfvec({int(dims)}))) "
+            "FROM chunk_embeddings WHERE model = :m"
         )
         sizes = session.execute(text(size_sql), {"m": model}).one()
         mb = 1024 * 1024
@@ -264,7 +263,6 @@ def run(
             int(sizes[0]),
             len(queries),
             len(labelled),
-            sizes[3] / mb,
             sizes[1] / mb,
             sizes[2] / mb,
             config,

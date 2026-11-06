@@ -165,9 +165,8 @@ def ann_report(a: "ann.AnnResult", runs: int) -> str:
         ]
     out += [
         "",
-        f"chunk_embeddings {a.table_mb:.0f} MB on disk; the vectors take {a.vector_mb:.0f} MB "
-        f"as vector, {a.halfvec_mb:.0f} MB as halfvec. Settings: "
-        + ", ".join(f"{k} {v}" for k, v in a.settings.items()),
+        f"The vectors take {a.vector_mb:.0f} MB as vector, {a.halfvec_mb:.0f} MB as halfvec. "
+        "Settings: " + ", ".join(f"{k} {v}" for k, v in a.settings.items()),
     ]
     out += [f"Notice: {n}" for n in a.notices]
     return "\n".join(out)
