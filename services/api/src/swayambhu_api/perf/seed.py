@@ -16,11 +16,16 @@ vectors named after the configured embedder (`EMBEDDING_PROVIDER=fake
 EMBEDDING_DIMENSIONS=384` matches e5-small's size), so the API's semantic search compares
 against them.
 
+`--corpus DIR` loads real text and e5-small vectors made by `swayambhu_api.perf.corpus`
+instead (`--vectors N` keeps the first interviews up to about N vectors). Run it, and the
+API, with `EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small`.
+
 It deletes every interview first, so it only runs against a database whose name ends in
 `_perf` or `_test`.
 """
 
 import argparse
+import json
 import math
 import random
 import time
@@ -28,7 +33,9 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
+import numpy as np
 import psycopg
 from sqlalchemy import Engine
 from sqlalchemy.engine import make_url
@@ -38,6 +45,7 @@ from swayambhu_providers.factory import embedder_name
 
 from swayambhu_api.config import Settings
 from swayambhu_api.db import get_engine
+from swayambhu_api.perf.corpus import load_vectors, read_corpus
 
 LINE_MS = 2_000
 INTERVIEWS_PER_SCALE = 30
@@ -203,6 +211,98 @@ def seed(engine: Engine, interviews: int, minutes: int, model: str, dimensions: 
     return Counts(len(meta), len(segments), len(chunks), len(embeddings))
 
 
+PASSAGE = "perf-corpus:"  # source_hash prefix of corpus embeddings
+WORD_MS = 400  # corpus lines last about as long as their words take to say
+
+
+def seed_corpus(engine: Engine, directory: Path, max_vectors: int | None, model: str) -> Counts:
+    """Load the first interviews of a real-text corpus (see perf.corpus), passage = chunk."""
+    _, interviews, _ = read_corpus(directory)
+    vectors = load_vectors(directory)
+    rng = random.Random(SEED)  # noqa: S311 (test data, not secrets)
+    raw = engine.raw_connection()
+    try:
+        conn = raw.driver_connection
+        if not isinstance(conn, psycopg.Connection):
+            raise TypeError("expected a psycopg 3 connection")
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM interviews")
+            cur.execute("DELETE FROM interviewees")
+            cur.execute(
+                "INSERT INTO interviewees (display_name) SELECT 'Placeholder interviewee ' || n "
+                "FROM generate_series(1, 20) n RETURNING id"
+            )
+            people = [row[0] for row in cur.fetchall()]
+            meta: list[tuple[object, ...]] = []
+            segments: list[tuple[object, ...]] = []
+            chunks: list[tuple[object, ...]] = []
+            embeddings: list[tuple[int, str, np.ndarray]] = []  # passage id, rep, vector
+            row = 0  # next row of `vectors`: passages in order, original then English
+            for n, interview in enumerate(interviews):
+                needed = sum(2 if p.english else 1 for p in interview.passages)
+                if row + needed > len(vectors) or (max_vectors and row >= max_vectors):
+                    break
+                interview_id = uuid.UUID(int=rng.getrandbits(128), version=4)
+                start = seq = 0
+                translated = interview.language == "en" or all(
+                    p.english for p in interview.passages
+                )
+                for p in interview.passages:
+                    english = p.english_sentences if p.english else None
+                    first = seq
+                    for i, sentence in enumerate(p.sentences):
+                        end = start + max(1, len(sentence.split())) * WORD_MS
+                        segments.append((interview_id, seq, start, end, p.language, sentence,
+                                         english[i] if english else None))  # fmt: skip
+                        start, seq = end, seq + 1
+                    chunks.append((interview_id, p.id, first, seq - 1,
+                                   segments[-len(p.sentences)][2], start))  # fmt: skip
+                    embeddings.append((p.id, "original" if p.language == "ne" else "english",
+                                       vectors[row]))  # fmt: skip
+                    row += 1
+                    if p.english:
+                        embeddings.append((p.id, "english", vectors[row]))
+                        row += 1
+                recorded = date(rng.randint(1990, 2024), 1, 1) if n % 4 else None
+                meta.append((
+                    interview_id, interview.title[:200],
+                    "public" if n % 2 == 0 else "private", "done",
+                    "not_needed" if interview.language == "en" else
+                    "done" if translated else "failed",
+                    interview.language, rng.choice(people) if n % 5 else None, recorded,
+                    "year" if recorded else None, start,
+                ))  # fmt: skip
+
+            _copy(cur, "interviews (id, title, visibility, status, translation_status, "
+                  "language_confirmed, interviewee_id, recorded_on, recorded_on_precision, "
+                  "duration_ms)", meta)  # fmt: skip
+            _copy(cur, "interview_languages (interview_id, language_code)",
+                  [(m[0], m[5]) for m in meta])  # fmt: skip
+            _copy(cur, "segments (interview_id, seq, start_ms, end_ms, language, "
+                  "original_machine, english_machine)", segments)  # fmt: skip
+            _copy(cur, "search_chunks (interview_id, chunker, first_seq, last_seq, start_ms, "
+                  "end_ms)", [(c[0], CHUNKER, *c[2:]) for c in chunks])  # fmt: skip
+            cur.execute(
+                "SELECT id, interview_id, first_seq FROM search_chunks WHERE chunker = %s",
+                (CHUNKER,),
+            )
+            chunk_ids = {(i, first): cid for cid, i, first in cur.fetchall()}
+            by_passage = {c[1]: chunk_ids[(c[0], c[2])] for c in chunks}
+            # source_hash names the corpus passage, so `bench ann` can find labelled answers.
+            _copy(cur, "chunk_embeddings (chunk_id, model, representation, embedding, "
+                  "source_hash)", [(by_passage[pid], model, rep, _format(v), f"{PASSAGE}{pid}")
+                                   for pid, rep, v in embeddings])  # fmt: skip
+            cur.execute("ANALYZE")
+        conn.commit()
+    finally:
+        raw.close()
+    return Counts(len(meta), len(segments), len(chunks), len(embeddings))
+
+
+def _format(vector: np.ndarray) -> str:
+    return "[" + ",".join(f"{x:.7g}" for x in vector.tolist()) + "]"
+
+
 def _copy(
     cur: psycopg.Cursor[tuple[object, ...]], target: str, rows: Sequence[tuple[object, ...]]
 ) -> None:
@@ -216,10 +316,28 @@ def main(argv: list[str] | None = None) -> None:
     size = parser.add_mutually_exclusive_group()
     size.add_argument("--scale", type=int, default=1, help="1x = 30 interviews (default 1)")
     size.add_argument("--interviews", type=int, help="exact number of interviews")
+    size.add_argument("--corpus", type=Path, help="real-text corpus from perf.corpus")
     parser.add_argument("--minutes", type=int, default=60, help="length of each (default 60)")
+    parser.add_argument("--vectors", type=int, help="with --corpus: stop at about N vectors")
     args = parser.parse_args(argv)
     settings = Settings()
     check_database(settings.database_url)
+    if args.corpus:
+        wanted = json.loads((args.corpus / "manifest.json").read_text())["model"]
+        if embedder_name(settings) != f"local:{wanted}":
+            raise SystemExit(
+                f"This corpus needs EMBEDDING_PROVIDER=local EMBEDDING_MODEL={wanted}, so the "
+                "API embeds queries with the same model"
+            )
+        began = time.monotonic()
+        counts = seed_corpus(
+            get_engine(settings), args.corpus, args.vectors, embedder_name(settings)
+        )
+        print(
+            f"Loaded {counts.interviews} interviews, {counts.lines} lines, {counts.chunks} "
+            f"chunks and {counts.embeddings} embeddings in {time.monotonic() - began:.0f} s"
+        )
+        return
     interviews = args.interviews or args.scale * INTERVIEWS_PER_SCALE
     # The vector size the configured embedder produces; fake defaults to 8, so set 384.
     dimensions = settings.embedding_dimensions or 384

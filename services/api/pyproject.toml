@@ -25,6 +25,10 @@ dev = [
     "pytest-cov>=5",
     "httpx2>=2.13",
 ]
+# Only for building the real-text performance corpus (swayambhu_api.perf.corpus).
+perf = [
+    "pyarrow>=21",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -42,6 +46,10 @@ addopts = "-m 'not integration'"
 strict = true
 packages = ["swayambhu_api"]
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100
