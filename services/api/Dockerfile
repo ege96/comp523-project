@@ -71,6 +71,9 @@ COPY --from=build /stage/ /
 # X-Forwarded-For for client IPs. Override per environment if that ever changes.
 ENV FORWARDED_ALLOW_IPS="*"
 COPY services/api/start.sh /opt/start.sh
+# Media volume mount point, writable by group 0 like the worker's, whichever container
+# first fills a fresh compose volume.
+RUN mkdir -p /data/media && chgrp 0 /data/media && chmod 2775 /data/media
 USER 1001
 EXPOSE 8080
 CMD ["sh", "/opt/start.sh"]

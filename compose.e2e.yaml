@@ -1,0 +1,23 @@
+# Overrides for the browser smoke tests (apps/web/e2e). Use with compose.yaml:
+#   docker compose -f compose.yaml -f compose.e2e.yaml up -d --build --wait
+services:
+  # Serves the public key the tests sign their stand-in Firebase tokens with. The tests make
+  # it on each checkout (apps/web/e2e/.auth, git-ignored); Google never sees these tokens.
+  jwks:
+    image: python:3.12-slim
+    command: ["python", "-m", "http.server", "8000", "-d", "/srv"]
+    volumes:
+      - ./apps/web/e2e/.auth/jwks:/srv:ro
+
+  api:
+    build:
+      # Fake providers only, so skip baking the embedding model (faster, no Hugging Face).
+      args: { EMBEDDING_MODEL: "" }
+    environment:
+      FIREBASE_PROJECT_ID: comp523-e2e
+      FIREBASE_JWKS_URL: http://jwks:8000/jwks.json
+    depends_on: [jwks]
+
+  worker:
+    build:
+      args: { EMBEDDING_MODEL: "" }
