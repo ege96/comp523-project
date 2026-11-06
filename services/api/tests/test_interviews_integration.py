@@ -41,6 +41,7 @@ def interviews(db_session: Session, settings: Settings) -> Iterator[dict[str, In
             interviewee_id=person.id,
             language_confirmed="ne",
             status_detail="Translating",
+            consent_note="Consent recorded on paper",
             duration_ms=20_000,
         )
         db_session.add(interview)
@@ -107,9 +108,12 @@ def test_detail_and_transcript_of_a_public_interview(
     path = f"/api/interviews/{interviews['public'].id}"
     detail = as_viewer(client).get(path).json()
     assert detail["status_detail"] is None  # admins only
+    assert detail["consent_note"] is None  # admins only
     assert detail["languages"] == [{"code": "ne", "name": "Nepali"}]
     assert detail["media"]["content_type"] == "audio/mp4"
-    assert as_viewer(client, ADMIN).get(path).json()["status_detail"] == "Translating"
+    admin_detail = as_viewer(client, ADMIN).get(path).json()
+    assert admin_detail["status_detail"] == "Translating"
+    assert admin_detail["consent_note"] == "Consent recorded on paper"
 
     segments = as_viewer(client).get(f"{path}/segments").json()["items"]
     assert [

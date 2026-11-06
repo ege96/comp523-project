@@ -72,6 +72,7 @@ class InterviewDetail(InterviewSummary):
     interviewer: str | None
     location: str | None
     description: str | None
+    # Record-keeping for admins; always None for visitors.
     consent_note: str | None
     languages: list[Language]
     # None until the worker has made the browser-playable copy.
@@ -211,7 +212,7 @@ def get_interview(
             "interviewer": interview.interviewer,
             "location": interview.location,
             "description": interview.description,
-            "consent_note": interview.consent_note,
+            "consent_note": interview.consent_note if viewer.is_admin else None,
             "languages": [Language(code=c, name=n) for c, n in languages],
             "media": media,
             "status_detail": interview.status_detail if viewer.is_admin else None,
