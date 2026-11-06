@@ -82,6 +82,8 @@ export interface paths {
          * Get Media
          * @description Stream a media file from a link made by the interview detail route. Supports HTTP
          *     Range requests, so players can seek without downloading the whole file (NF5).
+         *
+         *     A visitor's link stops working as soon as its interview is made Private.
          */
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
@@ -889,6 +891,7 @@ export interface operations {
             query: {
                 expires: number;
                 sig: string;
+                scope?: "public" | "admin";
             };
             header?: never;
             path: {
