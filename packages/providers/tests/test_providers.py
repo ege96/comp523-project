@@ -65,7 +65,7 @@ def test_http_errors_say_whether_to_retry(clip: AudioClip, status: int, retryabl
     transcriber = OpenAITranscriber(client(lambda _: httpx.Response(status, text="nope")), "m")
     with pytest.raises(ProviderError) as info:
         transcriber.transcribe(clip, [])
-    assert info.value.retryable is retryable
+    assert (info.value.retryable, info.value.status_code) == (retryable, status)
 
 
 def test_timeouts_are_retryable(clip: AudioClip) -> None:
@@ -75,6 +75,7 @@ def test_timeouts_are_retryable(clip: AudioClip) -> None:
     with pytest.raises(ProviderError) as info:
         OpenAITranscriber(client(handler), "m").transcribe(clip, [])
     assert info.value.retryable
+    assert info.value.status_code is None
 
 
 def test_openai_embedder_batches_and_keeps_order() -> None:

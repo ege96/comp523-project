@@ -45,3 +45,8 @@ export const UPLOAD_LANGUAGES = [
   { code: "new", name: "Nepal Bhasa" },
   { code: "en", name: "English" },
 ] as const;
+
+/** A language's name for a code the API sent, or the code itself if it's not one we list. */
+export function languageName(code: string): string {
+  return UPLOAD_LANGUAGES.find((l) => l.code === code)?.name ?? code;
+}

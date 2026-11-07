@@ -80,7 +80,8 @@ TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")
 REPRESENTATIONS = ("original", "english")
-JOB_KINDS = ("transcribe", "translate", "index", "playback", "retranslate")
+# retranscribe: transcribe again, replacing admins' corrections (they confirmed it, P-013).
+JOB_KINDS = ("transcribe", "translate", "index", "playback", "retranslate", "retranscribe")
 JOB_STATES = ("queued", "running", "done", "failed")
 
 

@@ -17,11 +17,16 @@ EmbeddingKind = Literal["query", "passage"]
 
 
 class ProviderError(Exception):
-    """A provider call failed. `retryable` is True for rate limits, timeouts and 5xx."""
+    """A provider call failed. `retryable` is True for rate limits, timeouts and 5xx.
 
-    def __init__(self, message: str, *, retryable: bool) -> None:
+    `status_code` is the HTTP status when the provider answered with an error, so the worker
+    can tell admins what went wrong in plain words; None for timeouts and other failures.
+    """
+
+    def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.status_code = status_code
 
 
 @dataclass(frozen=True)
@@ -91,4 +96,8 @@ def raise_for_status(status_code: int, body: str, provider: str) -> None:
         return
     retryable = status_code == 429 or status_code >= 500
     # Bodies can echo the request; keep the message short.
-    raise ProviderError(f"{provider} returned {status_code}: {body[:300]}", retryable=retryable)
+    raise ProviderError(
+        f"{provider} returned {status_code}: {body[:300]}",
+        retryable=retryable,
+        status_code=status_code,
+    )

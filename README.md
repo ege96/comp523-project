@@ -126,7 +126,7 @@ Results on a development container (PostgreSQL 16, fake embedder, so these are d
 
 What it found:
 
-- **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0008 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
+- **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0009 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
 - **Exact vector search is fast enough well past the expected archive.** 23 ms for the nearest 100 of 90,000 vectors. An HNSW index cut that to 8 ms but took 88 s to build, and on random vectors its recall was poor (0.23 of the exact top 10 with `ef_search` 200, 0.64 with 1000). Random vectors are a worst case for HNSW, so measure recall again with real embeddings before adding one; until then, keep exact search (P-015).
 
 ## Sign-in and admins

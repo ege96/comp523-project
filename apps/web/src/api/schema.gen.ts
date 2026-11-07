@@ -41,7 +41,11 @@ export interface paths {
         head?: never;
         /**
          * Update Interview
-         * @description Publish (Public) or hide (Private) an interview. Takes effect on the next request.
+         * @description Publish or hide an interview, or correct its details. Takes effect on the next request.
+         *
+         *     Changing the language doesn't redo the transcript or the English on its own: both cost
+         *     provider calls, and transcribing again would replace corrections. The admin page offers
+         *     those as separate actions.
          */
         patch: operations["update_interview_api_interviews__interview_id__patch"];
         trace?: never;
@@ -78,6 +82,8 @@ export interface paths {
          * Get Media
          * @description Stream a media file from a link made by the interview detail route. Supports HTTP
          *     Range requests, so players can seek without downloading the whole file (NF5).
+         *
+         *     A visitor's link stops working as soon as its interview is made Private.
          */
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
@@ -140,6 +146,30 @@ export interface paths {
         get: operations["list_jobs_api_interviews__interview_id__jobs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/interviews/{interview_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun
+         * @description Run a processing step again: to retry one that failed, or to redo the transcript or
+         *     English after the language was corrected. The later steps follow, as after an upload.
+         *
+         *     Transcribing again replaces every line, so when admins have corrected any it is refused
+         *     (409, with `corrected_lines`) unless `replace_corrections` says to go ahead.
+         */
+        post: operations["rerun_api_interviews__interview_id__rerun_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -422,6 +452,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -462,6 +494,12 @@ export interface components {
             media: components["schemas"]["Media"] | null;
             /** Status Detail */
             status_detail: string | null;
+            /** Language Detected */
+            language_detected: string | null;
+            /** Language Detected Confidence */
+            language_detected_confidence: number | null;
+            /** Language Confirmed */
+            language_confirmed: string | null;
         };
         /** InterviewList */
         InterviewList: {
@@ -481,6 +519,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -509,13 +549,23 @@ export interface components {
              */
             created_at: string;
         };
-        /** InterviewUpdate */
+        /**
+         * InterviewUpdate
+         * @description Only the fields sent change. For the optional details (D-004), null means unknown.
+         */
         InterviewUpdate: {
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "public" | "private";
+            /** Visibility */
+            visibility?: ("public" | "private") | null;
+            /** Title */
+            title?: string | null;
+            /** Interviewee Id */
+            interviewee_id?: number | null;
+            /** Interviewee Name */
+            interviewee_name?: string | null;
+            /** Recorded On */
+            recorded_on?: string | null;
+            /** Language */
+            language?: string | null;
         };
         /** Interviewee */
         Interviewee: {
@@ -609,6 +659,19 @@ export interface components {
             items: components["schemas"]["AdminSegment"][];
             /** Skipped */
             skipped: number;
+        };
+        /** Rerun */
+        Rerun: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "transcribe" | "translate" | "index" | "playback";
+            /**
+             * Replace Corrections
+             * @default false
+             */
+            replace_corrections: boolean;
         };
         /** RetranslateResult */
         RetranslateResult: {
@@ -828,6 +891,7 @@ export interface operations {
             query: {
                 expires: number;
                 sig: string;
+                scope?: "public" | "admin";
             };
             header?: never;
             path: {
@@ -942,6 +1006,48 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["JobList"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_api_interviews__interview_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Rerun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Already queued or running, or would replace corrections */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

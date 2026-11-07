@@ -231,6 +231,8 @@ describe("admin page", () => {
     const steps = await screen.findByRole("table", { name: "Processing steps" });
     expect(within(steps).getByText("Playback copy")).toBeTruthy();
     expect(within(steps).getByText("3 of 3")).toBeTruthy();
+    expect(within(steps).queryByText("ffmpeg exited 1")).toBeNull(); // folded away
+    await userEvent.click(within(steps).getByRole("button", { name: "Show technical details" }));
     expect(within(steps).getByText("ffmpeg exited 1")).toBeTruthy();
 
     cleanup();
