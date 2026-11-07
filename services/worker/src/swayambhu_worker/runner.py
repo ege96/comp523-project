@@ -10,6 +10,7 @@ from swayambhu_core.storage import MediaStore
 from swayambhu_providers import ProviderError
 
 from swayambhu_worker.audio import AudioError
+from swayambhu_worker.messages import WORKER_STOPPED, explain
 from swayambhu_worker.steps import GIVE_UP, STEPS, Providers, StepError
 
 log = logging.getLogger("swayambhu_worker")
@@ -35,7 +36,7 @@ class JobRunner:
         with self._new_session() as session:
             for stale in jobs.reap_stale(session, self._lease):
                 log.warning("job %s (%s) abandoned by its worker", stale.id, stale.kind)
-                GIVE_UP[stale.kind](session, stale.interview_id, "The worker stopped responding.")
+                GIVE_UP[stale.kind](session, stale.interview_id, WORKER_STOPPED)
             job = jobs.claim(session, self._lease)
             session.commit()
         if job is None:
@@ -49,13 +50,15 @@ class JobRunner:
                 )
                 jobs.complete(session, job)
                 session.commit()
-        except (StepError, AudioError, FileNotFoundError) as exc:
-            self._failed(job, str(exc), retryable=False)
+        except StepError as exc:  # already written for admins
+            self._failed(job, str(exc), str(exc), retryable=False)
+        except (AudioError, FileNotFoundError) as exc:
+            self._failed(job, str(exc), explain(job.kind, exc), retryable=False)
         except ProviderError as exc:
-            self._failed(job, str(exc), retryable=exc.retryable)
+            self._failed(job, str(exc), explain(job.kind, exc), retryable=exc.retryable)
         except Exception as exc:
             log.exception("job %s crashed", job.id)
-            self._failed(job, f"Unexpected error: {exc}", retryable=True)
+            self._failed(job, f"Unexpected error: {exc}", explain(job.kind, exc), retryable=True)
         else:
             log.info("job %s done", job.id)
         return True
@@ -68,11 +71,13 @@ class JobRunner:
 
         return beat
 
-    def _failed(self, job: jobs.Job, error: str, *, retryable: bool) -> None:
+    def _failed(self, job: jobs.Job, error: str, message: str, *, retryable: bool) -> None:
+        """`error` is the technical detail, kept on the job for the operator; `message` is
+        what admins see on the interview."""
         with self._new_session() as session:
             if jobs.fail(session, job, error, retryable=retryable):
                 log.warning("job %s will be retried: %s", job.id, error)
             else:
                 log.error("job %s failed: %s", job.id, error)
-                GIVE_UP[job.kind](session, job.interview_id, error)
+                GIVE_UP[job.kind](session, job.interview_id, message)
             session.commit()

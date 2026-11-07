@@ -50,6 +50,9 @@ _LANGUAGE_ALIASES = {
 }
 
 
+PLAYBACK_FAILED = "Playback copy failed"
+
+
 class StepError(Exception):
     """A failure that retrying won't fix, with a message an admin can act on."""
 
@@ -134,16 +137,18 @@ def transcribe(
     providers: Providers,
     store: MediaStore,
     heartbeat: Heartbeat,
+    *,
+    replace_edits: bool = False,
 ) -> None:
     interview = _interview(session, interview_id)
-    if session.scalar(
+    if not replace_edits and session.scalar(
         select(SegmentRow.id).where(
             SegmentRow.interview_id == interview_id, SegmentRow.edited_at.is_not(None)
         )
     ):
         raise StepError(
-            "Not re-transcribing: an admin has edited this transcript, and replacing it "
-            "needs their confirmation."
+            "Not transcribed again: admins have corrected lines of this transcript. To "
+            "replace them, press Transcribe again on this page and confirm."
         )
     media = _original_media(session, interview_id)
     interview.status_detail = "Transcribing"
@@ -190,6 +195,18 @@ def transcribe(
     interview.translation_status = "pending"
     interview.translated_by = None
     jobs.enqueue(session, "translate", interview_id)
+
+
+def retranscribe(
+    session: Session,
+    interview_id: uuid.UUID,
+    providers: Providers,
+    store: MediaStore,
+    heartbeat: Heartbeat,
+) -> None:
+    """Transcribe again although admins corrected lines: they confirmed losing the
+    corrections (P-013), say after fixing the language."""
+    transcribe(session, interview_id, providers, store, heartbeat, replace_edits=True)
 
 
 def _translate_lines(
@@ -276,7 +293,7 @@ def give_up_translating(session: Session, interview_id: uuid.UUID, error: str) -
     """English is allowed to fail (F13): index what there is and leave the gap visible."""
     interview = _interview(session, interview_id)
     interview.translation_status = "failed"
-    interview.status_detail = f"Translation failed: {error}"
+    interview.status_detail = f"English translation failed. {error}"
     jobs.enqueue(session, "index", interview_id)
 
 
@@ -398,7 +415,7 @@ def playback(
     heartbeat: Heartbeat,
 ) -> None:
     """Make the copy the player streams. Independent of the transcript steps."""
-    _interview(session, interview_id)
+    interview = _interview(session, interview_id)
     original = _original_media(session, interview_id)
     session.commit()
     with store.local_copy(original.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
@@ -418,6 +435,8 @@ def playback(
             store.delete(old.storage_key)
         session.delete(old)
         session.flush()
+    if interview.status_detail and interview.status_detail.startswith(PLAYBACK_FAILED):
+        interview.status_detail = None  # the failure this replaces
     session.add(
         MediaFileRow(
             interview_id=interview_id,
@@ -434,21 +453,33 @@ def give_up_retranslating(session: Session, interview_id: uuid.UUID, error: str)
     """The edited lines keep their old English and still show as out of date, so an admin
     can retry with "Update English now"."""
     interview = _interview(session, interview_id)
-    interview.status_detail = f"Updating the English failed: {error}"
+    interview.status_detail = f"Updating the English after edits failed. {error}"
 
 
 def give_up_playback(session: Session, interview_id: uuid.UUID, error: str) -> None:
-    """The transcript is still usable without a player, so the status stays as it is."""
+    """The transcript is still usable without a player, so the status stays as it is. A
+    transcript failure says more, so it isn't overwritten; the steps table shows both."""
     interview = _interview(session, interview_id)
-    interview.status_detail = f"Playback copy failed: {error}"
+    if interview.status == "failed":
+        return
+    interview.status_detail = f"{PLAYBACK_FAILED}. {error}"
 
 
-def give_up(session: Session, interview_id: uuid.UUID, error: str) -> None:
-    """Transcription or indexing failed for good: show it to admins (D-008 "Failed")."""
+def _failed(interview_id: uuid.UUID, session: Session, detail: str) -> None:
     interview = session.get(InterviewRow, interview_id)
     if interview is not None:
         interview.status = "failed"
-        interview.status_detail = error
+        interview.status_detail = detail
+
+
+def give_up_transcribing(session: Session, interview_id: uuid.UUID, error: str) -> None:
+    """No transcript: show it to admins as Failed (D-016)."""
+    _failed(interview_id, session, f"Transcription failed. {error}")
+
+
+def give_up_indexing(session: Session, interview_id: uuid.UUID, error: str) -> None:
+    """The transcript exists but search can't find it: Failed, so admins retry it."""
+    _failed(interview_id, session, f"Search indexing failed. {error}")
 
 
 Step = Callable[[Session, uuid.UUID, Providers, MediaStore, Heartbeat], None]
@@ -458,11 +489,13 @@ STEPS: dict[str, Step] = {
     "index": index,
     "playback": playback,
     "retranslate": retranslate,
+    "retranscribe": retranscribe,
 }
 GIVE_UP: dict[str, Callable[[Session, uuid.UUID, str], None]] = {
-    "transcribe": give_up,
+    "transcribe": give_up_transcribing,
     "translate": give_up_translating,
-    "index": give_up,
+    "index": give_up_indexing,
     "playback": give_up_playback,
     "retranslate": give_up_retranslating,
+    "retranscribe": give_up_transcribing,
 }

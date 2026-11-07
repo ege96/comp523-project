@@ -131,7 +131,7 @@ Results on a development container (PostgreSQL 16, fake embedder, so these are d
 
 What it found:
 
-- **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0008 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
+- **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0009 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
 - **On random vectors HNSW looked useless** (0.23 of the exact top 10 at `ef_search` 200). Real embeddings, below, tell a different story.
 
 Results with real text and e5-small vectors (2026-11-06; the API pinned to 1 CPU, like the CloudApps pod, and PostgreSQL to another, with its defaults: `shared_buffers` 128 MB, `maintenance_work_mem` 64 MB). The vector query is the nearest 100 chunks as a visitor, over 948 queries: 654 labelled FLEURS sentences, 249 labelled Wikipedia titles (1-4 words) and the 45 unfiltered queries in `perf/queries.txt`. HNSW here is `halfvec` at `ef_search` 1000:
