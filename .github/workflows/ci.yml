@@ -53,6 +53,9 @@ jobs:
           uv run python -m swayambhu_api.migrate upgrade head
           uv run python -m swayambhu_api.migrate check
           uv run pytest --cov -m ""
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
 
   worker:
     runs-on: ubuntu-latest
@@ -87,6 +90,9 @@ jobs:
       - run: uv run mypy
       # Unit and integration tests together: the pipeline is only covered against Postgres.
       - run: uv run pytest --cov -m ""
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Audit runtime dependencies
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
@@ -106,6 +112,9 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest --cov
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Audit runtime dependencies
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
@@ -125,6 +134,9 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run mypy
       - run: uv run pytest --cov
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
       - name: Audit runtime dependencies
         run: |
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"

@@ -1,0 +1,52 @@
+# Fixed search queries for the performance tests: kind<TAB>query<TAB>extra query string.
+# Words come from the seeder's placeholder vocabulary (swayambhu_api.perf.seed).
+word	lamp
+word	monkey
+word	pigeon
+word	festival
+word	temple
+word	incense
+word	monastery
+word	earthquake
+word	repair
+word	gold
+word	courtyard
+word	pilgrim
+word	drum
+word	monsoon
+word	offering
+word	ritual
+word	memory
+word	tourist
+word	candle
+word	shrine
+word	स्तूप
+word	बत्ती
+word	परेवा
+word	मन्दिर
+word	भूकम्प
+word	पूजा
+word	गीत
+word	तस्बिर
+word	ढुङ्गा
+word	मूर्ति
+phrase	butter lamp offering
+phrase	prayer wheel temple
+phrase	monkey on the steps
+phrase	festival drum song
+phrase	earthquake repair gold
+phrase	grandmother morning prayer
+phrase	pilgrim walk climb hill
+phrase	winter night monastery
+phrase	tourist photograph eyes
+phrase	village family memory
+phrase	rain road walk
+phrase	बिहान पूजा
+phrase	घ्यू बत्ती
+phrase	भूकम्प मर्मत
+phrase	हजुरआमा कथा
+filter	lamp	language=ne
+filter	festival	interviewee=unknown
+filter	temple	recorded_from=2000-01-01&recorded_to=2010-12-31
+filter	monkey	language=en
+filter	पूजा	recorded_from=1995-01-01&undated=true

@@ -2,7 +2,9 @@
 
 A search-first web archive of multilingual oral-history interviews about the Swayambhu stupa in Kathmandu. UNC COMP 523, with Dr. Lauren Leve (UNC Religious Studies) and Baakhan Nyane Waa.
 
-This is a skeleton: each service starts and reports health, and nothing else exists yet.
+[![CI](https://github.com/ege96/comp523-project/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ege96/comp523-project/actions/workflows/ci.yml)
+
+Admins upload hour-long recordings; a background worker transcribes, translates to English and indexes them; visitors search across languages and land on the timestamped moment in the recording. Keyword and semantic (pgvector) search are fused into one ranked list, and Private interviews never leave the server.
 
 ## Layout
 
@@ -41,29 +43,42 @@ cd services/api && uv sync && uv run uvicorn swayambhu_api.main:app --reload
 cd services/worker && uv sync && uv run python -m swayambhu_worker
 ```
 
-## Checks
+## Testing
 
-CI runs on every PR. Treat these as required checks when you set up branch protection:
+Every PR runs the full suite in CI. Python tests run against a real PostgreSQL 16 + pgvector service container, not mocks, and every AI provider has an offline fake, so CI never calls a paid API.
 
-| Job | What it runs |
+| Layer | Where | What it proves |
+|---|---|---|
+| Unit | `services/*/tests`, `packages/*/tests`, `apps/web/src/**/*.test.ts(x)` | Token verification (forged, unsigned and HS256 tokens rejected), chunking, text fingerprints, provider adapters, React components and hooks (Vitest + Testing Library) |
+| Integration (`-m integration`) | `services/api/tests/*_integration.py`, `services/worker/tests/*_integration.py` | Each route against Postgres: visibility on every listing, search hit, transcript and media link (an anonymous visitor never reaches Private content), migrations up and down, the worker pipeline end to end on generated audio with FFmpeg |
+| Authorization sweep | `services/api/tests/test_auth.py` | Walks every registered route: anything not on the public list must answer 401 to anonymous and 403 to non-admin requests, so a new route can't ship unprotected |
+| Search quality | `python -m swayambhu_api.search_eval` | Recall@5 and MRR for keyword, semantic and hybrid search on a labelled query set ([below](#measuring-search-quality-proposal)) |
+| Performance | `python -m swayambhu_api.perf.*`, `perf/` | Latency at 1x/10x/30x archive sizes, an HNSW index experiment, and a k6 load test at the CloudApps pod size ([below](#performance-proposal)) |
+
+Coverage gates: at least 80% (branch coverage) for each Python project and the web app; each CI job writes its coverage table to the job summary.
+
+| CI job | What it runs |
 |---|---|
-| `api`, `worker` | ruff lint and format, mypy `--strict`, pytest with at least 80% coverage. The API job also runs an integration test against Postgres + pgvector. |
-| `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with at least 80% coverage, Vite build |
+| `api`, `worker`, `core`, `providers` | ruff lint and format, mypy `--strict`, pytest (unit and integration) with coverage, `pip-audit` on runtime dependencies. `api` also checks the models match the migrations. |
+| `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with coverage, `npm audit`, Vite build |
 | `pre-commit` | Every hook in `.pre-commit-config.yaml`, including private-key and large-file checks |
-| `docker` | Runs hadolint on each Dockerfile, builds the image with a layer cache, runs it as an arbitrary non-root UID (like OpenShift does), and writes the image size to the job summary |
+| `docker` | hadolint, an image build with a layer cache, a smoke run as an arbitrary non-root UID (like OpenShift), image size in the job summary |
+| `Performance` (optional) | Seeds the 1x archive, fails if search p95 is over 1 s, then a 1-minute k6 load run |
 
-To run the same checks before you commit:
+To run the checks before you commit:
 
 ```sh
 uv tool install pre-commit && pre-commit install   # once
 pre-commit run --all-files
 ```
 
-To run them by hand:
+To run the tests by hand (integration tests need a Postgres with pgvector whose database name ends in `_test`, so a real database can't be wiped):
 
 ```sh
-cd services/api    && uv run ruff check . && uv run mypy && uv run pytest --cov
-cd services/worker && uv run ruff check . && uv run mypy && uv run pytest --cov
+export DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_test
+cd services/api    && uv run pytest --cov -m ""     # -m "" includes integration tests
+cd services/worker && uv run pytest --cov -m ""     # needs ffmpeg on PATH
+cd packages/core   && uv run pytest --cov
 cd apps/web        && npm run lint && npm run typecheck && npm run test:coverage
 ```
 
@@ -79,6 +94,40 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 `GET /api/search?q=...` returns transcript moments, best first: each has its interview, a start and end time, and an excerpt of about 30 s of transcript lines to seek to. Keyword search (Postgres full-text) and semantic search (the query's embedding against stored chunk embeddings) are merged by reciprocal rank fusion. There is no match count, only `has_more`. Optional filters: `language` (any language heard), `interviewee` (an id, or `unknown`), `recorded_from`/`recorded_to` (`undated=true` also keeps interviews with no date). `GET /api/search/filters` lists the languages and interviewees a viewer can filter by. Both filter by visibility like every other route. The API embeds queries with the same `EMBEDDING_*` settings the worker uses; if the provider fails or takes longer than `SEARCH_EMBEDDING_TIMEOUT_SECONDS` (default 5; remote providers only), results are keyword-only and the response says `"search_mode": "keyword_only"`. Each moment's `matched_by` says which searches found it. `SEARCH_CANDIDATES`, `SEARCH_RRF_K` and `SEARCH_EXCERPT_MS` tune the ranking and excerpts.
 
 `EMBEDDING_PROVIDER=local` (Proposal) embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
+
+### Measuring search quality (Proposal)
+
+`python -m swayambhu_api.search_eval <set.json>` (in `services/api`) runs a labelled query set through keyword, semantic and hybrid search and prints Recall@5 and MRR per mode, overall and by query language and kind (`--k` changes the cut-off, `--json` prints every query). A set can carry its own interviews, which are chunked and embedded like the worker does, searched on their own and rolled back, so nothing is saved; otherwise its labels name existing interview ids and the whole archive is searched as an admin sees it. It uses the configured `EMBEDDING_*` settings and refuses `openai` without `--allow-paid`. `services/api/eval/search_synthetic.json` is a small **synthetic** set (made-up English and AI-written Nepali, no Nepal Bhasa) that only checks the harness: replace it with queries labelled against real or consented pilot transcripts before tuning anything.
+
+```bash
+cd services/api
+EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small \
+  EMBEDDING_QUERY_PREFIX="query: " EMBEDDING_PASSAGE_PREFIX="passage: " \
+  uv run python -m swayambhu_api.search_eval eval/search_synthetic.json
+```
+
+### Performance (Proposal)
+
+`python -m swayambhu_api.perf.seed --scale N` fills a scratch `*_perf` database with N x 30 synthetic one-hour interviews (placeholder words, random 384-dim vectors, half Private) straight through COPY: 30x, 1.6 million lines, takes about 80 s. `python -m swayambhu_api.perf.bench` then measures:
+
+- `latency --url ...`: each of the 50 queries in `perf/queries.txt` (words, phrases, filtered), 20 times, over HTTP: median, p95, p99.
+- `split`: the keyword SQL and the vector SQL timed apart.
+- `hnsw`: exact nearest-neighbour search against a temporary HNSW index, with recall.
+
+`perf/search_load.js` is a k6 load test (ramp to 50 users; `PROFILE=smoke` holds 10 users for a minute) for the API run with the CloudApps pod's limits, `perf/compose.perf.yaml` (1 CPU, 768 MiB). The optional `Performance` CI workflow runs the 1x latency check and the k6 smoke run. Don't load-test the live CloudApps site: it's a shared cluster.
+
+Results on a development container (PostgreSQL 16, fake embedder, so these are database and API costs, not the embedding call; 2026-11-06):
+
+| Archive | Lines | Vectors | Search p50 | Search p95 | Keyword SQL p50 | Vector SQL p50 |
+|---|---|---|---|---|---|---|
+| 1x (30 h) | 54,000 | 3,000 | 29 ms | 35 ms | 16 ms | 4 ms |
+| 10x (300 h) | 540,000 | 30,000 | 73 ms | 92 ms | 21 ms | 21 ms |
+| 30x (900 h) | 1,620,000 | 90,000 | 137 ms | 177 ms | 55 ms | 55 ms |
+
+What it found:
+
+- **Keyword search scanned every line.** Matching English words against lines with no English text (English speech, failed translations) had no index, so each search read the whole `segments` table: 380 ms of keyword SQL at 10x. Migration 0009 adds a partial expression index for it (`segments_untranslated_tsv_idx`), and the same query now takes 21 ms.
+- **Exact vector search is fast enough well past the expected archive.** 23 ms for the nearest 100 of 90,000 vectors. An HNSW index cut that to 8 ms but took 88 s to build, and on random vectors its recall was poor (0.23 of the exact top 10 with `ef_search` 200, 0.64 with 1000). Random vectors are a worst case for HNSW, so measure recall again with real embeddings before adding one; until then, keep exact search (P-015).
 
 ## Sign-in and admins
 

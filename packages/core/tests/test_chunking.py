@@ -1,4 +1,5 @@
-from swayambhu_worker.chunking import Chunk, Timed, chunk_segments
+from swayambhu_core.chunking import Chunk, Timed, chunk_segments, chunk_texts
+from swayambhu_core.models import InterviewRow, SegmentRow
 
 
 def segments(*bounds: tuple[int, int]) -> list[Timed]:
@@ -27,3 +28,18 @@ def test_a_tail_that_would_make_a_chunk_too_long_stays_separate() -> None:
 def test_a_short_interview_is_one_chunk_and_no_speech_is_none() -> None:
     assert chunk_segments(segments((0, 10))) == [Chunk(0, 0, 0, 10_000)]
     assert chunk_segments([]) == []
+
+
+def test_chunk_texts_per_representation() -> None:
+    interview = InterviewRow(language_confirmed="ne")
+    lines = [
+        SegmentRow(original_text="नमस्ते", english_text="Hello"),
+        SegmentRow(original_text="धन्यवाद", english_text=None),  # failed translation
+        SegmentRow(original_text="Thank you", english_text=None, language="en"),
+    ]
+    assert chunk_texts(lines, interview) == {
+        "english": "Hello  Thank you",
+        "original": "नमस्ते धन्यवाद Thank you",
+    }
+    english = InterviewRow(language_confirmed="en")
+    assert chunk_texts(lines[2:], english) == {"english": "Thank you"}  # no "original"
