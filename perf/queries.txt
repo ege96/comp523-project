@@ -1,5 +1,5 @@
 # Fixed search queries for the performance tests: kind<TAB>query<TAB>extra query string.
-# Words come from the seeder's placeholder vocabulary (swayambhu_api.perf.seed).
+# Words come from the seeder's placeholder vocabulary (swayambhu_perf.seed).
 word	lamp
 word	monkey
 word	pigeon

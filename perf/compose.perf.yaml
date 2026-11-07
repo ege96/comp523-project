@@ -6,7 +6,9 @@
 #   dc exec db createdb -U swayambhu swayambhu_perf
 #   dc exec db psql -U swayambhu -d swayambhu_perf -c 'CREATE EXTENSION vector'
 #   dc up -d api      # applies migrations on start
-#   dc exec api python -m swayambhu_api.perf.seed --scale 1
+#   # the seeder runs on the host, from perf/ (it isn't in the API image):
+#   (cd perf && DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_perf \
+#     EMBEDDING_PROVIDER=fake EMBEDDING_DIMENSIONS=384 uv run python -m swayambhu_perf.seed --scale 1)
 #   k6 run -e API_URL=http://localhost:8000 perf/search_load.js
 #   docker stats   # the API's memory peak
 services:

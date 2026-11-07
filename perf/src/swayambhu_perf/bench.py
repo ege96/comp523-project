@@ -1,11 +1,11 @@
-"""Search latency benchmark, on an archive filled by `swayambhu_api.perf.seed`.
+"""Search latency benchmark, on an archive filled by `swayambhu_perf.seed`.
 
     # End to end: each query from perf/queries.txt, 20 times, one at a time, over HTTP
-    python -m swayambhu_api.perf.bench latency --url http://localhost:8000 --runs 20
+    python -m swayambhu_perf.bench latency --url http://localhost:8000 --runs 20
     # Where the time goes: keyword SQL vs vector SQL, in process
-    python -m swayambhu_api.perf.bench split
-    # Would an HNSW index on the vectors help? Builds one, compares, drops it
-    python -m swayambhu_api.perf.bench hnsw
+    python -m swayambhu_perf.bench split
+    # Exact vs HNSW (vector and halfvec) on the search's vector query; builds, then drops
+    python -m swayambhu_perf.bench ann --corpus data/corpus --ef-search 40,100,200
 
 Reports median, p95 and p99 in milliseconds, overall and by query kind (word, phrase,
 filter). `latency --max-p95-ms N` exits 1 when p95 is over N, for CI. Run the API with the
@@ -20,19 +20,19 @@ import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
-
-from sqlalchemy import text
-from swayambhu_providers import EmbeddingKind
-from swayambhu_providers.factory import build_embedder
 
 from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings
-from swayambhu_api.db import get_engine, new_session
+from swayambhu_api.db import new_session
 from swayambhu_api.search import keyword_hits, semantic_hits
+from swayambhu_providers import EmbeddingKind
+from swayambhu_providers.factory import build_embedder
 
-DEFAULT_QUERIES = Path(__file__).parents[5] / "perf" / "queries.txt"
+from swayambhu_perf import ann
+
+DEFAULT_QUERIES = Path(__file__).parents[2] / "queries.txt"
 VISITOR = Viewer(admin=None)
 
 
@@ -72,9 +72,10 @@ def by_kind(timed: list[tuple[str, float]]) -> dict[str, dict[str, float]]:
 
 
 def table(title: str, rows: dict[str, dict[str, float]]) -> str:
-    out = [title, f"{'':<12}{'n':>6}{'p50 ms':>10}{'p95 ms':>10}{'p99 ms':>10}{'max ms':>10}"]
+    width = max(12, *(len(name) + 2 for name in rows))
+    out = [title, f"{'':<{width}}{'n':>6}{'p50 ms':>10}{'p95 ms':>10}{'p99 ms':>10}{'max ms':>10}"]
     out += [
-        f"{name:<12}{int(s['n']):>6}{s['p50']:>10.1f}{s['p95']:>10.1f}{s['p99']:>10.1f}"
+        f"{name:<{width}}{int(s['n']):>6}{s['p50']:>10.1f}{s['p95']:>10.1f}{s['p99']:>10.1f}"
         f"{s['max']:>10.1f}"
         for name, s in rows.items()
     ]
@@ -136,72 +137,81 @@ def split(settings: Settings, queries: list[PerfQuery], runs: int) -> dict[str, 
     }
 
 
-@dataclass(frozen=True)
-class HnswResult:
-    vectors: int
-    build_s: float
-    exact: dict[str, float]
-    hnsw: dict[str, float]
-    recall_at_10: float
-    recall_at_100: float
+def k6_steps(csv_path: Path, step_s: int = 60) -> dict[str, dict[str, float]]:
+    """Searches per step of `search_load.js PROFILE=ceiling` (one step a minute), from k6's
+    `--out csv=` file: achieved rate, latency and failures for each step."""
+    import csv
+
+    rows: dict[int, list[float]] = {}
+    failed: dict[int, int] = {}
+    start = None
+    with csv_path.open(newline="") as f:
+        for row in csv.DictReader(f):
+            if row["name"] != "search" or row["metric_name"] not in (
+                "http_req_duration",
+                "http_req_failed",
+            ):
+                continue
+            t = int(row["timestamp"])
+            start = t if start is None else start
+            step = (t - start) // step_s
+            if row["metric_name"] == "http_req_duration":
+                rows.setdefault(step, []).append(float(row["metric_value"]))
+            elif float(row["metric_value"]):
+                failed[step] = failed.get(step, 0) + 1
+    out = {}
+    for step, samples in sorted(rows.items()):
+        if len(samples) > 1:
+            out[f"step {step + 1}"] = {
+                **stats(samples),
+                "rps": len(samples) / step_s,
+                "failed": failed.get(step, 0),
+            }
+    return out
 
 
-def hnsw(settings: Settings, queries: list[PerfQuery], runs: int, ef_search: int) -> HnswResult:
-    """Exact nearest vectors vs an HNSW index, on the raw vector query. Recall is the share of
-    the exact top 10 / top 100 vectors that the index also returns. The index is dropped
-    afterwards."""
-    embedder = build_embedder(settings)
-    dims = settings.embedding_dimensions or 384
-    vectors = embedder.embed(sorted({q.q for q in queries}), "query")
-    # The column has no fixed size, so the index (and the query) cast to one.
-    nearest = text(
-        f"SELECT chunk_id, representation FROM chunk_embeddings WHERE model = :model "  # noqa: S608 (dims is an int)
-        f"ORDER BY embedding::vector({dims}) <=> CAST(:q AS vector({dims})) LIMIT 100"
-    )
-    with get_engine(settings).connect() as conn:
-        count = conn.scalar(
-            text("SELECT count(*) FROM chunk_embeddings WHERE model = :m"), {"m": embedder.name}
+def ann_report(a: "ann.AnnResult", runs: int) -> str:
+    out = [
+        table(
+            f"Nearest 100 chunks of {a.vectors} vectors as a visitor, {a.queries} queries x "
+            f"{runs} runs",
+            {v.name: v.latency for v in a.variants},
+        ),
+        "",
+        f"{'':<22}{'vs exact @10':>13}{'@100':>7}{'index MB':>10}{'build s':>9}{'uses index':>12}",
+    ]
+    for v in a.variants:
+        out.append(
+            f"{v.name:<22}{v.recall_at_10:>13.3f}{v.recall_at_100:>7.3f}"
+            + (f"{v.index_mb:>10.1f}{v.build_s:>9.1f}{v.uses_index!s:>12}" if v.build_s else "")
         )
-
-        def run_all() -> tuple[list[float], list[list[tuple[int, str]]]]:
-            times, results = [], []
-            for _ in range(runs):
-                for v in vectors:
-                    params = {"model": embedder.name, "q": str(v)}
-                    began = time.perf_counter()
-                    ids = [(c, r) for c, r in conn.execute(nearest, params)]
-                    times.append((time.perf_counter() - began) * 1000)
-                    results.append(ids)
-            return times, results
-
-        exact_times, exact_ids = run_all()
-        began = time.perf_counter()
-        conn.execute(
-            text(
-                f"CREATE INDEX perf_hnsw ON chunk_embeddings "
-                f"USING hnsw ((embedding::vector({dims})) vector_cosine_ops)"
-            )
-        )
-        build_s = time.perf_counter() - began
-        conn.execute(text(f"SET hnsw.ef_search = {int(ef_search)}"))
-        try:
-            hnsw_times, hnsw_ids = run_all()
-        finally:
-            conn.rollback()  # drops the index: it was built inside this transaction
-
-    def recall(k: int) -> float:
-        pairs = list(zip(exact_ids, hnsw_ids, strict=True))
-        return statistics.mean(len(set(e[:k]) & set(h[:k])) / max(len(e[:k]), 1) for e, h in pairs)
-
-    return HnswResult(
-        count or 0, build_s, stats(exact_times), stats(hnsw_times), recall(10), recall(100)
-    )
+    if a.labelled:
+        kinds = sorted(a.variants[0].task_recall_at_10)
+        out += [
+            "",
+            f"Task recall@10, {a.labelled} labelled queries as an admin",
+            f"{'':<22}" + "".join(f"{k:>9}" for k in kinds),
+        ]
+        out += [
+            f"{v.name:<22}" + "".join(f"{v.task_recall_at_10[k]:>9.3f}" for k in kinds)
+            for v in a.variants
+        ]
+    out += [
+        "",
+        f"The vectors take {a.vector_mb:.0f} MB as vector, {a.halfvec_mb:.0f} MB as halfvec. "
+        "Settings: " + ", ".join(f"{k} {v}" for k, v in a.settings.items()),
+    ]
+    out += [f"Notice: {n}" for n in a.notices]
+    return "\n".join(out)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("latency", "split", "hnsw"):
+    k6 = sub.add_parser("k6", help="per-step results of a k6 PROFILE=ceiling run")
+    k6.add_argument("csv", type=Path, help="k6 --out csv= file")
+    k6.add_argument("--json", action="store_true")
+    for name in ("latency", "split", "ann"):
         cmd = sub.add_parser(name)
         cmd.add_argument("--queries", type=Path, default=DEFAULT_QUERIES)
         cmd.add_argument("--runs", type=int, default=20 if name == "latency" else 5)
@@ -209,9 +219,25 @@ def main(argv: Sequence[str] | None = None) -> None:
         if name == "latency":
             cmd.add_argument("--url", required=True, help="the API, e.g. http://localhost:8000")
             cmd.add_argument("--max-p95-ms", type=float, help="exit 1 if overall p95 is above")
-        if name == "hnsw":
-            cmd.add_argument("--ef-search", type=int, default=200)
+        if name == "ann":
+            cmd.add_argument("--corpus", type=Path, help="labelled queries from perf.corpus")
+            cmd.add_argument("--ef-search", default="40,100,200", help="comma-separated")
+            cmd.add_argument("--m", type=int, default=16)
+            cmd.add_argument("--ef-construction", type=int, default=64)
     args = parser.parse_args(argv)
+    if args.command == "k6":
+        steps = k6_steps(args.csv)
+        if args.json:
+            json.dump(steps, sys.stdout, indent=2)
+            print()
+            return
+        print(f"{'':<10}{'req/s':>7}{'p50 ms':>9}{'p95 ms':>9}{'max ms':>9}{'failed':>8}")
+        for name, s in steps.items():
+            print(
+                f"{name:<10}{s['rps']:>7.1f}{s['p50']:>9.0f}{s['p95']:>9.0f}{s['max']:>9.0f}"
+                f"{int(s['failed']):>8}"
+            )
+        return
     queries = load_queries(args.queries)
     settings = Settings()
 
@@ -223,16 +249,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         rows = split(settings, queries, args.runs)
         result, report = rows, table(f"Search SQL as a visitor, {args.runs} runs per query", rows)
     else:
-        h = hnsw(settings, queries, args.runs, args.ef_search)
-        result = h.__dict__
-        report = (
-            table(
-                f"Nearest 100 of {h.vectors} vectors, {args.runs} runs per query",
-                {"exact": h.exact, "hnsw": h.hnsw},
-            )
-            + f"\nHNSW build {h.build_s:.1f} s, ef_search {args.ef_search}: "
-            f"recall@10 {h.recall_at_10:.3f}, recall@100 {h.recall_at_100:.3f}"
+        plain = [ann.Query(q.q, q.kind) for q in queries if not q.extra]
+        efs = [int(x) for x in args.ef_search.split(",")]
+        a = ann.run(
+            settings, plain, args.corpus, args.runs, efs, args.m, args.ef_construction, stats
         )
+        result, report = asdict(a), ann_report(a, args.runs)
     if args.json:
         json.dump(result, sys.stdout, indent=2)
         print()

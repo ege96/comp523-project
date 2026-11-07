@@ -98,6 +98,41 @@ jobs:
           uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
           uvx pip-audit -r "$RUNNER_TEMP/requirements.txt" --progress-spinner off
 
+  perf:
+    # perf/: development-only benchmark tools (not in any image). Their integration tests run
+    # against Postgres; no coverage gate, since the command-line entry points aren't tested.
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: perf
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: swayambhu
+          POSTGRES_DB: swayambhu_perf_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U swayambhu"
+          --health-interval 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://swayambhu@localhost:5432/swayambhu_perf_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - name: Test against Postgres + pgvector
+        run: |
+          for f in ../db/init/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+          uv run pytest --cov -m ""
+      - name: Coverage summary
+        if: ${{ !cancelled() }}
+        run: uv run coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+
   core:
     # packages/core: database models, job queue and storage shared by the api and worker images.
     runs-on: ubuntu-latest
