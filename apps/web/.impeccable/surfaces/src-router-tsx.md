@@ -13,14 +13,14 @@ Audience/job: a visitor with a question finds a timestamped moment, reads it in 
 
 ## Direction contract
 
-THESIS: Two scripts read together. Every passage is a bilingual pair, Devanagari over Roman, like Kathmandu's street signs. Refuses the category default of a cream "heritage" page with a serif slogan and cards.
+THESIS: The interviewees' words lead, as bilingual pairs (original above English), inside the archive's existing warm look. Eric (2026-11-10) chose to keep the general vibe; direction C with A's structural improvements.
 
-OWN-WORLD: Enamel-blue plate (deep blue field, white type) owns the masthead, search band and section openers; white ground, near-black ink, hairline rules; marigold only for find/match marks; vermilion line marker for "you are here" in a transcript. Mukta (both scripts, self-hosted) everywhere; tabular figures for time. Square corners, no shadows, no cards.
+OWN-WORLD: Cream ground, paper header and panels, terracotta accent for actions and "you are here", Georgia headings, Mukta body for both scripts, 4px corners, rules instead of cards and shadows.
 
-STORY: The visitor sees the search on the blue plate first, types a question, scans moments that lead with the spoken words, opens one at the exact second, and reads along while the player stays in view.
+STORY: The visitor searches from the home page, scans moments that lead with the spoken words, opens one at the exact second, and reads along while the player stays in view.
 
-FIRST VIEWPORT: Home: blue plate full width: name pair (Devanagari name above Roman) left, nav right; one-line purpose; large search field across the plate. Below on white: recently added as a ruled catalogue (title, interviewee, language, length, date columns).
+FIRST VIEWPORT: Home: paper header (logo tile, wordmark, Search · Interviews · About); serif headline, one-line intro, search field with terracotta button, example question link; below a rule, recently added as a ruled catalogue.
 
-FORM: Kathmandu bilingual enamel signage; position 5 of 7 on the ordered list. seed:c29d2435e1954238. Raise from the interlinear field-transcript pick: numbered/timecoded margin column and strict line-pair discipline in transcripts.
+FORM: Standing exit (refined incumbent look), chosen by Eric over the assigned bilingual-signage direction (position 5 of 7). seed:c29d2435e1954238. Kept from the signage and interlinear directions: timecoded margin column, strict line pairs, pinned player.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

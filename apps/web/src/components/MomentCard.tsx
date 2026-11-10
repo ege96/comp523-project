@@ -58,7 +58,7 @@ export function MomentCard({ moment }: { moment: Moment }) {
           py: { xs: 0.75, sm: 1 },
           bgcolor: tokens.plate,
           color: tokens.onPlate,
-          borderRadius: "2px",
+          borderRadius: 1,
           fontVariantNumeric: "tabular-nums",
           "&:hover": { bgcolor: tokens.plateDeep },
         }}

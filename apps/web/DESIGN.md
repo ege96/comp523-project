@@ -1,30 +1,30 @@
 ---
 name: Swayambhu Stories
-description: Bilingual-signage frame around a calm reading column for a searchable oral-history archive.
+description: Warm cream archive with terracotta accents, serif headings and paired original/English transcript lines.
 colors:
-  plate: "#173a8c"
-  plate-deep: "#0f2a6b"
-  on-plate: "#ffffff"
-  on-plate-muted: "#c9d6f5"
-  ground: "#ffffff"
-  ground-alt: "#f2f4f8"
-  ink: "#141821"
-  ink-muted: "#4a5161"
-  rule: "#d6dbe5"
-  rule-strong: "#7f8a9e"
-  mark: "#ffd257"
-  here: "#c2321d"
+  accent: "#963a35"
+  accent-deep: "#7a2e2a"
+  on-accent: "#ffffff"
+  on-accent-muted: "#f3d9d5"
+  ground: "#f6f3ef"
+  paper: "#fdfcfa"
+  ground-alt: "#efe9e2"
+  ink: "#2b2724"
+  ink-muted: "#635d57"
+  rule: "#e2dbd3"
+  rule-strong: "#8a8178"
+  mark: "#f4d58d"
+  here-tint: "rgba(150, 58, 53, 0.08)"
 typography:
   display:
-    fontFamily: "Mukta, Noto Sans Devanagari, Nirmala UI, system-ui, sans-serif"
-    fontSize: "2.25rem"
-    fontWeight: 800
+    fontFamily: "Georgia, Times New Roman, serif"
+    fontSize: "2.5rem"
+    fontWeight: 400
     lineHeight: 1.15
-    letterSpacing: "-0.01em"
   heading:
-    fontFamily: "Mukta, Noto Sans Devanagari, Nirmala UI, system-ui, sans-serif"
-    fontSize: "1.5rem"
-    fontWeight: 800
+    fontFamily: "Georgia, Times New Roman, serif"
+    fontSize: "1.75rem"
+    fontWeight: 400
     lineHeight: 1.25
   title:
     fontFamily: "Mukta, Noto Sans Devanagari, Nirmala UI, system-ui, sans-serif"
@@ -52,81 +52,81 @@ typography:
     fontWeight: 600
     letterSpacing: "0.06em"
 rounded:
-  plate: "2px"
+  sm: "4px"
 spacing:
   unit: "8px"
   row: "12px"
   section: "40px"
 components:
   time-plate:
-    backgroundColor: "{colors.plate}"
-    textColor: "{colors.on-plate}"
-    rounded: "{rounded.plate}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-accent}"
+    rounded: "{rounded.sm}"
     padding: "8px 12px"
   time-plate-here:
-    backgroundColor: "{colors.here}"
-    textColor: "{colors.on-plate}"
-    rounded: "{rounded.plate}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-accent}"
+    rounded: "{rounded.sm}"
   button-primary:
-    backgroundColor: "{colors.plate}"
-    textColor: "{colors.on-plate}"
-    rounded: "{rounded.plate}"
+    backgroundColor: "{colors.accent}"
+    textColor: "{colors.on-accent}"
+    rounded: "{rounded.sm}"
     height: "40px"
   search-field:
-    backgroundColor: "{colors.ground}"
+    backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.plate}"
+    rounded: "{rounded.sm}"
 ---
 
 ## Overview
 
-The frame comes from Kathmandu's bilingual enamel street signs: a deep blue plate with white
-lettering, Devanagari above Roman. The plate owns the masthead, the search band on Home and
-Search, the player frame and the small time plates. Everything people read sits on white, in a
-calm column. One family, Mukta, sets both scripts so a Nepali line and its English read as a pair.
+The original warm archive look, kept on purpose: cream ground, lighter paper for the header and
+panels, a terracotta accent, Georgia headings. Body text is Mukta, one family for Devanagari and
+Latin, self-hosted. The structure leads with the interviewees' words: every transcript line and
+search moment is a pair, original above English.
 
 ## Colors
 
-- **Plate** blue is the frame, never the reading ground. White and `on-plate-muted` are the only text colours on it.
-- **Mark** (marigold) is reserved for find-in-transcript matches and the focus ring of the search field on the plate.
-- **Here** (vermilion) marks the one line that is "you are here": the line opened from a search, then the line playing. Never decorative.
-- Body text on white uses `ink`; secondary text `ink-muted` (7.9:1). Input borders use `rule-strong` (3.5:1).
+- **Accent** (terracotta) is for actions and wayfinding: buttons, links, the current nav item, time labels.
+- **Here tint + filled time label** marks the one line that is "you are here": the line opened from a search, then the line playing.
+- **Mark** (pale gold) is reserved for find-in-transcript matches.
+- Text: `ink` on cream/paper; secondary `ink-muted` (5.9:1 on cream). Input borders `rule-strong` (3.5:1).
 
 ## Typography
 
-Mukta 400/600/800, self-hosted from `@fontsource/mukta` (the CSP allows no font host). Headings
-800; titles 600. Devanagari lines get line-height 1.75 via a global `[lang]` rule. Times use
-tabular figures. Section headings inside pages are small caps-tracked labels over a 2px ink rule
-(they are the heading, not a label above one).
+Headings Georgia 400 (h1 2.5rem, h2 1.75rem, h3 1.375rem). Body Mukta 400/600/800 from
+`@fontsource/mukta` (the CSP allows no font host). Devanagari lines get line-height 1.75 via a
+global `[lang]` rule. Times use tabular figures. In-page section headings are small tracked labels
+over a 2px ink rule.
 
 ## Layout
 
-Container width from MUI (max 1200px, 16/24px gutters). Search: 15rem filter rail + results;
-filters fold behind a "Filters" button below `md`. Viewer: 20rem pinned side column (player and
-details) + transcript; below `md` the side column dissolves and audio pins to the top.
-Transcript lines and moments are a 2-column grid: time in the margin, the line pair beside it.
+Search: 15rem filter rail + results; filters fold behind a "Filters" button below `md`. Viewer:
+20rem pinned side column (player and details) + transcript; below `md` the side column dissolves
+and audio pins to the top. Transcript lines and moments are a 2-column grid: time in the margin,
+the line pair beside it. Interview lists are a ruled catalogue on wide screens.
 
 ## Elevation & Depth
 
-None. No shadows. Separation is by rules: 2px ink rule under section headings and above
-catalogue tables, 1px `rule` between rows.
+None. Separation by rules: 2px ink rule under section labels and above catalogue tables, 1px
+`rule` between rows, outlined paper panels.
 
 ## Shapes
 
-Square, 2px corners on plates, fields and buttons. No pills, no cards.
+4px corners on buttons, fields, the logo tile and time labels.
 
 ## Components
 
-- **Masthead:** plate, place name in Devanagari above "Swayambhu Stories", nav items underlined 3px white when current.
-- **Search box:** white field on the plate, plate-blue Search button inset, marigold outline on focus.
+- **Header:** paper bar with bottom rule; terracotta waveform tile + Georgia wordmark; nav items Search · Interviews · About, current one underlined in terracotta.
+- **Search box:** paper field with a terracotta Search button inset; terracotta outline on focus.
 - **Catalogue (InterviewList):** ruled table on wide screens, one detail line on phones; title link stretched over the row.
-- **Moment:** time plate link in the margin ("0:44 to 1:40, Listen" with a drawn play icon), title, details, then line pairs.
+- **Moment:** terracotta time label link in the margin ("0:44 to 1:40, Listen" with a drawn play icon), title, details, then line pairs.
 - **LinePair:** original above, English below in `ink-muted`; whichever half is alone leads at full size.
-- **Transcript line:** time button (plate text; `here` fill when current), line pair, "Corrected" caption.
+- **Transcript line:** time button (terracotta text; filled when current, row tinted), line pair, "Corrected" caption.
 
 ## Do's and Don'ts
 
-- Do show the original words first and the English beneath; never hide the original behind a tab by default.
-- Do keep the plate to the frame; never put running text on blue.
-- Don't add cards, shadows, gradients, pills or rounded corners above 2px.
-- Don't use colour for anything but plate, mark and here.
+- Do show the original words first and the English beneath; don't hide the original behind a tab by default.
+- Do keep visible keyboard focus on every control (ripple is off globally).
+- Don't add shadows, gradients or pills; don't box search results as cards.
+- Don't use the accent for decoration; it marks actions and "you are here".

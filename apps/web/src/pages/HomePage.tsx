@@ -13,7 +13,6 @@ import { InterviewList } from "../components/InterviewList";
 import { TextLink } from "../components/links";
 import { Plate } from "../components/Plate";
 import { SearchBox } from "../components/SearchBox";
-import { tokens } from "../theme";
 
 // Proposal: the home page shows the 5 most recently added interviews; the rest are a click away
 // on /interviews. Search-first: no themes, featured items or recommendations (handoff, settled).
@@ -28,29 +27,26 @@ export function HomePage() {
           <Typography
             variant="h1"
             sx={{
-              fontSize: { xs: "1.75rem", md: "2.5rem" },
-              maxWidth: "26ch",
+              fontSize: { xs: "2.25rem", md: "3.25rem" },
+              maxWidth: "24ch",
               textWrap: "balance",
             }}
           >
-            Search what people remember about Swayambhu.
+            An archive of voices, memories and lived heritage.
           </Typography>
-          <Typography sx={{ color: tokens.onPlateMuted, maxWidth: "60ch" }}>
-            Recorded interviews in Nepali, Nepal Bhasa and English. Search their words or their
-            meaning, then listen from the exact moment it was said.
+          <Typography
+            variant="h6"
+            component="p"
+            color="text.secondary"
+            sx={{ fontWeight: 400, maxWidth: "60ch" }}
+          >
+            Explore recorded interviews with people connected to Swayambhu. Search their words or
+            their meaning, listen to their stories, and read along.
           </Typography>
           <SearchBox large />
-          <Typography variant="body2" sx={{ color: tokens.onPlateMuted }}>
+          <Typography variant="body2" color="text.secondary">
             Try a question, like{" "}
-            <TextLink
-              to="/search"
-              search={{ q: EXAMPLE }}
-              sx={{
-                color: tokens.onPlate,
-                fontWeight: 600,
-                textDecorationColor: tokens.onPlateMuted,
-              }}
-            >
+            <TextLink to="/search" search={{ q: EXAMPLE }} sx={{ fontWeight: 600 }}>
               {EXAMPLE}
             </TextLink>
           </Typography>

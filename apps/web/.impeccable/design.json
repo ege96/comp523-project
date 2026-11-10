@@ -4,16 +4,12 @@
   "title": "Design System: Swayambhu Stories",
   "extensions": {
     "colorMeta": {
-      "plate": { "role": "primary", "displayName": "Enamel Plate Blue", "canonical": "#173a8c" },
-      "here": {
-        "role": "accent",
-        "displayName": "Vermilion (you are here)",
-        "canonical": "#c2321d"
-      },
-      "mark": { "role": "accent", "displayName": "Marigold (find match)", "canonical": "#ffd257" },
-      "ground": { "role": "neutral", "displayName": "White Ground", "canonical": "#ffffff" }
+      "accent": { "role": "primary", "displayName": "Terracotta", "canonical": "#963a35" },
+      "ground": { "role": "neutral", "displayName": "Cream", "canonical": "#f6f3ef" },
+      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#fdfcfa" },
+      "mark": { "role": "accent", "displayName": "Pale gold (find match)", "canonical": "#f4d58d" }
     },
-    "focus": { "ring": "2px solid #173a8c, offset 2px; white on the plate" },
+    "focus": { "ring": "2px solid #963a35, offset 2px" },
     "motion": { "here": "background-color 160ms ease-out on the time button" },
     "breakpoints": { "md": "900px" }
   }

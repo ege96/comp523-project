@@ -1,28 +1,31 @@
 import { alpha, createTheme } from "@mui/material/styles";
 
 /**
- * The look comes from Kathmandu's bilingual enamel street signs: a deep blue plate with white
- * lettering, Devanagari above Roman. The plate is the frame (masthead, search band, time
- * labels); the reading column stays white and calm.
- *
- * Mukta is one family drawn for both scripts, so a Nepali line and its English sit together
- * at the same size and weight. It is self-hosted from @fontsource (the CSP allows no font host).
+ * Warm cream ground, terracotta accent and Georgia headings (the original look, kept on
+ * purpose). Body text is Mukta, one family drawn for both Devanagari and Latin, so a Nepali
+ * line and its English sit together evenly. Self-hosted from @fontsource (the CSP allows no
+ * font host).
  */
 export const tokens = {
-  plate: "#173a8c",
-  plateDeep: "#0f2a6b",
+  // Terracotta accent: buttons, links, time labels, the current nav item.
+  plate: "#963a35",
+  plateDeep: "#7a2e2a",
   onPlate: "#ffffff",
-  onPlateMuted: "#c9d6f5",
-  ground: "#ffffff",
-  groundAlt: "#f2f4f8",
-  ink: "#141821",
-  inkMuted: "#4a5161",
-  rule: "#d6dbe5",
-  ruleStrong: "#7f8a9e",
+  onPlateMuted: "#f3d9d5",
+  // Warm cream page with lighter paper for the header and panels.
+  ground: "#f6f3ef",
+  paper: "#fdfcfa",
+  groundAlt: "#efe9e2",
+  ink: "#2b2724",
+  inkMuted: "#635d57",
+  rule: "#e2dbd3",
+  ruleStrong: "#8a8178",
   // Find-in-page matches, like a highlighter on paper.
-  mark: "#ffd257",
+  mark: "#f4d58d",
   // "You are here": the line opened from a search, or the one playing.
-  here: "#c2321d",
+  here: "#963a35",
+  hereTint: "rgba(150, 58, 53, 0.08)",
+  serif: 'Georgia, "Times New Roman", serif',
   font: '"Mukta", "Noto Sans Devanagari", "Nirmala UI", system-ui, sans-serif',
 } as const;
 
@@ -30,19 +33,19 @@ export const theme = createTheme({
   palette: {
     primary: { main: tokens.plate, dark: tokens.plateDeep, contrastText: tokens.onPlate },
     secondary: { main: tokens.here },
-    background: { default: tokens.ground, paper: tokens.ground },
+    background: { default: tokens.ground, paper: tokens.paper },
     text: { primary: tokens.ink, secondary: tokens.inkMuted },
     divider: tokens.rule,
     warning: { main: "#9a5b00" },
   },
-  shape: { borderRadius: 2 },
+  shape: { borderRadius: 4 },
   typography: {
     fontFamily: tokens.font,
     fontSize: 15,
     htmlFontSize: 16,
-    h1: { fontSize: "2.25rem", fontWeight: 800, lineHeight: 1.15, letterSpacing: "-0.01em" },
-    h2: { fontSize: "1.5rem", fontWeight: 800, lineHeight: 1.25 },
-    h3: { fontSize: "1.1875rem", fontWeight: 600, lineHeight: 1.3 },
+    h1: { fontFamily: tokens.serif, fontSize: "2.5rem", fontWeight: 400, lineHeight: 1.15 },
+    h2: { fontFamily: tokens.serif, fontSize: "1.75rem", fontWeight: 400, lineHeight: 1.25 },
+    h3: { fontFamily: tokens.serif, fontSize: "1.375rem", fontWeight: 400, lineHeight: 1.3 },
     h6: { fontWeight: 600 },
     subtitle1: { fontSize: "1.0625rem", fontWeight: 600 },
     body1: { fontSize: "1.0625rem", lineHeight: 1.6 },
@@ -82,12 +85,12 @@ export const theme = createTheme({
       },
     },
     MuiPaper: {
-      defaultProps: { variant: "outlined", square: true },
+      defaultProps: { variant: "outlined" },
       styleOverrides: { outlined: { borderColor: tokens.rule } },
     },
     MuiOutlinedInput: {
       styleOverrides: {
-        root: { backgroundColor: tokens.ground },
+        root: { backgroundColor: tokens.paper },
         notchedOutline: { borderColor: tokens.ruleStrong },
       },
     },
@@ -104,11 +107,11 @@ export const theme = createTheme({
       styleOverrides: { root: { minHeight: 40 }, indicator: { height: 3 } },
     },
     MuiChip: {
-      styleOverrides: { root: { borderRadius: 2, fontWeight: 600 } },
+      styleOverrides: { root: { fontWeight: 600 } },
     },
     MuiAlert: {
       defaultProps: { variant: "outlined" },
-      styleOverrides: { root: { borderRadius: 2, alignItems: "flex-start" } },
+      styleOverrides: { root: { alignItems: "flex-start" } },
     },
     MuiLink: { defaultProps: { underline: "always" } },
     MuiCheckbox: {

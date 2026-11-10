@@ -35,11 +35,11 @@ export function SearchBox({
       sx={{
         display: "flex",
         alignItems: "stretch",
-        bgcolor: tokens.ground,
+        bgcolor: tokens.paper,
         color: tokens.ink,
-        borderRadius: "2px",
-        outline: `1px solid ${tokens.plateDeep}`,
-        "&:focus-within": { outline: `3px solid ${tokens.mark}` },
+        borderRadius: 1,
+        outline: `1px solid ${tokens.ruleStrong}`,
+        "&:focus-within": { outline: `2px solid ${tokens.plate}` },
       }}
     >
       <Box
@@ -75,7 +75,7 @@ export function SearchBox({
         sx={{
           m: "4px",
           px: { xs: 2, md: 3 },
-          borderRadius: "1px",
+          borderRadius: "3px",
           bgcolor: tokens.plate,
           color: tokens.onPlate,
           fontSize: large ? "1rem" : undefined,

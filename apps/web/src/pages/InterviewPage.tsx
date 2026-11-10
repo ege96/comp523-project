@@ -192,7 +192,16 @@ function Player({
     },
   } as const;
   return (
-    <Box sx={{ bgcolor: tokens.plate, p: { xs: 1, md: 1.5 }, borderRadius: { md: "2px" } }}>
+    <Box
+      sx={{
+        bgcolor: tokens.paper,
+        p: { xs: 1, md: 1.5 },
+        borderBottom: { xs: 1, md: 0 },
+        border: { md: 1 },
+        borderColor: { xs: "divider", md: "divider" },
+        borderRadius: { md: 1 },
+      }}
+    >
       {media.content_type.startsWith("video/") ? (
         <Box
           component="video"
@@ -479,6 +488,9 @@ function Transcript({
                     gridTemplateColumns: "4.25rem minmax(0, 1fr)",
                     columnGap: { xs: 1.5, sm: 2 },
                     py: 1.5,
+                    px: 1,
+                    mx: -1,
+                    bgcolor: here ? tokens.hereTint : undefined,
                     borderBottom: 1,
                     borderColor: "divider",
                     outline: isCurrent ? `2px solid ${tokens.plate}` : undefined,
@@ -500,7 +512,7 @@ function Transcript({
                       mt: "3px",
                       px: 0.75,
                       py: 0.25,
-                      borderRadius: "2px",
+                      borderRadius: 1,
                       fontWeight: 600,
                       fontSize: "0.9375rem",
                       fontVariantNumeric: "tabular-nums",

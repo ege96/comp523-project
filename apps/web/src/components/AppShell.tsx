@@ -7,21 +7,22 @@ import { createLink, Outlet, useRouterState } from "@tanstack/react-router";
 
 import { useAuth } from "../auth/useAuth";
 import { tokens } from "../theme";
+import { WaveformIcon } from "./icons";
 import { TextLink } from "./links";
 
-// A nav item is lettering on the plate; the current one is underlined like a sign's rule.
+// Terracotta nav lettering; the current page is underlined.
 const navItemSx = {
-  color: tokens.onPlate,
+  color: tokens.plate,
   fontWeight: 600,
   fontSize: "0.9375rem",
   px: { xs: 1, sm: 1.5 },
   minHeight: 40,
   textDecoration: "none",
   borderBottom: "3px solid transparent",
-  "&:hover": { borderBottomColor: tokens.onPlateMuted },
-  "&[aria-current='page']": { borderBottomColor: tokens.onPlate },
+  "&:hover": { borderBottomColor: tokens.rule },
+  "&[aria-current='page']": { borderBottomColor: tokens.plate },
   "&.Mui-focusVisible, &:focus-visible": {
-    outline: `2px solid ${tokens.onPlate}`,
+    outline: `2px solid ${tokens.plate}`,
     outlineOffset: 2,
   },
 } as const;
@@ -53,7 +54,10 @@ export function AppShell() {
       >
         Skip to content
       </Box>
-      <Box component="header" sx={{ bgcolor: tokens.plate, color: tokens.onPlate }}>
+      <Box
+        component="header"
+        sx={{ bgcolor: tokens.paper, color: tokens.ink, borderBottom: 1, borderColor: "divider" }}
+      >
         <Container>
           <Stack
             direction="row"
@@ -62,43 +66,31 @@ export function AppShell() {
               flexWrap: "wrap",
               columnGap: 3,
               minHeight: { xs: 56, md: 72 },
-              borderBottom: `1px solid ${tokens.plateDeep}`,
             }}
           >
             <TextLink
               to="/"
               underline="none"
-              sx={{
-                mr: "auto",
-                py: 1,
-                color: tokens.onPlate,
-                display: "flex",
-                flexDirection: "column",
-                lineHeight: 1,
-                "&:focus-visible": { outline: `2px solid ${tokens.onPlate}`, outlineOffset: 2 },
-              }}
+              color="inherit"
+              sx={{ mr: "auto", py: 1, display: "flex", alignItems: "center", gap: 1.5 }}
             >
-              {/* Proposal: the place name in Devanagari above the Roman, as on Kathmandu's
-                  street signs. The archive team should confirm the spelling and script. */}
               <Box
-                component="span"
-                lang="ne"
+                aria-hidden
                 sx={{
-                  fontSize: { xs: "0.9375rem", md: "1.0625rem" },
-                  fontWeight: 600,
-                  color: tokens.onPlateMuted,
-                  lineHeight: 1.3,
+                  display: "grid",
+                  placeItems: "center",
+                  width: 36,
+                  height: 36,
+                  borderRadius: 1,
+                  bgcolor: tokens.plate,
+                  color: tokens.onPlate,
                 }}
               >
-                स्वयम्भू
+                <WaveformIcon fontSize="small" />
               </Box>
               <Box
                 component="span"
-                sx={{
-                  fontSize: { xs: "1.25rem", md: "1.4375rem" },
-                  fontWeight: 800,
-                  letterSpacing: "-0.01em",
-                }}
+                sx={{ fontFamily: tokens.serif, fontSize: { xs: "1.25rem", md: "1.375rem" } }}
               >
                 Swayambhu Stories
               </Box>
