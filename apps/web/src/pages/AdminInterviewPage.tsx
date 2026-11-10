@@ -214,18 +214,18 @@ function NextStep({
         };
       case "ready":
         return {
-          heading: "Ready to publish",
+          heading: "Finished, not published",
           body: (
             <>
               <Typography>
-                Read through the transcript below and correct anything the machine got wrong. Then
-                publish it so visitors can find it.
+                The transcript is done. Visitors can&apos;t see this recording until it&apos;s
+                published.
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {interview.translation_status === "failed"
-                  ? "The English translation didn't work, so visitors will only see the original words. "
+                  ? "The English translation didn't work, so visitors would see only the original words. "
                   : null}
-                Checking first is up to you: you can publish now and correct it later.
+                You can correct the transcript at any time, whether it&apos;s published or not.
               </Typography>
             </>
           ),
@@ -233,7 +233,7 @@ function NextStep({
             <>
               <PublishButton interview={interview} />
               <Button href="#transcript" variant="outlined">
-                Check the transcript
+                Correct the transcript
               </Button>
             </>
           ),

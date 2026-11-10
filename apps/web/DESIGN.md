@@ -122,7 +122,7 @@ None. Separation by 1px `rule` lines and outlined paper panels (as in the mockup
 - **Search box:** paper field with a terracotta Search button inset; terracotta outline on focus.
 - **Catalogue (InterviewList):** outlined panel with a tinted header row on wide screens, one detail line on phones; title link stretched over the row.
 - **Moment:** outlined card as in the search mockup: Georgia title, details, a soft time pill ("0:44 – 1:40"), line pairs, then an "Open at this moment" button.
-- **Admin stage pill:** soft pill naming where a recording is: Needs attention (amber), Processing (neutral), Ready to publish (terracotta tint), Published (green). Same words as the admin tabs.
+- **Admin stage pill:** soft pill naming where a recording is: Needs attention (amber), Processing (neutral), Not published (terracotta tint), Published (green). Same words as the admin tabs.
 - **Next step panel:** outlined panel with a 4px left edge in the stage colour; "Next step" label, one heading, a sentence or two, and at most two buttons.
 - **Processing checklist:** one line per step in plain words with a mark (tick, spinner, empty ring, red "!"); a failed step says how many tries and folds the technical text.
 - **Recording date:** Year, Month and Day fields, each optional from the right.

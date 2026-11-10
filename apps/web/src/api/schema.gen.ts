@@ -14,7 +14,7 @@ export interface paths {
         /**
          * List Interviews
          * @description Interviews the viewer may see, most recently added first, optionally only those with
-         *     one status and/or visibility (for the admin's work queue: "ready to publish" is done and
+         *     one status and/or visibility (for the admin's work queue: "not published" is done and
          *     private). The filters only narrow what `summary_query` already allows, so a visitor asking
          *     for private interviews gets none.
          */

@@ -23,7 +23,9 @@ describe("admin workflow", () => {
     expect(queueOf({ status: "done", visibility: "private" })).toBe("ready");
     expect(queueOf({ status: "done", visibility: "public" })).toBe("published");
     expect(nextStep({ status: "processing", visibility: "public" }).text).toMatch(/^Published/);
-    expect(nextStep({ status: "done", visibility: "private" }).action).toBe("Review & publish");
+    expect(nextStep({ status: "done", visibility: "private" }).text).toMatch(
+      /until it's published/,
+    );
   });
 
   it("lists each step once, from its latest job, in the order they run", () => {

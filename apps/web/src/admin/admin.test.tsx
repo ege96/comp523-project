@@ -81,7 +81,7 @@ describe("admin page", () => {
     ).toHaveProperty("textContent", expect.stringContaining("Visitors can find and play it."));
 
     await userEvent.click(screen.getByRole("tab", { name: /Needs attention/ }));
-    await userEvent.click(screen.getByRole("tab", { name: /Ready to publish/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /Not published/ }));
     await vi.waitFor(() => {
       expect(requests().some((r) => r.url.includes("limit=20&offset=0&status=failed"))).toBe(true);
       expect(
@@ -112,7 +112,9 @@ describe("admin page", () => {
     stubApi(routes);
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
 
-    expect(await screen.findByRole("heading", { name: "Ready to publish" }, SLOW)).toBeTruthy();
+    expect(
+      await screen.findByRole("heading", { name: "Finished, not published" }, SLOW),
+    ).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
     const dialog = await screen.findByRole("dialog", { name: "Publish “Test interview A”?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));

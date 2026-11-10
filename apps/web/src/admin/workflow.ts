@@ -11,7 +11,7 @@ export type Queue = (typeof QUEUES)[number];
 export const QUEUE_LABELS = {
   attention: "Needs attention",
   processing: "Processing",
-  ready: "Ready to publish",
+  ready: "Not published",
   published: "Published",
 } as const satisfies Record<Queue, string>;
 
@@ -29,7 +29,7 @@ export const QUEUE_FILTERS = {
 export const QUEUE_EMPTY = {
   attention: "Nothing needs your attention.",
   processing: "Nothing is being processed right now.",
-  ready: "Nothing is waiting to be published.",
+  ready: "Every finished recording is published.",
   published: "Nothing has been published yet.",
 } as const satisfies Record<Queue, string>;
 
@@ -56,8 +56,8 @@ export function nextStep(interview: Stage): { text: string; action: string } {
         : { text: "The transcript is being made. Nothing to do yet.", action: "Check progress" };
     case "ready":
       return {
-        text: "Transcript finished. Check it, then publish it.",
-        action: "Review & publish",
+        text: "Finished. Only admins can see it until it's published.",
+        action: "Open",
       };
     case "published":
       return { text: "Visitors can find and play it.", action: "Open" };

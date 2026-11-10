@@ -164,7 +164,7 @@ function QueueRow({ interview }: { interview: InterviewSummary }) {
     formatRecordedOn(interview),
     interview.visibility === "public" ? "Public" : "Private",
   ].filter(Boolean);
-  const urgent = queue === "attention" || queue === "ready";
+  const urgent = queue === "attention";
   return (
     <Box
       component="li"
