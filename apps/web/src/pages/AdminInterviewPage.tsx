@@ -116,7 +116,7 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
             <TextLink to="/interviews/$interviewId" params={{ interviewId: interview.id }}>
               Preview the public page
             </TextLink>{" "}
-            (you&apos;re signed in, so you also see admin-only notes)
+            (admin-only notes show too)
           </Typography>
         </Stack>
       </Stack>

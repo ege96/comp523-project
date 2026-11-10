@@ -189,7 +189,7 @@ describe("admin page", () => {
       "#transcript",
     );
     expect(screen.getByRole("link", { name: "Preview the public page" })).toBeTruthy();
-    expect(screen.getByText(/you're signed in, so you also see admin-only notes/)).toBeTruthy();
+    expect(screen.getByText(/admin-only notes show too/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Unpublish" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(requests()).toContainEqual({
