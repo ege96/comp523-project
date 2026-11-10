@@ -163,8 +163,10 @@ export function InterviewPage() {
         <InterviewChips interview={interview.data} />
       </Stack>
       {/* Phones: one column, the player pinned while the transcript scrolls (audio only: a
-          pinned video would cover the text). Wide screens: player and details in a pinned
-          side column. The aside dissolves into the column on phones so the player can pin. */}
+          pinned video would cover the text). Wide screens: player and details in a side
+          column as tall as the transcript, where only the player stays pinned, so long
+          details never end up out of reach below the screen. The aside dissolves into the
+          column on phones so the player can pin. */}
       <Box
         sx={{
           display: { xs: "block", md: "grid" },
@@ -180,13 +182,13 @@ export function InterviewPage() {
         <Box
           component="aside"
           aria-label="Recording"
-          sx={{ display: { xs: "contents", md: "block" }, position: "sticky", top: 24 }}
+          sx={{ display: { xs: "contents", md: "block" }, alignSelf: "stretch" }}
         >
           <Box
             ref={measurePin}
             sx={{
-              position: { xs: pinned ? "sticky" : "static", md: "static" },
-              top: 0,
+              position: { xs: pinned ? "sticky" : "static", md: "sticky" },
+              top: { xs: 0, md: 24 },
               zIndex: 2,
               mx: { xs: -2, sm: -3, md: 0 },
             }}
@@ -366,7 +368,9 @@ function Player({
           sx={{
             display: "block",
             width: "100%",
-            aspectRatio: "16 / 9",
+            // The file's own shape once it loads (a phone video may be upright), 16:9 until
+            // then so the page doesn't jump.
+            aspectRatio: "auto 16 / 9",
             // Never taller than most of the screen, so the transcript stays reachable.
             maxHeight: "70vh",
             bgcolor: "black",
