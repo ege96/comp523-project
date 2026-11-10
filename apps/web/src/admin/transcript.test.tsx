@@ -137,7 +137,8 @@ describe("transcript editor", () => {
     const form = screen.getByRole("form", { name: "Edit line at 0:00" });
     const englishBox = within(form).getByRole("textbox", { name: "English" });
     fireEvent.change(englishBox, { target: { value: "  Corrected english A " } });
-    expect(within(form).getByText("Machine: Machine english A")).toBeTruthy();
+    // The machine text stays visible under the box, marked with its language.
+    expect(within(form).getByText("Machine english A").getAttribute("lang")).toBe("en");
 
     routes[`${base}/transcript`] = { body: { items: [saved, english, untranslated] } };
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
@@ -293,7 +294,7 @@ describe("faster editing", () => {
     pause.mockRestore();
   });
 
-  it("opens a line by clicking its text, saves with Enter and moves on with Tab", async () => {
+  it("opens a line by clicking its text, saves with Enter and moves on with Alt+Enter", async () => {
     const saved = { ...nepali, original_edited: "Machine original A fixed" };
     const routes = api([nepali, english, untranslated], { body: saved });
     routes[`${base}/segments/1`] = { body: english };
@@ -312,15 +313,47 @@ describe("faster editing", () => {
     ]);
     expect(screen.queryByRole("form", { name: "Edit line at 0:00" })).toBeNull();
 
-    // Tab from the last box saves (nothing changed here) and opens the next line.
+    // Tab moves between the boxes and buttons without saving.
     await userEvent.click(screen.getByText("Machine original A fixed"));
     await userEvent.click(screen.getByRole("textbox", { name: "English" }));
     await userEvent.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save" }));
+    expect(patches()).toHaveLength(1);
+    // Alt+Enter saves (nothing changed here) and opens the next line.
+    await userEvent.click(screen.getByRole("textbox", { name: "English" }));
+    await userEvent.keyboard("{Alt>}{Enter}{/Alt}");
     const next = await screen.findByRole("form", { name: "Edit line at 1:05" });
     expect(document.activeElement).toBe(within(next).getByRole("textbox", { name: "Original" }));
+    // Escape closes it and gives focus back to the line's Edit button.
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("form", { name: "Edit line at 1:05" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit line at 1:05" }));
     expect(patches()).toHaveLength(1);
+  });
+
+  it("keeps typed text when another line is opened, and marks the passage language", async () => {
+    stubApi(api([nepali, english], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    expect((await screen.findByText("Machine original A", {}, SLOW)).getAttribute("lang")).toBe(
+      "ne",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
+    const original = screen.getByRole("textbox", { name: "Original" });
+    expect(original.getAttribute("lang")).toBe("ne");
+    await userEvent.type(original, " draft");
+    // Opening another line keeps the draft and says so on the first line.
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 1:05" }));
+    expect(screen.getByText(/Unsaved changes/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
+    expect(screen.getByRole("textbox", { name: "Original" })).toHaveProperty(
+      "value",
+      "Machine original A draft",
+    );
+    // Cancel throws it away on purpose.
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Unsaved changes/)).toBeNull();
+    expect(patches()).toHaveLength(0);
   });
 
   it("finds a misspelling, highlights it and replaces it in every line at once", async () => {
@@ -352,7 +385,13 @@ describe("faster editing", () => {
 
     await userEvent.type(within(panel).getByRole("textbox", { name: "Replace with" }), "Swayambhu");
     routes[`${base}/transcript`] = { body: { items: [fixedA, english, fixedC] } };
-    await userEvent.click(within(panel).getByRole("button", { name: "Replace in 2 lines" }));
+    // Nothing is saved until the before-and-after check is confirmed.
+    await userEvent.click(within(panel).getByRole("button", { name: "Check 2 lines" }));
+    const check = within(panel).getByRole("group", { name: /Replace “SWAYAMBU” with/ });
+    expect(within(check).getByText("Machine english Swayambu A").tagName).toBe("DEL");
+    expect(within(check).getByText("Machine english Swayambhu A").tagName).toBe("INS");
+    expect(patches("POST")).toEqual([]);
+    await userEvent.click(within(check).getByRole("button", { name: "Replace in 2 lines" }));
     expect((await within(panel).findByRole("status")).textContent).toMatch(/Replaced in 2 lines/);
     expect(patches("POST")).toEqual([
       {

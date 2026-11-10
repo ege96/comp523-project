@@ -28,6 +28,7 @@ import {
   countMatchingLines,
   isEnglishSpeech,
   matcher,
+  previewReplace,
   splitMatches,
   type EditorInterview as Interview,
 } from "./findReplace";
@@ -36,7 +37,8 @@ import { useSegmentPlayer } from "./useSegmentPlayer";
 
 type Player = ReturnType<typeof useSegmentPlayer>;
 /** Where to go after a line closes: stay put, or open the next or previous line. */
-type Move = "next" | "prev" | null;
+type Move = "next" | null;
+type Draft = { original: string; english: string };
 
 /** Which lines the editor shows. */
 export type LineFilter = "all" | "corrected" | "missing";
@@ -84,6 +86,11 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
     enabled: viewer.ready,
   });
   const [editing, setEditing] = useState<number | null>(null);
+  // Unsaved text per line, so opening another line, changing the filter or replacing text
+  // never throws away what was typed. Cancel discards it on purpose.
+  const [drafts, setDrafts] = useState<ReadonlyMap<number, Draft>>(new Map());
+  // The line whose Edit button gets focus back once its form closes.
+  const refocus = useRef<number | null>(null);
   const [saved, setSaved] = useState(false);
   const [search, setSearch] = useState<Search | null>(null);
   const [finding, setFinding] = useState(false);
@@ -134,12 +141,31 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
     setSaved(false);
   };
 
+  const setDraft = (seq: number, draft: Draft | null) => {
+    setDrafts((all) => {
+      const next = new Map(all);
+      if (draft) next.set(seq, draft);
+      else next.delete(seq);
+      return next;
+    });
+  };
+
   const close = (seq: number, didSave: boolean, move: Move) => {
     if (didSave) setSaved(true);
+    setDraft(seq, null);
     const i = shown.findIndex((line) => line.seq === seq);
-    const next = move === "next" ? shown[i + 1] : move === "prev" ? shown[i - 1] : undefined;
+    const next = move === "next" ? shown[i + 1] : undefined;
+    if (!next) refocus.current = seq;
     setEditing(next?.seq ?? null);
   };
+
+  // Back to the line's Edit button after Save or Cancel, so the keyboard keeps its place.
+  useEffect(() => {
+    const seq = refocus.current;
+    if (editing !== null || seq === null) return;
+    refocus.current = null;
+    lineRefs.current.get(seq)?.querySelector<HTMLButtonElement>("button[data-edit]")?.focus();
+  }, [editing]);
 
   const jump = (ms: number) => {
     player.seek(ms, !player.paused);
@@ -155,10 +181,8 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
           exclusive
           value={filter}
           onChange={(_e, next: LineFilter | null) => {
-            if (next) {
-              setFilter(next);
-              setEditing(null);
-            }
+            // An open line stays open (with its draft) while it is still shown.
+            if (next) setFilter(next);
           }}
           aria-label="Show lines"
         >
@@ -283,6 +307,10 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
               interview={interview}
               line={line}
               player={player}
+              draft={drafts.get(line.seq)}
+              onDraft={(draft) => {
+                setDraft(line.seq, draft);
+              }}
               onDone={(didSave, move) => {
                 close(line.seq, didSave, move);
               }}
@@ -294,6 +322,7 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
               player={player}
               current={current?.seq === line.seq}
               highlight={search && re ? { field: search.field, re } : null}
+              draft={drafts.has(line.seq)}
               onEdit={() => {
                 open(line.seq);
               }}
@@ -313,8 +342,8 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ maxWidth: "75ch" }}>
             Play the recording and follow along. When a line is wrong, press “Edit the line playing”
-            or click the line. Enter saves, Tab saves and opens the next line. The machine text is
-            kept, so any line can go back to it.
+            or click the line. Enter saves, Alt+Enter saves and opens the next line. The machine
+            text is kept, so any line can go back to it.
           </Typography>
         </Stack>
         {toolbar}
@@ -322,10 +351,20 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
           <FindReplacePanel
             interviewId={interview.id}
             matches={matches}
+            preview={(next, replacement) =>
+              previewReplace(
+                items,
+                next.field,
+                matcher(next.find, next.matchCase),
+                replacement,
+                interview,
+              )
+            }
             onSearch={setSearch}
             onReplaced={() => {
-              // An open line would still hold the text from before the replace.
-              setEditing(null);
+              // An untouched open line would still show the text from before the replace;
+              // one with typed changes stays open so they aren't lost.
+              if (editing !== null && !drafts.has(editing)) setEditing(null);
             }}
           />
         </Collapse>
@@ -477,6 +516,7 @@ function LineView({
   player,
   current,
   highlight,
+  draft,
   onEdit,
 }: {
   interview: Interview;
@@ -484,6 +524,7 @@ function LineView({
   player: Player;
   current: boolean;
   highlight: { field: "original" | "english"; re: RegExp } | null;
+  draft: boolean;
   onEdit: () => void;
 }) {
   const english = line.english_edited ?? line.english_machine;
@@ -530,7 +571,7 @@ function LineView({
           "&:hover": { bgcolor: "action.hover" },
         }}
       >
-        <Typography sx={{ overflowWrap: "anywhere" }}>
+        <Typography sx={{ overflowWrap: "anywhere" }} lang={line.language ?? undefined}>
           <Highlighted
             text={line.original_edited ?? line.original_machine}
             re={reFor("original")}
@@ -540,6 +581,7 @@ function LineView({
           <Typography
             variant="body2"
             color="text.secondary"
+            lang={english === null ? undefined : "en"}
             sx={{ overflowWrap: "anywhere", fontStyle: english === null ? "italic" : undefined }}
           >
             {english === null ? (
@@ -563,9 +605,15 @@ function LineView({
             {line.edited_by ? `Corrected by ${line.edited_by}` : "Corrected"}
           </Typography>
         ) : null}
+        {draft ? (
+          <Typography variant="caption" color="warning.main">
+            Unsaved changes. Open the line to save or cancel them.
+          </Typography>
+        ) : null}
       </Stack>
       <Button
         size="small"
+        data-edit
         onClick={onEdit}
         aria-label={`Edit line at ${formatClock(line.start_ms)}`}
         sx={{ gridArea: "edit" }}
@@ -594,22 +642,27 @@ function LineForm({
   interview,
   line,
   player,
+  draft,
+  onDraft,
   onDone,
 }: {
   interview: Interview;
   line: AdminSegment;
   player: Player;
+  draft: Draft | undefined;
+  onDraft: (draft: Draft | null) => void;
   onDone: (saved: boolean, move: Move) => void;
 }) {
   const save = useEditSegment(interview.id);
   const englishSpeech = isEnglishSpeech(line, interview);
   // Set by the key that submitted the form, so a save can go on to the next line.
   const move = useRef<Move>(null);
+  const stored = {
+    original: line.original_edited ?? line.original_machine,
+    english: line.english_edited ?? line.english_machine ?? "",
+  };
   const form = useForm({
-    defaultValues: {
-      original: line.original_edited ?? line.original_machine,
-      english: line.english_edited ?? line.english_machine ?? "",
-    },
+    defaultValues: draft ?? stored,
     onSubmit: async ({ value }) => {
       const edit = englishSpeech
         ? buildEdit(line, { ...value, english: "" })
@@ -634,26 +687,26 @@ function LineForm({
     move.current = to;
     void form.handleSubmit();
   };
-  const lastField = englishSpeech ? "original" : "english";
+  // Keeps typed text in the parent, so it survives this form closing without a save.
+  const change = (name: keyof Draft, value: string) => {
+    const next = { ...form.state.values, [name]: value };
+    onDraft(next.original === stored.original && next.english === stored.english ? null : next);
+  };
 
-  // Enter saves (Shift+Enter starts a new line in the text), Tab from the last box saves and
-  // opens the next line, Shift+Tab from the first box the previous one, Escape cancels, and
-  // Alt+P plays or stops the line's audio.
+  // Enter saves (Shift+Enter starts a new line in the text), Alt+Enter saves and opens the
+  // next line, Escape cancels, and Alt+P plays or stops the line's audio. Tab moves between
+  // the boxes and buttons as it does everywhere else.
   const onKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     const target = event.target as HTMLElement;
     if (target.tagName !== "TEXTAREA") return;
     // Typing with an input method (common for Devanagari) uses Enter to pick a word.
     if (event.nativeEvent.isComposing) return;
-    const name = target.getAttribute("name");
-    if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey) {
-      event.preventDefault();
-      submitAndMove(null);
-    } else if (event.key === "Tab" && !event.shiftKey && name === lastField) {
+    if (event.key === "Enter" && event.altKey && !event.shiftKey) {
       event.preventDefault();
       submitAndMove("next");
-    } else if (event.key === "Tab" && event.shiftKey && name === "original") {
+    } else if (event.key === "Enter" && !event.shiftKey && !event.altKey && !event.ctrlKey) {
       event.preventDefault();
-      submitAndMove("prev");
+      submitAndMove(null);
     } else if (event.key === "Escape" && !save.isPending) {
       event.preventDefault();
       onDone(false, null);
@@ -701,7 +754,11 @@ function LineForm({
               machine={line.original_machine}
               value={field.state.value}
               error={field.state.meta.errors[0]}
-              onChange={field.handleChange}
+              lang={line.language}
+              onChange={(value) => {
+                field.handleChange(value);
+                change("original", value);
+              }}
               autoFocus
             />
           )}
@@ -723,7 +780,11 @@ function LineForm({
                 machine={line.english_machine}
                 value={field.state.value}
                 error={field.state.meta.errors[0]}
-                onChange={field.handleChange}
+                lang="en"
+                onChange={(value) => {
+                  field.handleChange(value);
+                  change("english", value);
+                }}
               />
             )}
           </form.Field>
@@ -740,6 +801,15 @@ function LineForm({
                 {save.isPending ? "Saving…" : "Save"}
               </Button>
               <Button
+                variant="outlined"
+                disabled={!canSubmit || save.isPending}
+                onClick={() => {
+                  submitAndMove("next");
+                }}
+              >
+                Save &amp; next
+              </Button>
+              <Button
                 onClick={() => {
                   onDone(false, null);
                 }}
@@ -750,9 +820,9 @@ function LineForm({
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ display: { xs: "none", sm: "block" } }}
+                sx={{ display: { xs: "none", md: "block" } }}
               >
-                Enter saves · Tab saves and goes to the next line · Esc cancels
+                Enter saves · Alt+Enter saves and goes on · Esc cancels
                 {interview.media ? " · Alt+P plays the line" : ""}
               </Typography>
             </Stack>
@@ -770,6 +840,7 @@ function MachineAware({
   machine,
   value,
   error,
+  lang,
   onChange,
   autoFocus = false,
 }: {
@@ -778,6 +849,8 @@ function MachineAware({
   machine: string | null;
   value: string;
   error: string | undefined;
+  /** The text's language, for screen readers and spell checking; null when unknown. */
+  lang: string | null;
   onChange: (value: string) => void;
   autoFocus?: boolean;
 }) {
@@ -802,11 +875,12 @@ function MachineAware({
         }}
         error={Boolean(error)}
         helperText={error ?? (machine === null ? "No machine text for this line." : undefined)}
+        slotProps={{ htmlInput: { lang: lang ?? undefined } }}
       />
       {differs ? (
         <Stack direction="row" spacing={1} sx={{ alignItems: "baseline" }}>
           <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-            Machine: {machine}
+            Machine: <span lang={lang ?? undefined}>{machine}</span>
           </Typography>
           <Button
             size="small"
