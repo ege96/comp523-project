@@ -106,7 +106,7 @@ Search: 15rem filter rail + results; filters fold behind a "Filters" button belo
 and audio pins to the top. Transcript lines and moments are a 2-column grid: time in the margin,
 the line pair beside it. Interview lists are a catalogue panel with columns on wide screens.
 Admin: upload panel beside the recordings list (stacked below `lg`, list first); a recording's
-page is a next-step panel, then Processing beside Details and Who can see it, then the transcript.
+page is a next-step panel, then Processing beside Details and Who can see it, then the transcript panel.
 
 ## Elevation & Depth
 
@@ -125,7 +125,7 @@ None. Separation by 1px `rule` lines and outlined paper panels (as in the mockup
 - **Admin stage pill:** soft pill naming where a recording is: Needs attention (amber), Processing (neutral), Not published (terracotta tint), Published (green). Same words as the admin tabs.
 - **Next step panel:** outlined panel with a 4px left edge in the stage colour; "Next step" label, one heading, a sentence or two, and at most two buttons.
 - **Processing checklist:** one line per step in plain words with a mark (tick, spinner, empty ring, red "!"); a failed step says how many tries and folds the technical text.
-- **Transcript editor:** its own page (`/admin/interviews/$id/transcript`, md container). A pinned toolbar holds the native audio player, the line filters, Find and replace, "Edit the line playing", "Follow the recording" and a Jump-to strip in 5-minute steps. The line playing gets the `hereTint` row with a 3px terracotta left edge.
+- **Transcript editor:** a panel on the recording's page. Toolbar (filters, Find and replace, "Edit the line playing", "Follow the recording"), then the recording (video at 360px when the file is video, else audio) with a Jump-to row beside a bordered box of lines that scrolls on its own (max 72vh), so the recording stays next to the text. The line playing gets the `hereTint` row with a 3px terracotta left edge.
 - **Recording date:** Year, Month and Day fields, each optional from the right.
 - **LinePair:** original above, English below in `ink-muted`; whichever half is alone leads at full size.
 - **Transcript line:** time button (terracotta text; filled when current, row tinted), line pair, "Corrected" caption.

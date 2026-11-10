@@ -92,6 +92,8 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
   const [follow, setFollow] = useState(true);
   const player = useSegmentPlayer(interview.id);
   const lineRefs = useRef(new Map<number, HTMLLIElement>());
+  const scroller = useRef<HTMLDivElement>(null);
+  const isVideo = interview.media?.content_type.startsWith("video/") ?? false;
 
   const items = data?.items ?? [];
   const re = finding && search ? matcher(search.find, search.matchCase) : null;
@@ -111,10 +113,15 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
     (_, i) => i * JUMP_STEP_MS,
   );
 
+  // Scrolls the transcript box only, never the page, so the player stays where it is.
   const scrollTo = (seq: number) => {
-    lineRefs.current
-      .get(seq)
-      ?.scrollIntoView({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    const box = scroller.current;
+    const line = lineRefs.current.get(seq);
+    if (!box || !line) return;
+    const top = line.offsetTop - box.clientHeight / 2 + line.clientHeight / 2;
+    if (typeof box.scrollTo === "function")
+      box.scrollTo({ top, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    else box.scrollTop = top;
   };
 
   // Follow the recording: keep the line playing in view, unless a line is open for editing.
@@ -137,233 +144,256 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
 
   const jump = (ms: number) => {
     player.seek(ms, !player.paused);
-    const first = items.find((line) => line.end_ms > ms);
+    const first = shown.find((line) => line.end_ms > ms);
     if (first) scrollTo(first.seq);
   };
 
-  return (
-    <Stack spacing={2}>
-      {interview.media || items.length > 0 ? (
-        <Paper
-          sx={{
-            position: "sticky",
-            top: 0,
-            zIndex: 2,
-            p: { xs: 1.5, sm: 2 },
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
+  const toolbar =
+    items.length > 0 ? (
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap", alignItems: "center" }}>
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={filter}
+          onChange={(_e, next: LineFilter | null) => {
+            if (next) {
+              setFilter(next);
+              setEditing(null);
+            }
+          }}
+          aria-label="Show lines"
+        >
+          <ToggleButton value="all">All {items.length}</ToggleButton>
+          <ToggleButton value="corrected">Corrected {corrected}</ToggleButton>
+          {missing > 0 ? <ToggleButton value="missing">No English {missing}</ToggleButton> : null}
+        </ToggleButtonGroup>
+        <Button
+          size="small"
+          variant={finding ? "contained" : "outlined"}
+          aria-expanded={finding}
+          aria-controls="find-replace"
+          onClick={() => {
+            setFinding((f) => !f);
           }}
         >
-          <Stack spacing={1.5}>
-            {interview.media ? (
-              // An <audio> element plays the sound of a video file too.
+          Find and replace
+        </Button>
+        {interview.media ? (
+          <>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={current === null}
+              onClick={() => {
+                if (!current) return;
+                player.stop();
+                setFilter("all");
+                open(current.seq);
+                scrollTo(current.seq);
+              }}
+            >
+              Edit the line playing
+            </Button>
+            <FormControlLabel
+              control={
+                <Switch
+                  size="small"
+                  checked={follow}
+                  onChange={(e) => {
+                    setFollow(e.target.checked);
+                  }}
+                />
+              }
+              label="Follow the recording"
+              slotProps={{ typography: { variant: "body2" } }}
+              sx={{ ml: { sm: "auto" }, mr: 0 }}
+            />
+          </>
+        ) : null}
+      </Stack>
+    ) : null;
+
+  const jumpTo =
+    items.length > 0 && jumps.length > 1 ? (
+      <Stack
+        component="nav"
+        aria-label="Jump to a time"
+        direction="row"
+        spacing={0.5}
+        useFlexGap
+        sx={{ flexWrap: "wrap", alignItems: "center" }}
+      >
+        <Typography variant="caption" color="text.secondary" sx={{ pr: 0.5 }}>
+          Jump to
+        </Typography>
+        {jumps.map((ms) => {
+          const here =
+            player.currentMs !== null &&
+            player.currentMs >= ms &&
+            player.currentMs < ms + JUMP_STEP_MS;
+          return (
+            <Button
+              key={ms}
+              size="small"
+              variant={here ? "contained" : "text"}
+              aria-current={here ? "time" : undefined}
+              onClick={() => {
+                jump(ms);
+              }}
+              sx={{ minWidth: 0, minHeight: 28, px: 1, fontVariantNumeric: "tabular-nums" }}
+            >
+              {formatClock(ms)}
+            </Button>
+          );
+        })}
+      </Stack>
+    ) : null;
+
+  const lines = isError ? (
+    <Alert severity="error">The transcript couldn&apos;t be loaded.</Alert>
+  ) : isPending ? (
+    <Skeleton variant="rounded" height={240} />
+  ) : items.length === 0 ? (
+    <Typography color="text.secondary" sx={{ p: 2 }}>
+      There&apos;s no transcript yet. Lines appear here once transcription has finished.
+    </Typography>
+  ) : shown.length === 0 ? (
+    <Typography color="text.secondary" sx={{ p: 2 }}>
+      {filter === "corrected" ? "No lines have been corrected yet." : "Every line has English."}
+    </Typography>
+  ) : (
+    <Box component="ol" sx={{ listStyle: "none", m: 0, p: 0 }}>
+      {shown.map((line) => (
+        <Box
+          component="li"
+          key={line.seq}
+          ref={(el: HTMLLIElement | null) => {
+            if (el) lineRefs.current.set(line.seq, el);
+            else lineRefs.current.delete(line.seq);
+          }}
+          sx={{
+            px: { xs: 0.5, sm: 1 },
+            py: 1,
+            borderBottom: 1,
+            borderColor: "divider",
+            "&:last-of-type": { borderBottom: 0 },
+          }}
+        >
+          {editing === line.seq ? (
+            <LineForm
+              interview={interview}
+              line={line}
+              player={player}
+              onDone={(didSave, move) => {
+                close(line.seq, didSave, move);
+              }}
+            />
+          ) : (
+            <LineView
+              interview={interview}
+              line={line}
+              player={player}
+              current={current?.seq === line.seq}
+              highlight={search && re ? { field: search.field, re } : null}
+              onEdit={() => {
+                open(line.seq);
+              }}
+            />
+          )}
+        </Box>
+      ))}
+    </Box>
+  );
+
+  return (
+    <Paper component="section" aria-labelledby="transcript-title" sx={{ p: { xs: 2, sm: 3 } }}>
+      <Stack spacing={2}>
+        <Stack spacing={0.5}>
+          <Typography id="transcript-title" variant="h3" component="h2">
+            Transcript
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ maxWidth: "75ch" }}>
+            Play the recording and follow along. When a line is wrong, press “Edit the line playing”
+            or click the line. Enter saves, Tab saves and opens the next line. The machine text is
+            kept, so any line can go back to it.
+          </Typography>
+        </Stack>
+        {toolbar}
+        <Collapse in={finding} id="find-replace" unmountOnExit>
+          <FindReplacePanel
+            interviewId={interview.id}
+            matches={matches}
+            onSearch={setSearch}
+            onReplaced={() => {
+              // An open line would still hold the text from before the replace.
+              setEditing(null);
+            }}
+          />
+        </Collapse>
+        {saved ? (
+          <Typography variant="body2" color="success.main" role="status">
+            Saved. Search finds the corrected words within a minute.
+          </Typography>
+        ) : null}
+        {/* Unmounted at zero, so a later batch of edits starts with a fresh button. */}
+        {data?.items.some((line) => line.english_stale) ? (
+          <StaleEnglish interviewId={interview.id} lines={data.items} />
+        ) : null}
+
+        <Box
+          sx={{
+            display: "grid",
+            gap: { xs: 2, md: 3 },
+            gridTemplateColumns: {
+              xs: "minmax(0, 1fr)",
+              md: interview.media
+                ? `${isVideo ? "360px" : "280px"} minmax(0, 1fr)`
+                : "minmax(0, 1fr)",
+            },
+            alignItems: "start",
+          }}
+        >
+          {interview.media ? (
+            <Stack spacing={1.5}>
               <Box
-                component="audio"
+                component={isVideo ? "video" : "audio"}
                 src={interview.media.url}
                 controls
+                playsInline
                 aria-label="Recording"
                 {...player.audioProps}
-                sx={{ width: 1, height: 40, display: "block" }}
-              />
-            ) : null}
-            {items.length > 0 ? (
-              <Stack
-                direction="row"
-                spacing={1}
-                useFlexGap
-                sx={{ flexWrap: "wrap", alignItems: "center" }}
-              >
-                <ToggleButtonGroup
-                  size="small"
-                  exclusive
-                  value={filter}
-                  onChange={(_e, next: LineFilter | null) => {
-                    if (next) {
-                      setFilter(next);
-                      setEditing(null);
-                    }
-                  }}
-                  aria-label="Show lines"
-                >
-                  <ToggleButton value="all">All {items.length}</ToggleButton>
-                  <ToggleButton value="corrected">Corrected {corrected}</ToggleButton>
-                  {missing > 0 ? (
-                    <ToggleButton value="missing">No English {missing}</ToggleButton>
-                  ) : null}
-                </ToggleButtonGroup>
-                <Button
-                  size="small"
-                  variant={finding ? "contained" : "outlined"}
-                  aria-expanded={finding}
-                  aria-controls="find-replace"
-                  onClick={() => {
-                    setFinding((f) => !f);
-                  }}
-                >
-                  Find and replace
-                </Button>
-                {interview.media ? (
-                  <>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      disabled={current === null}
-                      onClick={() => {
-                        if (!current) return;
-                        player.stop();
-                        setFilter("all");
-                        open(current.seq);
-                        scrollTo(current.seq);
-                      }}
-                    >
-                      Edit the line playing
-                    </Button>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          size="small"
-                          checked={follow}
-                          onChange={(e) => {
-                            setFollow(e.target.checked);
-                          }}
-                        />
-                      }
-                      label="Follow the recording"
-                      slotProps={{ typography: { variant: "body2" } }}
-                      sx={{ ml: { sm: "auto" }, mr: 0 }}
-                    />
-                  </>
-                ) : null}
-              </Stack>
-            ) : null}
-            {items.length > 0 && jumps.length > 1 ? (
-              <Stack
-                component="nav"
-                aria-label="Jump to a time"
-                direction="row"
-                spacing={0.5}
-                sx={{ overflowX: "auto", alignItems: "center", pb: 0.25 }}
-              >
-                <Typography
-                  variant="caption"
-                  color="text.secondary"
-                  sx={{ flexShrink: 0, pr: 0.5 }}
-                >
-                  Jump to
-                </Typography>
-                {jumps.map((ms) => {
-                  const here =
-                    player.currentMs !== null &&
-                    player.currentMs >= ms &&
-                    player.currentMs < ms + JUMP_STEP_MS;
-                  return (
-                    <Button
-                      key={ms}
-                      size="small"
-                      variant={here ? "contained" : "text"}
-                      aria-current={here ? "time" : undefined}
-                      onClick={() => {
-                        jump(ms);
-                      }}
-                      sx={{
-                        minWidth: 0,
-                        minHeight: 28,
-                        px: 1,
-                        flexShrink: 0,
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {formatClock(ms)}
-                    </Button>
-                  );
-                })}
-              </Stack>
-            ) : null}
-          </Stack>
-        </Paper>
-      ) : null}
-
-      <Collapse in={finding} id="find-replace" unmountOnExit>
-        <FindReplacePanel
-          interviewId={interview.id}
-          matches={matches}
-          onSearch={setSearch}
-          onReplaced={() => {
-            // An open line would still hold the text from before the replace.
-            setEditing(null);
-          }}
-        />
-      </Collapse>
-
-      {saved ? (
-        <Typography variant="body2" color="success.main" role="status">
-          Saved. Search finds the corrected words within a minute.
-        </Typography>
-      ) : null}
-      {/* Unmounted at zero, so a later batch of edits starts with a fresh button. */}
-      {data?.items.some((line) => line.english_stale) ? (
-        <StaleEnglish interviewId={interview.id} lines={data.items} />
-      ) : null}
-
-      {isError ? (
-        <Alert severity="error">The transcript couldn&apos;t be loaded.</Alert>
-      ) : isPending ? (
-        <Skeleton variant="rounded" height={240} />
-      ) : items.length === 0 ? (
-        <Typography color="text.secondary">
-          There&apos;s no transcript yet. Lines appear here once transcription has finished.
-        </Typography>
-      ) : shown.length === 0 ? (
-        <Typography color="text.secondary" sx={{ py: 2 }}>
-          {filter === "corrected" ? "No lines have been corrected yet." : "Every line has English."}
-        </Typography>
-      ) : (
-        <Paper sx={{ px: { xs: 1, sm: 2 }, py: 1 }}>
-          <Box component="ol" sx={{ listStyle: "none", m: 0, p: 0 }}>
-            {shown.map((line) => (
-              <Box
-                component="li"
-                key={line.seq}
-                ref={(el: HTMLLIElement | null) => {
-                  if (el) lineRefs.current.set(line.seq, el);
-                  else lineRefs.current.delete(line.seq);
-                }}
                 sx={{
-                  py: 1,
-                  borderBottom: 1,
-                  borderColor: "divider",
-                  "&:last-of-type": { borderBottom: 0 },
-                  // Leave room above for the pinned player when scrolled to.
-                  scrollMarginTop: 200,
+                  width: 1,
+                  display: "block",
+                  borderRadius: 1,
+                  ...(isVideo ? { bgcolor: "#000", aspectRatio: "16 / 9" } : { height: 40 }),
                 }}
-              >
-                {editing === line.seq ? (
-                  <LineForm
-                    interview={interview}
-                    line={line}
-                    player={player}
-                    onDone={(didSave, move) => {
-                      close(line.seq, didSave, move);
-                    }}
-                  />
-                ) : (
-                  <LineView
-                    interview={interview}
-                    line={line}
-                    player={player}
-                    current={current?.seq === line.seq}
-                    highlight={search && re ? { field: search.field, re } : null}
-                    onEdit={() => {
-                      open(line.seq);
-                    }}
-                  />
-                )}
-              </Box>
-            ))}
+              />
+              {jumpTo}
+            </Stack>
+          ) : null}
+          {/* The lines scroll inside this box, so the recording stays beside them. */}
+          <Box
+            ref={scroller}
+            tabIndex={0}
+            role="region"
+            aria-label="Transcript lines"
+            sx={{
+              position: "relative",
+              maxHeight: { xs: "65vh", md: "72vh" },
+              overflowY: "auto",
+              overscrollBehavior: "contain",
+              border: 1,
+              borderColor: "divider",
+              borderRadius: 1,
+              bgcolor: "background.paper",
+            }}
+          >
+            {lines}
           </Box>
-        </Paper>
-      )}
-    </Stack>
+        </Box>
+      </Stack>
+    </Paper>
   );
 }
 

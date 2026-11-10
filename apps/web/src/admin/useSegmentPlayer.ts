@@ -8,12 +8,12 @@ import { useAuth } from "../auth/useAuth";
 /**
  * The transcript editor's one player. It plays the recording straight through (the editor
  * follows along), or just one line, stopping at the line's end. Spread `audioProps` onto a
- * single <audio> element.
+ * single <audio> or <video> element.
  */
 export function useSegmentPlayer(interviewId: string) {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
-  const ref = useRef<HTMLAudioElement>(null);
+  const ref = useRef<HTMLMediaElement>(null);
   const endMs = useRef(0);
   // The line playing on its own, if any; null while playing straight through.
   const [playing, setPlaying] = useState<number | null>(null);

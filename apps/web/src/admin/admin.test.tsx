@@ -130,13 +130,12 @@ describe("admin page", () => {
     };
     stubApi(routes);
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
-    // The transcript itself is on its own page; this one sums it up.
-    expect(
-      await screen.findByText("1 line · 1 corrected · last corrected 2 November 2026", {}, SLOW),
-    ).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open the transcript" })).toHaveProperty(
-      "href",
-      expect.stringContaining(`/admin/interviews/${id}/transcript`),
+    // The transcript is on the same page, in a box that scrolls beside the recording.
+    expect(await screen.findByText("Corrected line", {}, SLOW)).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Transcript lines" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Correct the transcript" })).toHaveProperty(
+      "hash",
+      "#transcript",
     );
 
     expect(
