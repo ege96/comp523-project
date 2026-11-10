@@ -14,17 +14,28 @@ export function LinePair({
   lang,
   renderText = (text) => text,
   show = "both",
+  originalNotes = [],
+  englishNotes = [],
 }: {
   original: string;
   english: string | null;
   lang: string | null;
   renderText?: (text: string) => ReactNode;
   show?: "both" | "original" | "english";
+  /** Quiet labels after each half, such as "Corrected". */
+  originalNotes?: string[];
+  englishNotes?: string[];
 }) {
   const showOriginal = show !== "english" || english === null;
   const showEnglish = show !== "original" && english !== null;
   // The English becomes the lead when it is the only half shown.
   const englishLeads = !showOriginal;
+  // Asked for English, a line without any shows its original, saying so rather than passing
+  // it off as the translation.
+  const notesOnOriginal =
+    show === "english" && english === null
+      ? ["No English for this line", ...originalNotes]
+      : originalNotes;
   return (
     <Box>
       {showOriginal ? (
@@ -33,7 +44,7 @@ export function LinePair({
           lang={lang ?? undefined}
           sx={{ m: 0, fontSize: "1.125rem", lineHeight: 1.65, color: tokens.ink }}
         >
-          {renderText(original)}
+          <WithNotes notes={notesOnOriginal}>{renderText(original)}</WithNotes>
         </Box>
       ) : null}
       {showEnglish ? (
@@ -47,9 +58,36 @@ export function LinePair({
             color: englishLeads ? tokens.ink : tokens.inkMuted,
           }}
         >
-          {renderText(english)}
+          <WithNotes notes={englishNotes}>{renderText(english)}</WithNotes>
         </Box>
       ) : null}
     </Box>
+  );
+}
+
+// The text gets its own element only when labels follow it, so it can still be found alone.
+function WithNotes({ notes, children }: { notes: string[]; children: ReactNode }) {
+  if (notes.length === 0) return children;
+  return (
+    <>
+      <span>{children}</span>
+      {notes.map((note) => (
+        <Box
+          component="span"
+          key={note}
+          lang="en"
+          sx={{
+            display: "inline-block",
+            ml: 1,
+            fontSize: "0.75rem",
+            lineHeight: 1.4,
+            color: tokens.inkMuted,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {note}
+        </Box>
+      ))}
+    </>
   );
 }

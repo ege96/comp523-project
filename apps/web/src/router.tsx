@@ -12,6 +12,7 @@ import { AdminGate } from "./components/AdminGate";
 import { AppShell } from "./components/AppShell";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { trackSearchOrigins } from "./searchOrigin";
 
 // Proposal: URL paths. The handoff names screens (§5), not URLs.
 //   /                          home: search box and recently added interviews
@@ -113,12 +114,15 @@ const routeTree = rootRoute.addChildren([
 ]);
 
 export function createAppRouter(history?: RouterHistory) {
-  return createRouter({
+  const router = createRouter({
     routeTree,
     history,
     defaultPreload: "intent",
     scrollRestoration: true,
   });
+  // Lets the interview viewer offer "Back to results" when opened from a search.
+  trackSearchOrigins(router);
+  return router;
 }
 
 declare module "@tanstack/react-router" {

@@ -473,7 +473,8 @@ describe("interview viewer", () => {
       },
     });
     renderApp(`/interviews/${id}`);
-    const both = await screen.findByRole("tab", { name: "Original + English" });
+    // Phone-width labels (jsdom has no matchMedia); see InterviewPage.test.tsx for the wide ones.
+    const both = await screen.findByRole("tab", { name: "Both" });
     expect(both.getAttribute("aria-selected")).toBe("true");
     expect(screen.getByText("Original text A").getAttribute("lang")).toBe("ne");
     expect(screen.getByText("English text A")).toBeTruthy();
