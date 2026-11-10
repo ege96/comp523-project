@@ -21,6 +21,7 @@ import { API_BASE_URL } from "../config";
 import { useAuth } from "../auth/useAuth";
 
 export type Status = InterviewSummary["status"];
+type Visibility = InterviewSummary["visibility"];
 
 /** How often admin screens re-ask while the worker is still busy (there is no push yet). */
 export const PROCESSING_POLL_MS = 10_000;
@@ -30,13 +31,19 @@ export const adminQueries = {
   // Every interview, Private included (the API decides that from the token), newest first.
   interviews: (
     viewer: Viewer,
-    { status, limit, offset = 0 }: { status?: Status; limit: number; offset?: number },
+    {
+      status,
+      visibility,
+      limit,
+      offset = 0,
+    }: { status?: Status; visibility?: Visibility; limit: number; offset?: number },
   ) =>
     queryOptions({
-      queryKey: ["interviews", viewer.key, "admin", { status, limit, offset }],
+      queryKey: ["interviews", viewer.key, "admin", { status, visibility, limit, offset }],
       queryFn: async ({ signal }) => {
         const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (status) query.set("status", status);
+        if (visibility) query.set("visibility", visibility);
         return getJson(`/api/interviews?${query.toString()}`, InterviewListSchema, {
           token: await viewer.getToken(),
           signal,
@@ -81,8 +88,6 @@ async function patchInterview(token: string | null, id: string, update: Intervie
   });
   if (!res.ok) throw new ApiError(res.status, url);
 }
-
-type Visibility = InterviewSummary["visibility"];
 
 /** Publish (Public) or hide (Private) an interview. Allowed at any time (D-008). */
 export function useSetVisibility() {

@@ -6,7 +6,8 @@ import DialogContent from "@mui/material/DialogContent";
 import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import Stack from "@mui/material/Stack";
-import { useState } from "react";
+import Typography from "@mui/material/Typography";
+import { useState, type ReactNode } from "react";
 
 import type { InterviewDetail, Job } from "../api/schemas";
 import { CorrectionsWouldBeLost, useRerun, useRetranslate } from "./api";
@@ -55,7 +56,10 @@ export function RerunActions({ interview }: { interview: InterviewDetail }) {
           the English from {mismatch}. If the transcript itself is wrong, transcribe again.
         </Alert>
       ) : null}
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+      <RerunOption
+        title="Transcribe again"
+        text="When the transcript is mostly wrong, for example because the language was wrong. It replaces the transcript and the English."
+      >
         <Button
           variant="outlined"
           size="small"
@@ -67,6 +71,11 @@ export function RerunActions({ interview }: { interview: InterviewDetail }) {
         >
           Transcribe again
         </Button>
+      </RerunOption>
+      <RerunOption
+        title="Translate again"
+        text="When the English is poor or missing. The transcript and your corrections to it stay as they are."
+      >
         <Button
           variant="outlined"
           size="small"
@@ -77,7 +86,12 @@ export function RerunActions({ interview }: { interview: InterviewDetail }) {
         >
           Translate again
         </Button>
-      </Stack>
+      </RerunOption>
+      {busy && interview.status === "processing" ? (
+        <Typography variant="body2" color="text.secondary">
+          These can be used once processing has finished.
+        </Typography>
+      ) : null}
       {failed ? (
         <Alert severity="error">That step couldn&apos;t be started. Try again.</Alert>
       ) : null}
@@ -116,18 +130,60 @@ export function RerunActions({ interview }: { interview: InterviewDetail }) {
   );
 }
 
+function RerunOption({
+  title,
+  text,
+  children,
+}: {
+  title: string;
+  text: string;
+  children: ReactNode;
+}) {
+  return (
+    <Stack
+      direction={{ xs: "column", sm: "row" }}
+      spacing={{ xs: 1, sm: 2 }}
+      sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}
+    >
+      <Stack spacing={0.25} sx={{ minWidth: 0 }}>
+        <Typography sx={{ fontWeight: 600 }}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {text}
+        </Typography>
+      </Stack>
+      <Stack sx={{ flexShrink: 0, alignItems: "flex-start" }}>{children}</Stack>
+    </Stack>
+  );
+}
+
 /** Run a failed step again. Re-transcribing goes through the same warning as above. */
-export function RetryButton({ interview, job }: { interview: InterviewDetail; job: Job }) {
+export function RetryButton({
+  interview,
+  job,
+  label = "Try again",
+  variant = "outlined",
+}: {
+  interview: InterviewDetail;
+  job: Job;
+  label?: string;
+  variant?: "outlined" | "contained";
+}) {
   const step = retryStepFor(job.kind);
   const rerun = useRerun(interview.id);
   const retranslate = useRetranslate(interview.id);
   const pending = rerun.isPending || retranslate.isPending;
   if (step === null) return null;
   if (rerun.error instanceof CorrectionsWouldBeLost)
-    return <span>Use &ldquo;Transcribe again&rdquo; above: lines have corrections.</span>;
+    return (
+      <Typography variant="body2">
+        Lines have corrections. Use &ldquo;Transcribe again&rdquo; under &ldquo;Fix a
+        problem&rdquo;.
+      </Typography>
+    );
   return (
-    <>
+    <Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
       <Button
+        variant={variant}
         size="small"
         disabled={pending}
         onClick={() => {
@@ -135,11 +191,13 @@ export function RetryButton({ interview, job }: { interview: InterviewDetail; jo
           else rerun.mutate({ step });
         }}
       >
-        Retry
+        {label}
       </Button>
       {rerun.isError || retranslate.isError ? (
-        <span role="alert">Couldn&apos;t retry. Try again.</span>
+        <Typography variant="body2" color="error" role="alert">
+          That didn&apos;t start. Check your connection and try again.
+        </Typography>
       ) : null}
-    </>
+    </Stack>
   );
 }

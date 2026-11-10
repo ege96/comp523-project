@@ -1,82 +1,88 @@
-import Chip from "@mui/material/Chip";
+import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { useId } from "react";
 
 import type { Moment } from "../api/schemas";
-import { formatClock, formatRecordedOn } from "../format";
+import { formatClock, formatRecordedOn, transcriptLabel } from "../format";
 import { PlayIcon } from "./icons";
 import { InterviewChips } from "./InterviewChips";
 import { ButtonLink } from "./links";
+import { LinePair } from "./LinePair";
 
-/** One search hit: a stretch of transcript, opened in the viewer at its first line. */
+/**
+ * One search hit. The spoken words lead: a top row with the time to open at, then the lines
+ * (original above English) in the strongest type, then a compact line naming the interview.
+ */
 export function MomentCard({ moment }: { moment: Moment }) {
   const { interview, excerpt } = moment;
+  const titleId = useId();
   const recorded = formatRecordedOn(interview);
   const details = [
     interview.interviewee ?? "Unknown interviewee",
     interview.primary_language?.name,
     recorded ? `Recorded ${recorded}` : null,
   ].filter(Boolean);
-  const english = excerpt.flatMap((s) => (s.english_text ? [s.english_text] : [])).join(" ");
   // Semantic alone means the words themselves may not appear (search API, PR #27).
   const relatedOnly = !moment.matched_by.includes("keyword");
-  const span = `${formatClock(moment.start_ms)} – ${formatClock(moment.end_ms)}`;
+  const start = formatClock(moment.start_ms);
 
   return (
-    <Paper component="article" sx={{ p: 3 }}>
+    <Paper component="article" aria-labelledby={titleId} sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack spacing={1.5}>
         <Stack
           direction="row"
           spacing={2}
-          sx={{ justifyContent: "space-between", alignItems: "flex-start" }}
+          useFlexGap
+          sx={{ alignItems: "center", flexWrap: "wrap", rowGap: 1 }}
         >
-          <Typography variant="h3" component="h2">
-            {interview.title}
-          </Typography>
-          <Chip
+          <ButtonLink
+            to="/interviews/$interviewId"
+            params={{ interviewId: interview.id }}
+            search={{ t: moment.start_ms }}
+            variant="outlined"
             size="small"
-            label={span}
-            aria-label={`From ${span}`}
-            sx={{ bgcolor: "rgba(150, 58, 53, 0.1)", color: "primary.main", flexShrink: 0 }}
-          />
+            startIcon={<PlayIcon aria-hidden />}
+            // The accessible name starts with the visible words (WCAG 2.5.3 label in name).
+            aria-label={`Open at ${start}, ${interview.title}`}
+            sx={{ fontVariantNumeric: "tabular-nums" }}
+          >
+            Open at {start}
+          </ButtonLink>
+          {relatedOnly ? (
+            <Typography variant="caption" color="text.secondary">
+              Related by meaning
+            </Typography>
+          ) : null}
         </Stack>
-        <Typography variant="body2" color="text.secondary">
-          {details.join(" · ")}
-        </Typography>
-        <InterviewChips interview={interview} />
-        <Stack component="blockquote" spacing={1} sx={{ m: 0 }}>
-          {english ? <Typography>“{english}”</Typography> : null}
-          {/* The original words, always kept; `lang` lets the browser pick a Devanagari font. */}
-          <Stack spacing={0.5}>
-            {excerpt.map((s) => (
-              <Typography
-                key={s.seq}
-                lang={s.language ?? undefined}
-                variant={english ? "body2" : "body1"}
-                color={english ? "text.secondary" : "text.primary"}
-              >
-                {s.original_text}
-              </Typography>
-            ))}
-          </Stack>
+        <Stack component="blockquote" spacing={1.25} sx={{ m: 0 }}>
+          {excerpt.map((s) => (
+            <LinePair
+              key={s.seq}
+              original={s.original_text}
+              english={s.english_text}
+              lang={s.language}
+            />
+          ))}
         </Stack>
-        {relatedOnly ? (
-          <Typography variant="caption" color="text.secondary">
-            Related in meaning. Your exact words may not appear here.
+        <Box sx={{ borderTop: 1, borderColor: "divider", pt: 1.25 }}>
+          <Typography variant="body2" color="text.secondary">
+            <Box
+              component="span"
+              id={titleId}
+              sx={{ color: "text.primary", fontWeight: 600, mr: 0.75 }}
+            >
+              {interview.title}
+            </Box>
+            · {details.join(" · ")}
           </Typography>
-        ) : null}
-        <ButtonLink
-          to="/interviews/$interviewId"
-          params={{ interviewId: interview.id }}
-          search={{ t: moment.start_ms }}
-          variant="outlined"
-          endIcon={<PlayIcon />}
-          aria-label={`Open ${interview.title} at ${formatClock(moment.start_ms)}`}
-          sx={{ alignSelf: "flex-start" }}
-        >
-          Open at this moment
-        </ButtonLink>
+          {interview.visibility === "private" || transcriptLabel(interview.status) ? (
+            <Box sx={{ mt: 0.75 }}>
+              <InterviewChips interview={interview} />
+            </Box>
+          ) : null}
+        </Box>
       </Stack>
     </Paper>
   );

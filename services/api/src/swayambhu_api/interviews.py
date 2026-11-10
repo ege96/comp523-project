@@ -161,12 +161,19 @@ def list_interviews(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     status_filter: Annotated[Status | None, Query(alias="status")] = None,
+    visibility_filter: Annotated[
+        Literal["public", "private"] | None, Query(alias="visibility")
+    ] = None,
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
-    one status (for the admin's processing queue)."""
+    one status and/or visibility (for the admin's work queue: "not published" is done and
+    private). The filters only narrow what `summary_query` already allows, so a visitor asking
+    for private interviews gets none."""
     query = summary_query(viewer)
     if status_filter is not None:
         query = query.where(InterviewRow.status == status_filter)
+    if visibility_filter is not None:
+        query = query.where(InterviewRow.visibility == visibility_filter)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = session.execute(
         query.order_by(InterviewRow.created_at.desc(), InterviewRow.id).limit(limit).offset(offset)

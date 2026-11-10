@@ -10,14 +10,18 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useForm } from "@tanstack/react-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type DragEvent, type SubmitEvent } from "react";
 
 import { searchQueries } from "../api/client";
 import { useAuth } from "../auth/useAuth";
+import { UploadIcon } from "../components/icons";
 import { TextLink } from "../components/links";
 import { formatBytes } from "../format";
 import { UPLOAD_LANGUAGES } from "./status";
-import { recordedOnError, startUpload, uploadErrorMessage, type UploadHandle } from "./upload";
+import { datePartsError, NO_DATE, partsToText } from "./recordedOn";
+import { RecordedOnField } from "./RecordedOnField";
+import { startUpload, uploadErrorMessage, type UploadHandle } from "./upload";
 
 type Interviewee = { id: number | null; name: string };
 
@@ -28,6 +32,9 @@ type UploadState =
   | { phase: "error"; message: string };
 
 const NO_INTERVIEWEE: Interviewee = { id: null, name: "" };
+
+const LEAVE_WARNING = "Leave this page? The upload will stop.";
+const FILE_ERROR_ID = "upload-file-error";
 
 function baseName(file: File): string {
   return file.name.replace(/\.[^.]+$/, "");
@@ -60,18 +67,27 @@ export function UploadCard() {
     enabled: viewer.ready,
   });
 
-  // Leaving the page stops the upload, so ask first. It resumes if the same file is chosen
-  // again with the same details.
+  // Leaving the page stops the upload, so ask first, whether the admin closes the tab or follows
+  // a link in the app. Changing tabs or pages of the list stays on this page, so it isn't asked.
+  // The upload resumes if the same file is chosen again with the same details.
+  useBlocker({
+    shouldBlockFn: ({ current, next }) =>
+      current.pathname !== next.pathname && !window.confirm(LEAVE_WARNING),
+    enableBeforeUnload: uploading,
+    disabled: !uploading,
+  });
+  // Leaving after saying yes stops the upload, as the question says.
+  const handle = useRef<UploadHandle | null>(null);
   useEffect(() => {
-    if (!uploading) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-    };
-  }, [uploading]);
+    handle.current = upload.phase === "uploading" ? upload.handle : null;
+  }, [upload]);
+  useEffect(
+    () => () => {
+      handle.current?.abort();
+    },
+    [],
+  );
+  const formRef = useRef<HTMLFormElement>(null);
 
   const form = useForm({
     defaultValues: {
@@ -79,7 +95,7 @@ export function UploadCard() {
       title: "",
       interviewee: NO_INTERVIEWEE,
       language: "",
-      recordedOn: "",
+      recordedOn: NO_DATE,
     },
     onSubmit: async ({ value, formApi }) => {
       const file = value.file;
@@ -93,7 +109,7 @@ export function UploadCard() {
           language: value.language || undefined,
           intervieweeId: value.interviewee.id ?? undefined,
           intervieweeName: value.interviewee.id === null && name ? name : undefined,
-          recordedOn: value.recordedOn.trim() || undefined,
+          recordedOn: partsToText(value.recordedOn) || undefined,
         },
         {
           getToken: viewer.getToken,
@@ -120,7 +136,13 @@ export function UploadCard() {
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void form.handleSubmit();
+    void form.handleSubmit().then(() => {
+      if (form.state.isValid) return;
+      // Once the errors have rendered, take the admin to the first one.
+      window.setTimeout(() => {
+        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      }, 0);
+    });
   };
 
   const cancel = () => {
@@ -131,8 +153,13 @@ export function UploadCard() {
 
   return (
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack component="form" spacing={2.5} noValidate onSubmit={submit}>
-        <Typography variant="h2">Upload an interview</Typography>
+      <Stack component="form" ref={formRef} spacing={2.5} noValidate onSubmit={submit}>
+        <Stack spacing={0.5}>
+          <Typography variant="h2">Add an interview</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Only the file and a title are needed. Everything else can be added later.
+          </Typography>
+        </Stack>
 
         <form.Field name="file" validators={{ onChange: ({ value }) => fileError(value) }}>
           {(field) => (
@@ -180,7 +207,7 @@ export function UploadCard() {
           )}
         </form.Field>
 
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+        <Stack spacing={2.5}>
           <form.Field name="interviewee">
             {(field) => (
               <Autocomplete
@@ -246,24 +273,15 @@ export function UploadCard() {
 
         <form.Field
           name="recordedOn"
-          validators={{ onChange: ({ value }) => recordedOnError(value) }}
+          validators={{ onChange: ({ value }) => datePartsError(value) }}
         >
           {(field) => (
-            <TextField
-              label="Recording date"
-              name={field.name}
-              placeholder="e.g. 2019, 2019-05 or 2019-05-28"
+            <RecordedOnField
               value={field.state.value}
-              disabled={uploading}
-              onChange={(e) => {
-                field.handleChange(e.target.value);
-              }}
+              onChange={field.handleChange}
               onBlur={field.handleBlur}
-              error={shownError(field.state.meta) !== undefined}
-              helperText={
-                shownError(field.state.meta) ?? "Optional. Give as much of the date as is known."
-              }
-              sx={{ maxWidth: { sm: "50%" } }}
+              error={shownError(field.state.meta)}
+              disabled={uploading}
             />
           )}
         </form.Field>
@@ -276,7 +294,8 @@ export function UploadCard() {
           sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}
         >
           <Typography variant="body2" color="text.secondary">
-            New interviews start Private. Processing starts when the upload completes.
+            It stays Private until you publish it. The transcript is made automatically once the
+            upload finishes.
           </Typography>
           <Button type="submit" variant="contained" disabled={uploading} sx={{ flexShrink: 0 }}>
             Upload
@@ -318,19 +337,22 @@ function FileDrop({
         }}
         onDrop={drop}
         sx={{
-          p: 2.5,
+          px: 2,
+          py: 3,
           border: "1px dashed",
-          borderColor: error ? "error.main" : over ? "primary.main" : "divider",
+          borderColor: error ? "error.main" : over ? "primary.main" : "text.disabled",
           borderRadius: 1,
           bgcolor: over ? "action.hover" : "background.default",
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 2,
-          alignItems: { sm: "center" },
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
+          gap: 1.5,
         }}
       >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 500, overflowWrap: "anywhere" }}>
+        <UploadIcon aria-hidden sx={{ color: "primary.main", fontSize: 32 }} />
+        <Box sx={{ minWidth: 0, maxWidth: 1 }}>
+          <Typography sx={{ fontWeight: 600, overflowWrap: "anywhere" }}>
             {file ? file.name : "Drop a video or audio file here"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
@@ -340,8 +362,9 @@ function FileDrop({
         <Button
           variant="outlined"
           disabled={disabled}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? FILE_ERROR_ID : undefined}
           onClick={() => input.current?.click()}
-          sx={{ flexShrink: 0 }}
         >
           {file ? "Choose another file" : "Choose file"}
         </Button>
@@ -351,6 +374,7 @@ function FileDrop({
           hidden
           accept="audio/*,video/*"
           aria-label="Recording file"
+          aria-describedby={error ? FILE_ERROR_ID : undefined}
           onChange={(e) => {
             const chosen = e.target.files?.[0];
             if (chosen) onFile(chosen);
@@ -359,7 +383,14 @@ function FileDrop({
         />
       </Box>
       {error ? (
-        <Typography variant="caption" color="error" sx={{ mx: 1.75 }}>
+        <Typography
+          id={FILE_ERROR_ID}
+          role="alert"
+          variant="caption"
+          color="error"
+          component="p"
+          sx={{ mx: 1.75 }}
+        >
           {error}
         </Typography>
       ) : null}

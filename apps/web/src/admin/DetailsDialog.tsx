@@ -18,7 +18,8 @@ import { useAuth } from "../auth/useAuth";
 import { useUpdateInterview } from "./api";
 import { changedFields, detectedLabel, recordedOnText, type DetailsValues } from "./details";
 import { UPLOAD_LANGUAGES } from "./status";
-import { recordedOnError } from "./upload";
+import { datePartsError, partsFromText } from "./recordedOn";
+import { RecordedOnField } from "./RecordedOnField";
 
 function shownError(meta: { isTouched: boolean; errors: (string | undefined)[] }) {
   return meta.isTouched ? meta.errors[0] : undefined;
@@ -45,7 +46,7 @@ export function DetailsDialog({
     defaultValues: {
       title: interview.title,
       interviewee: { id: interview.interviewee_id, name: interview.interviewee ?? "" },
-      recordedOn: recordedOnText(interview),
+      recordedOn: partsFromText(recordedOnText(interview)),
       language: interview.language_confirmed ?? "",
     } satisfies DetailsValues,
     onSubmit: async ({ value }) => {
@@ -139,23 +140,14 @@ export function DetailsDialog({
 
             <form.Field
               name="recordedOn"
-              validators={{ onChange: ({ value }) => recordedOnError(value) }}
+              validators={{ onChange: ({ value }) => datePartsError(value) }}
             >
               {(field) => (
-                <TextField
-                  label="Recording date"
-                  name={field.name}
-                  placeholder="e.g. 2019, 2019-05 or 2019-05-28"
+                <RecordedOnField
                   value={field.state.value}
-                  onChange={(e) => {
-                    field.handleChange(e.target.value);
-                  }}
+                  onChange={field.handleChange}
                   onBlur={field.handleBlur}
-                  error={shownError(field.state.meta) !== undefined}
-                  helperText={
-                    shownError(field.state.meta) ??
-                    "Give as much of the date as is known. Leave empty if unknown."
-                  }
+                  error={shownError(field.state.meta)}
                 />
               )}
             </form.Field>

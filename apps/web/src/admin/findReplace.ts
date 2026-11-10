@@ -59,3 +59,30 @@ export function splitMatches(text: string, re: RegExp | null): { text: string; m
   if (last < text.length) parts.push({ text: text.slice(last), match: false });
   return parts;
 }
+
+export type ReplaceExample = { seq: number; startMs: number; before: string; after: string };
+
+/** A few lines as they are and as they would be after replacing, to check before saving. */
+export function previewReplace(
+  lines: AdminSegment[],
+  field: Field,
+  re: RegExp | null,
+  replacement: string,
+  interview: EditorInterview,
+  limit = 3,
+): ReplaceExample[] {
+  if (!re) return [];
+  const examples: ReplaceExample[] = [];
+  for (const line of lines) {
+    const text = currentText(line, field, interview);
+    if (text === null || text.search(re) === -1) continue;
+    examples.push({
+      seq: line.seq,
+      startMs: line.start_ms,
+      before: text,
+      after: text.replace(new RegExp(re), replacement),
+    });
+    if (examples.length === limit) break;
+  }
+  return examples;
+}

@@ -10,68 +10,104 @@ import { interviewQueries } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { ArrowForwardIcon } from "../components/icons";
 import { InterviewList } from "../components/InterviewList";
-import { ButtonLink } from "../components/links";
+import { TextLink } from "../components/links";
+import { Plate } from "../components/Plate";
 import { SearchBox } from "../components/SearchBox";
 
 // Proposal: the home page shows the 5 most recently added interviews; the rest are a click away
 // on /interviews. Search-first: no themes, featured items or recommendations (handoff, settled).
 const RECENT_COUNT = 5;
+const EXAMPLE = "How have festivals changed?";
 
 export function HomePage() {
   return (
-    <Container sx={{ py: { xs: 5, md: 8 } }}>
-      <Stack spacing={3} sx={{ maxWidth: 900, mb: { xs: 7, md: 10 } }}>
-        <Typography variant="overline" color="primary" sx={{ fontWeight: 600 }}>
-          Oral histories · Swayambhu, Kathmandu
-        </Typography>
-        <Typography
-          variant="h1"
-          sx={{ fontSize: { xs: "2.5rem", md: "3.5rem" }, lineHeight: 1.15 }}
-        >
-          An archive of voices, memories and lived heritage.
-        </Typography>
-        <Typography variant="h6" component="p" color="text.secondary" sx={{ fontWeight: 400 }}>
-          Explore recorded interviews with people connected to Swayambhu. Search their words, listen
-          to their stories, and read along.
-        </Typography>
-        <Box>
-          <SearchBox />
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5 }}>
-            Search finds moments by meaning as well as exact words, in the original transcripts and
-            their English translations. Try a question, like “How have festivals changed?”
+    <>
+      <Plate pb={{ xs: 4, md: 5 }}>
+        <Stack spacing={{ xs: 2.5, md: 3 }} sx={{ maxWidth: 820, pt: { md: 1 } }}>
+          <Typography variant="overline" component="p" color="primary" sx={{ mb: -1 }}>
+            Oral histories · Swayambhu, Kathmandu
           </Typography>
-        </Box>
-        <Box>
-          <ButtonLink to="/interviews" variant="outlined" endIcon={<ArrowForwardIcon />}>
-            Browse all interviews
-          </ButtonLink>
-        </Box>
-      </Stack>
+          <Typography
+            variant="h1"
+            sx={{
+              fontSize: { xs: "2.25rem", md: "3.25rem" },
+              maxWidth: "24ch",
+              textWrap: "balance",
+            }}
+          >
+            An archive of voices, memories and lived heritage.
+          </Typography>
+          <Typography
+            variant="h6"
+            component="p"
+            color="text.secondary"
+            sx={{ fontWeight: 400, maxWidth: "60ch" }}
+          >
+            Explore recorded interviews with people connected to Swayambhu. Search their words or
+            their meaning, listen to their stories, and read along.
+          </Typography>
+          <Box>
+            <SearchBox large />
+            <Stack
+              direction="row"
+              useFlexGap
+              sx={{
+                mt: 1.5,
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                flexWrap: "wrap",
+                columnGap: 3,
+                rowGap: 1,
+              }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                Try a question, like{" "}
+                <TextLink to="/search" search={{ q: EXAMPLE }} sx={{ fontWeight: 600 }}>
+                  {EXAMPLE}
+                </TextLink>
+              </Typography>
+              <TextLink
+                to="/interviews"
+                variant="body2"
+                underline="hover"
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, fontWeight: 600 }}
+              >
+                Browse all interviews <ArrowForwardIcon fontSize="small" aria-hidden />
+              </TextLink>
+            </Stack>
+          </Box>
+        </Stack>
+      </Plate>
 
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        spacing={2}
-        sx={{ justifyContent: "space-between", alignItems: { sm: "flex-end" }, mb: 3 }}
-      >
-        <Box>
-          <Typography variant="h2" gutterBottom>
-            Recently added interviews
-          </Typography>
-          <Typography color="text.secondary">
-            Original recordings with timestamped transcripts. English translations are shown when
-            available.
-          </Typography>
-        </Box>
-        <ButtonLink
-          to="/interviews"
-          endIcon={<ArrowForwardIcon />}
-          sx={{ flexShrink: 0, alignSelf: { xs: "flex-start", sm: "auto" } }}
+      <Container sx={{ pt: { xs: 4, md: 6 } }}>
+        <Stack
+          direction="row"
+          sx={{
+            justifyContent: "space-between",
+            alignItems: "flex-end",
+            flexWrap: "wrap",
+            gap: 1,
+            mb: 2,
+          }}
         >
-          View all interviews
-        </ButtonLink>
-      </Stack>
-      <RecentInterviews />
-    </Container>
+          <Box>
+            <Typography variant="h2">Recently added</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Interviews with timestamped transcripts. English translations are shown when
+              available.
+            </Typography>
+          </Box>
+          <TextLink
+            to="/interviews"
+            underline="hover"
+            sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, fontWeight: 600 }}
+          >
+            Browse all interviews <ArrowForwardIcon fontSize="small" aria-hidden />
+          </TextLink>
+        </Stack>
+        <RecentInterviews />
+      </Container>
+    </>
   );
 }
 
@@ -83,9 +119,13 @@ function RecentInterviews() {
   });
   if (isError)
     return <Alert severity="error">Interviews couldn&apos;t be loaded. Please try again.</Alert>;
-  if (isPending) return <Skeleton variant="rounded" height={320} />;
+  if (isPending) return <Skeleton variant="rectangular" height={320} />;
   if (data.items.length === 0) {
-    return <Typography color="text.secondary">No interviews have been published yet.</Typography>;
+    return (
+      <Box sx={{ py: 4, borderTop: 1, borderColor: "divider" }}>
+        <Typography color="text.secondary">No interviews have been published yet.</Typography>
+      </Box>
+    );
   }
   return <InterviewList interviews={data.items} />;
 }

@@ -6,15 +6,19 @@ import type { AdminSegment } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
 
 /**
- * Plays one transcript line at a time from the interview's recording, stopping at the line's
- * end. Spread `audioProps` onto a single <audio> element.
+ * The transcript editor's one player. It plays the recording straight through (the editor
+ * follows along), or just one line, stopping at the line's end. Spread `audioProps` onto a
+ * single <audio> or <video> element.
  */
 export function useSegmentPlayer(interviewId: string) {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
-  const ref = useRef<HTMLAudioElement>(null);
+  const ref = useRef<HTMLMediaElement>(null);
   const endMs = useRef(0);
+  // The line playing on its own, if any; null while playing straight through.
   const [playing, setPlaying] = useState<number | null>(null);
+  const [currentMs, setCurrentMs] = useState<number | null>(null);
+  const [paused, setPaused] = useState(true);
 
   const stop = () => {
     ref.current?.pause();
@@ -36,13 +40,32 @@ export function useSegmentPlayer(interviewId: string) {
     });
   };
 
+  /** Move to a time; keeps playing (straight through) if it was playing. */
+  const seek = (ms: number, play = false) => {
+    const el = ref.current;
+    if (!el) return;
+    endMs.current = Infinity;
+    setPlaying(null);
+    el.currentTime = ms / 1000;
+    setCurrentMs(ms);
+    if (play) void el.play().catch(() => undefined);
+  };
+
   const audioProps = {
     ref,
-    preload: "none",
+    preload: "metadata",
     // timeupdate fires a few times a second, so playback can run a moment past the line's end.
     onTimeUpdate: () => {
       const el = ref.current;
-      if (el && playing !== null && el.currentTime * 1000 >= endMs.current) stop();
+      if (!el) return;
+      setCurrentMs(Math.round(el.currentTime * 1000));
+      if (playing !== null && el.currentTime * 1000 >= endMs.current) stop();
+    },
+    onPlay: () => {
+      setPaused(false);
+    },
+    onPause: () => {
+      setPaused(true);
     },
     onEnded: () => {
       setPlaying(null);
@@ -57,5 +80,5 @@ export function useSegmentPlayer(interviewId: string) {
     },
   } as const;
 
-  return { playing, toggle, stop, audioProps };
+  return { playing, currentMs, paused, toggle, seek, stop, audioProps };
 }

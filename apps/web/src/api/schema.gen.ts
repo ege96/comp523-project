@@ -14,7 +14,9 @@ export interface paths {
         /**
          * List Interviews
          * @description Interviews the viewer may see, most recently added first, optionally only those with
-         *     one status (for the admin's processing queue).
+         *     one status and/or visibility (for the admin's work queue: "not published" is done and
+         *     private). The filters only narrow what `summary_query` already allows, so a visitor asking
+         *     for private interviews gets none.
          */
         get: operations["list_interviews_api_interviews_get"];
         put?: never;
@@ -764,6 +766,7 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 status?: ("processing" | "done" | "failed") | null;
+                visibility?: ("public" | "private") | null;
             };
             header?: never;
             path?: never;

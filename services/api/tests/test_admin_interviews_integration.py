@@ -159,6 +159,8 @@ def test_resumed_upload_queues_processing_and_publishing_shows_it_to_visitors(
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
     assert client.get("/api/interviews?status=processing").json()["total"] == 1
     assert client.get("/api/interviews?status=done").json()["total"] == 0
+    assert client.get("/api/interviews?status=processing&visibility=private").json()["total"] == 1
+    assert client.get("/api/interviews?visibility=public").json()["total"] == 0
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=None)
     path = f"/api/interviews/{interview_id}"
     assert client.get(path).status_code == 404

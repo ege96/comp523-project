@@ -1,77 +1,136 @@
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
+import Box from "@mui/material/Box";
 import Paper from "@mui/material/Paper";
-import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import type { InterviewSummary } from "../api/schemas";
 import { formatClock, formatRecordedOn } from "../format";
-import { ArrowForwardIcon } from "./icons";
+import { tokens } from "../theme";
 import { InterviewChips } from "./InterviewChips";
 import { TextLink } from "./links";
+import { visuallyHidden } from "./visuallyHidden";
 
-/** Interviews as rows: the whole row opens the interview (the title link is stretched over it). */
+// Title | Interviewee | Language | Length | Recorded, as a catalogue panel on wide screens.
+const columns = {
+  md: "minmax(0, 2.4fr) minmax(0, 1.3fr) minmax(0, 0.9fr) 5.5rem minmax(0, 1fr)",
+} as const;
+
+/** Interviews as catalogue rows: the whole row opens the interview (the title link is stretched). */
 export function InterviewList({ interviews }: { interviews: readonly InterviewSummary[] }) {
   return (
-    <Paper>
-      <List disablePadding>
-        {interviews.map((interview, i) => (
-          <ListItem
-            key={interview.id}
-            divider={i < interviews.length - 1}
-            sx={{ py: 2.5, px: 3, "&:hover": { bgcolor: "action.hover" } }}
-          >
-            <InterviewRow interview={interview} />
-          </ListItem>
+    <Paper sx={{ overflow: "hidden" }}>
+      <Box
+        aria-hidden
+        sx={{
+          display: { xs: "none", md: "grid" },
+          gridTemplateColumns: columns,
+          columnGap: 3,
+          px: 3,
+          py: 1.25,
+          bgcolor: tokens.groundAlt,
+          borderBottom: 1,
+          borderColor: "divider",
+          color: "text.secondary",
+          typography: "caption",
+          fontWeight: 600,
+        }}
+      >
+        <span>Title</span>
+        <span>Interviewee</span>
+        <span>Language</span>
+        <Box component="span" sx={{ textAlign: "right" }}>
+          Length
+        </Box>
+        <span>Recorded</span>
+      </Box>
+      <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0 }}>
+        {interviews.map((interview) => (
+          <InterviewRow key={interview.id} interview={interview} />
         ))}
-      </List>
+      </Box>
     </Paper>
   );
 }
 
 function InterviewRow({ interview }: { interview: InterviewSummary }) {
-  const details = [
-    `Interviewee: ${interview.interviewee ?? "Unknown"}`,
-    interview.primary_language?.name,
-    interview.duration_ms === null ? null : formatClock(interview.duration_ms),
-  ].filter(Boolean);
+  const length = interview.duration_ms === null ? null : formatClock(interview.duration_ms);
+  const recorded = formatRecordedOn(interview);
+  const cell = { typography: "body2", color: "text.secondary", fontVariantNumeric: "tabular-nums" };
   return (
-    <Stack
-      direction={{ xs: "column", sm: "row" }}
-      spacing={{ xs: 1.5, sm: 3 }}
-      sx={{ width: 1, alignItems: { sm: "center" } }}
+    <Box
+      component="li"
+      sx={{
+        position: "relative",
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", md: columns.md },
+        columnGap: 3,
+        rowGap: 0.5,
+        alignItems: "baseline",
+        px: { xs: 2, md: 3 },
+        py: { xs: 2, md: 2.25 },
+        borderBottom: 1,
+        borderColor: "divider",
+        "&:last-of-type": { borderBottom: 0 },
+        "&:hover": { bgcolor: tokens.hereTint },
+        "&:hover a": { textDecoration: "underline" },
+      }}
     >
-      <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+      <Box sx={{ minWidth: 0 }}>
+        {/* Terracotta like every link, so the title reads as one; the focus ring goes round
+            the whole row, which the stretched link covers. */}
         <TextLink
           to="/interviews/$interviewId"
           params={{ interviewId: interview.id }}
-          variant="subtitle1"
           underline="hover"
-          color="inherit"
-          sx={{ fontWeight: 500, "&::after": { content: '""', position: "absolute", inset: 0 } }}
+          color="primary"
+          sx={{
+            typography: "subtitle1",
+            lineHeight: 1.35,
+            "&::after": { content: '""', position: "absolute", inset: 0, borderRadius: 1 },
+            "&:focus-visible": { outline: "none", textDecoration: "underline" },
+            "&:focus-visible::after": {
+              outline: `2px solid ${tokens.plate}`,
+              outlineOffset: -2,
+            },
+          }}
         >
           {interview.title}
         </TextLink>
-        <Typography variant="body2" color="text.secondary">
-          {details.join(" · ")}
-        </Typography>
-        <InterviewChips interview={interview} />
-      </Stack>
-      <Stack sx={{ width: { sm: 160 }, flexShrink: 0 }}>
-        <Typography variant="overline" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-          Recorded
-        </Typography>
-        <Typography variant="body2">{formatRecordedOn(interview) ?? "Unknown"}</Typography>
-      </Stack>
-      {/* Decorative: the stretched title link already opens the interview. */}
-      <Typography
-        aria-hidden
-        color="primary"
-        variant="body2"
-        sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 1, fontWeight: 500 }}
-      >
-        Open interview <ArrowForwardIcon fontSize="small" />
+        <Box sx={{ mt: 0.5, "&:empty": { display: "none" } }}>
+          <InterviewChips interview={interview} />
+        </Box>
+      </Box>
+      {/* On phones the details run on one line under the title. */}
+      <Typography sx={{ ...cell, display: { md: "none" } }}>
+        {[
+          interview.interviewee ?? "Unknown interviewee",
+          interview.primary_language?.name,
+          length,
+          recorded,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
       </Typography>
-    </Stack>
+      <Typography sx={{ ...cell, display: { xs: "none", md: "block" } }}>
+        <Box component="span" sx={visuallyHidden}>
+          Interviewee:{" "}
+        </Box>
+        {interview.interviewee ?? "Unknown"}
+      </Typography>
+      <Typography sx={{ ...cell, display: { xs: "none", md: "block" } }}>
+        {interview.primary_language?.name ?? "—"}
+      </Typography>
+      <Typography sx={{ ...cell, display: { xs: "none", md: "block" }, textAlign: "right" }}>
+        <Box component="span" sx={visuallyHidden}>
+          Length:{" "}
+        </Box>
+        {length ?? "—"}
+      </Typography>
+      <Typography sx={{ ...cell, display: { xs: "none", md: "block" } }}>
+        <Box component="span" sx={visuallyHidden}>
+          Recorded:{" "}
+        </Box>
+        {recorded ?? "Unknown"}
+      </Typography>
+    </Box>
   );
 }

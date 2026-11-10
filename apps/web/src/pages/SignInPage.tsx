@@ -1,4 +1,5 @@
 import Alert from "@mui/material/Alert";
+import AlertTitle from "@mui/material/AlertTitle";
 import Button from "@mui/material/Button";
 import Container from "@mui/material/Container";
 import Divider from "@mui/material/Divider";
@@ -10,6 +11,7 @@ import { useEffect, useRef, useState, useTransition, type SubmitEvent } from "re
 
 import { SignInError } from "../auth/authClient";
 import { useAuth } from "../auth/useAuth";
+import { TextLink } from "../components/links";
 
 type Notice = { severity: "error" | "success" | "info"; text: string };
 
@@ -58,7 +60,24 @@ export function SignInPage() {
           </Typography>
         </Stack>
         {state.status === "unavailable" ? (
-          <Alert severity="warning">Sign-in isn&apos;t available right now.</Alert>
+          <Stack spacing={2} sx={{ alignItems: "flex-start" }}>
+            <Alert severity="warning">
+              <AlertTitle>Sign-in isn&apos;t available right now.</AlertTitle>
+              Try again in a few minutes. If it keeps happening, contact whoever runs the archive.
+              Visitors can still search and listen without signing in.
+            </Alert>
+            <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+              <Button
+                variant="outlined"
+                onClick={() => {
+                  window.location.reload();
+                }}
+              >
+                Try again
+              </Button>
+              <TextLink to="/">Back to the archive</TextLink>
+            </Stack>
+          </Stack>
         ) : state.status === "loading" ? (
           <Alert severity="info">Checking sign-in…</Alert>
         ) : state.status === "signedOut" ? (
