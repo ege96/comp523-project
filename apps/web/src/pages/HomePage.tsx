@@ -24,6 +24,9 @@ export function HomePage() {
     <>
       <Plate pb={{ xs: 5, md: 7 }}>
         <Stack spacing={{ xs: 2.5, md: 3 }} sx={{ maxWidth: 820, pt: { md: 2 } }}>
+          <Typography variant="overline" component="p" color="primary" sx={{ mb: -1 }}>
+            Oral histories · Swayambhu, Kathmandu
+          </Typography>
           <Typography
             variant="h1"
             sx={{
@@ -58,13 +61,19 @@ export function HomePage() {
           direction="row"
           sx={{
             justifyContent: "space-between",
-            alignItems: "baseline",
+            alignItems: "flex-end",
             flexWrap: "wrap",
             gap: 1,
             mb: 2,
           }}
         >
-          <Typography variant="h2">Recently added</Typography>
+          <Box>
+            <Typography variant="h2">Recently added</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              Recordings with timestamped transcripts. English translations are shown when
+              available.
+            </Typography>
+          </Box>
           <TextLink
             to="/interviews"
             underline="hover"
@@ -90,7 +99,7 @@ function RecentInterviews() {
   if (isPending) return <Skeleton variant="rectangular" height={320} />;
   if (data.items.length === 0) {
     return (
-      <Box sx={{ py: 4, borderTop: 2, borderColor: "text.primary" }}>
+      <Box sx={{ py: 4, borderTop: 1, borderColor: "divider" }}>
         <Typography color="text.secondary">No interviews have been published yet.</Typography>
       </Box>
     );

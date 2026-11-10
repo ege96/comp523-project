@@ -127,7 +127,7 @@ export function InterviewPage() {
             variant="overline"
             component="h2"
             id="transcript"
-            sx={{ display: "block", borderBottom: 2, borderColor: "text.primary", pb: 0.5 }}
+            sx={{ display: "block", borderBottom: 1, borderColor: "divider", pb: 0.5 }}
           >
             Transcript
           </Typography>
@@ -228,7 +228,7 @@ function AboutRecording({ interview }: { interview: InterviewDetail }) {
       <Typography
         variant="overline"
         component="h2"
-        sx={{ borderBottom: 2, borderColor: "text.primary", pb: 0.5 }}
+        sx={{ borderBottom: 1, borderColor: "divider", pb: 0.5 }}
       >
         About this recording
       </Typography>

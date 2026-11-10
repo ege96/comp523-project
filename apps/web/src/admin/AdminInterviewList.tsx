@@ -1,7 +1,5 @@
 import Alert from "@mui/material/Alert";
-import Chip from "@mui/material/Chip";
-import List from "@mui/material/List";
-import ListItem from "@mui/material/ListItem";
+import Box from "@mui/material/Box";
 import Pagination from "@mui/material/Pagination";
 import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
@@ -13,32 +11,41 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
 import type { InterviewSummary } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
-import { TextLink } from "../components/links";
-import { formatRecordedOn } from "../format";
-import { adminQueries, type Status } from "./api";
-import { STATUS_COLORS, STATUS_LABELS } from "./status";
-import { VisibilitySwitch } from "./VisibilitySwitch";
+import { ArrowForwardIcon } from "../components/icons";
+import { ButtonLink, TextLink } from "../components/links";
+import { visuallyHidden } from "../components/visuallyHidden";
+import { formatClock, formatRecordedOn } from "../format";
+import { adminQueries } from "./api";
+import { StagePill } from "./StagePill";
+import {
+  nextStep,
+  QUEUE_EMPTY,
+  QUEUE_FILTERS,
+  QUEUE_LABELS,
+  queueOf,
+  QUEUES,
+  type Queue,
+} from "./workflow";
 
 const PAGE_SIZE = 20;
-const FILTERS = ["processing", "done", "failed"] as const satisfies Status[];
 
 /**
- * Every interview, Private included, with its processing status and a publish toggle.
- * Refreshes itself while anything on the page is still processing.
+ * Every recording, Private included, sorted by what the admin does next. Each row says its
+ * next step and has one button for it. Refreshes itself while anything shown is processing.
  */
 export function AdminInterviewList({
-  status,
+  view,
   page,
   onChange,
 }: {
-  status: Status | undefined;
+  view: Queue | undefined;
   page: number;
-  onChange: (next: { status: Status | undefined; page: number }) => void;
+  onChange: (next: { view: Queue | undefined; page: number }) => void;
 }) {
   const { viewer } = useAuth();
   const { data, isPending, isError } = useQuery({
     ...adminQueries.interviews(viewer, {
-      status,
+      ...(view ? QUEUE_FILTERS[view] : {}),
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     }),
@@ -48,97 +55,167 @@ export function AdminInterviewList({
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack spacing={2}>
-        <Typography variant="h2">Interviews</Typography>
+    <Paper component="section" aria-labelledby="queue-title">
+      <Stack spacing={1.5} sx={{ px: { xs: 2, sm: 3 }, pt: { xs: 2, sm: 3 } }}>
+        <Typography id="queue-title" variant="h2">
+          Your recordings
+        </Typography>
         <Tabs
-          value={status ?? "all"}
-          onChange={(_e, value: Status | "all") => {
-            onChange({ status: value === "all" ? undefined : value, page: 1 });
+          value={view ?? "all"}
+          onChange={(_e, value: Queue | "all") => {
+            onChange({ view: value === "all" ? undefined : value, page: 1 });
           }}
           variant="scrollable"
           allowScrollButtonsMobile
-          aria-label="Filter by status"
+          aria-label="Show recordings that are"
+          sx={{
+            borderBottom: 1,
+            borderColor: "divider",
+            mx: { xs: -2, sm: -3 },
+            px: { sm: 1.5 },
+            "& .MuiTab-root": { minWidth: 0, px: 1.5 },
+          }}
         >
           <Tab value="all" label="All" />
-          {FILTERS.map((s) => (
-            <Tab key={s} value={s} label={STATUS_LABELS[s]} />
+          {QUEUES.map((q) => (
+            <Tab key={q} value={q} label={<QueueTabLabel queue={q} />} />
           ))}
         </Tabs>
+      </Stack>
+      <Box sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 3 } }}>
         {isError ? (
-          <Alert severity="error">Interviews couldn&apos;t be loaded. Please try again.</Alert>
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Your recordings couldn&apos;t be loaded. Please try again.
+          </Alert>
         ) : isPending ? (
-          <Skeleton variant="rounded" height={320} />
+          <Skeleton variant="rounded" height={320} sx={{ mt: 2 }} />
         ) : data.items.length === 0 ? (
-          <Typography color="text.secondary">
-            {status
-              ? `No interviews are ${STATUS_LABELS[status].toLowerCase()}.`
-              : "No interviews yet. Upload one to start."}
+          <Typography color="text.secondary" sx={{ py: 4 }}>
+            {view ? QUEUE_EMPTY[view] : "No recordings yet. Add one to start."}
           </Typography>
         ) : (
-          <List disablePadding>
-            {data.items.map((interview, i) => (
-              <ListItem
-                key={interview.id}
-                divider={i < data.items.length - 1}
-                sx={{ px: 0, py: 2 }}
-              >
-                <AdminRow interview={interview} />
-              </ListItem>
+          <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0 }}>
+            {data.items.map((interview) => (
+              <QueueRow key={interview.id} interview={interview} />
             ))}
-          </List>
+          </Box>
         )}
         {pages > 1 ? (
           <Pagination
             page={page}
             count={pages}
-            sx={{ alignSelf: "center" }}
+            sx={{ display: "flex", justifyContent: "center", pt: 2 }}
             onChange={(_e, next) => {
-              onChange({ status, page: next });
+              onChange({ view, page: next });
             }}
           />
         ) : null}
-      </Stack>
+      </Box>
     </Paper>
   );
 }
 
-function AdminRow({ interview }: { interview: InterviewSummary }) {
+/** A tab's name with how many recordings are in it, so the admin sees where work waits. */
+function QueueTabLabel({ queue }: { queue: Queue }) {
+  const { viewer } = useAuth();
+  const { data } = useQuery({
+    ...adminQueries.interviews(viewer, { ...QUEUE_FILTERS[queue], limit: 1 }),
+    enabled: viewer.ready,
+  });
+  const count = data?.total;
+  const urgent = queue === "attention" && count !== undefined && count > 0;
+  return (
+    <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
+      <span>{QUEUE_LABELS[queue]}</span>
+      {count === undefined ? null : (
+        <Box
+          component="span"
+          aria-hidden
+          sx={{
+            minWidth: 22,
+            px: 0.75,
+            borderRadius: 999,
+            fontSize: "0.75rem",
+            lineHeight: "20px",
+            textAlign: "center",
+            bgcolor: urgent ? "#fbe9c8" : "action.hover",
+            color: urgent ? "#6e4300" : "text.secondary",
+          }}
+        >
+          {count}
+        </Box>
+      )}
+      {count === undefined ? null : (
+        <Box component="span" sx={visuallyHidden}>
+          ({count})
+        </Box>
+      )}
+    </Stack>
+  );
+}
+
+function QueueRow({ interview }: { interview: InterviewSummary }) {
+  const queue = queueOf(interview);
+  const step = nextStep(interview);
   const details = [
     interview.interviewee ?? "Interviewee unknown",
-    interview.primary_language?.name ?? "Language not detected yet",
-    formatRecordedOn(interview) ?? "Date unknown",
-  ];
+    interview.primary_language?.name ?? "Language not known yet",
+    interview.duration_ms === null ? null : formatClock(interview.duration_ms),
+    formatRecordedOn(interview),
+    interview.visibility === "public" ? "Public" : "Private",
+  ].filter(Boolean);
+  const urgent = queue === "attention" || queue === "ready";
   return (
-    <Stack
-      direction={{ xs: "column", sm: "row" }}
-      spacing={{ xs: 1, sm: 2 }}
-      sx={{ width: 1, alignItems: { sm: "center" } }}
+    <Box
+      component="li"
+      sx={{
+        py: 2.25,
+        borderBottom: 1,
+        borderColor: "divider",
+        "&:last-of-type": { borderBottom: 0 },
+        display: "grid",
+        gap: { xs: 1.25, sm: 2 },
+        gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) auto" },
+        alignItems: "center",
+      }}
     >
-      <Stack spacing={0.5} sx={{ flex: 1, minWidth: 0 }}>
+      <Stack spacing={0.5} sx={{ minWidth: 0, alignItems: "flex-start" }}>
         <TextLink
           to="/admin/interviews/$interviewId"
           params={{ interviewId: interview.id }}
           variant="subtitle1"
           underline="hover"
           color="inherit"
-          sx={{ fontWeight: 500, overflowWrap: "anywhere" }}
+          // The button beside it goes to the same page; one stop per row for keyboards.
+          tabIndex={-1}
+          sx={{ overflowWrap: "anywhere" }}
         >
           {interview.title}
         </TextLink>
         <Typography variant="body2" color="text.secondary">
           {details.join(" · ")}
         </Typography>
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          sx={{ alignItems: "center", flexWrap: "wrap", pt: 0.5 }}
+        >
+          <StagePill queue={queue} />
+          <Typography variant="body2">{step.text}</Typography>
+        </Stack>
       </Stack>
-      <Chip
+      <ButtonLink
+        to="/admin/interviews/$interviewId"
+        params={{ interviewId: interview.id }}
+        variant={urgent ? "contained" : "outlined"}
         size="small"
-        color={STATUS_COLORS[interview.status]}
-        label={STATUS_LABELS[interview.status]}
-        sx={{ alignSelf: { xs: "flex-start", sm: "center" } }}
-      />
-      <Stack sx={{ width: { sm: 120 }, flexShrink: 0 }}>
-        <VisibilitySwitch interview={interview} />
-      </Stack>
-    </Stack>
+        endIcon={<ArrowForwardIcon aria-hidden />}
+        aria-label={`${step.action}: ${interview.title}`}
+        sx={{ justifySelf: { xs: "start", sm: "end" }, whiteSpace: "nowrap" }}
+      >
+        {step.action}
+      </ButtonLink>
+    </Box>
   );
 }

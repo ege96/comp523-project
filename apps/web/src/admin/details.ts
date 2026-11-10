@@ -1,4 +1,5 @@
 import type { InterviewDetail, InterviewUpdate } from "../api/schemas";
+import { partsToText, type DateParts } from "./recordedOn";
 import { languageName } from "./status";
 
 type Interviewee = { id: number | null; name: string };
@@ -27,7 +28,7 @@ export function detectedLabel(
 export type DetailsValues = {
   title: string;
   interviewee: Interviewee;
-  recordedOn: string;
+  recordedOn: DateParts;
   language: string;
 };
 
@@ -46,7 +47,7 @@ export function changedFields(interview: InterviewDetail, value: DetailsValues):
   } else if (interview.interviewee_id !== null) {
     update.interviewee_id = null;
   }
-  const recordedOn = value.recordedOn.trim();
+  const recordedOn = partsToText(value.recordedOn);
   if (recordedOn !== recordedOnText(interview)) update.recorded_on = recordedOn || null;
   const language = value.language || null;
   if (language !== interview.language_confirmed) update.language = language;

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { z } from "zod";
 
+import { QUEUES } from "./admin/workflow";
 import { AdminGate } from "./components/AdminGate";
 import { AppShell } from "./components/AppShell";
 import { HomePage } from "./pages/HomePage";
@@ -20,9 +21,11 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 //   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
 //   /about                     About & Help: what the archive is, and an FAQ for visitors
 //   /signin                    admin sign-in
-//   /admin?status=&page=       upload, processing status and publishing (admins only)
+//   /admin?view=&page=         add recordings; recordings sorted by what to do next, view =
+//                              attention|processing|ready|published (admins only)
 //   /admin/interviews/$interviewId
-//                              one interview's processing steps and visibility (admins only)
+//                              one recording: next step, processing, details, transcript and
+//                              publishing (admins only)
 // Only the home page is in the main bundle; the rest load on demand, and `defaultPreload:
 // "intent"` fetches a page's code when the pointer rests on a link to it.
 
@@ -87,7 +90,7 @@ const adminHomeRoute = createRoute({
   getParentRoute: () => adminRoute,
   path: "/",
   validateSearch: z.object({
-    status: z.enum(["processing", "done", "failed"]).optional().catch(undefined),
+    view: z.enum(QUEUES).optional().catch(undefined),
     page: z.number().int().min(2).optional().catch(undefined),
   }),
   component: lazyRouteComponent(() => import("./pages/AdminPage"), "AdminPage"),

@@ -34,7 +34,7 @@ export function AboutPage() {
           <Typography
             variant="overline"
             component="p"
-            sx={{ borderBottom: 2, borderColor: "text.primary", pb: 0.5, mb: 1 }}
+            sx={{ borderBottom: 1, borderColor: "divider", pb: 0.5, mb: 1 }}
           >
             On this page
           </Typography>
@@ -59,7 +59,7 @@ export function AboutPage() {
             <Typography
               variant="h2"
               id="about-archive"
-              sx={{ borderBottom: 2, borderColor: "text.primary", pb: 1, scrollMarginTop: 24 }}
+              sx={{ borderBottom: 1, borderColor: "divider", pb: 1, scrollMarginTop: 24 }}
             >
               About the archive
             </Typography>
@@ -78,7 +78,7 @@ export function AboutPage() {
             <Typography
               variant="h2"
               id="faq"
-              sx={{ borderBottom: 2, borderColor: "text.primary", pb: 1, scrollMarginTop: 24 }}
+              sx={{ borderBottom: 1, borderColor: "divider", pb: 1, scrollMarginTop: 24 }}
             >
               Questions
             </Typography>

@@ -14,10 +14,13 @@ import { useEffect, useRef, useState, type DragEvent, type SubmitEvent } from "r
 
 import { searchQueries } from "../api/client";
 import { useAuth } from "../auth/useAuth";
+import { UploadIcon } from "../components/icons";
 import { TextLink } from "../components/links";
 import { formatBytes } from "../format";
 import { UPLOAD_LANGUAGES } from "./status";
-import { recordedOnError, startUpload, uploadErrorMessage, type UploadHandle } from "./upload";
+import { datePartsError, NO_DATE, partsToText } from "./recordedOn";
+import { RecordedOnField } from "./RecordedOnField";
+import { startUpload, uploadErrorMessage, type UploadHandle } from "./upload";
 
 type Interviewee = { id: number | null; name: string };
 
@@ -79,7 +82,7 @@ export function UploadCard() {
       title: "",
       interviewee: NO_INTERVIEWEE,
       language: "",
-      recordedOn: "",
+      recordedOn: NO_DATE,
     },
     onSubmit: async ({ value, formApi }) => {
       const file = value.file;
@@ -93,7 +96,7 @@ export function UploadCard() {
           language: value.language || undefined,
           intervieweeId: value.interviewee.id ?? undefined,
           intervieweeName: value.interviewee.id === null && name ? name : undefined,
-          recordedOn: value.recordedOn.trim() || undefined,
+          recordedOn: partsToText(value.recordedOn) || undefined,
         },
         {
           getToken: viewer.getToken,
@@ -132,7 +135,12 @@ export function UploadCard() {
   return (
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack component="form" spacing={2.5} noValidate onSubmit={submit}>
-        <Typography variant="h2">Upload an interview</Typography>
+        <Stack spacing={0.5}>
+          <Typography variant="h2">Add a recording</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Only the file and a title are needed. Everything else can be added later.
+          </Typography>
+        </Stack>
 
         <form.Field name="file" validators={{ onChange: ({ value }) => fileError(value) }}>
           {(field) => (
@@ -180,7 +188,7 @@ export function UploadCard() {
           )}
         </form.Field>
 
-        <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
+        <Stack spacing={2.5}>
           <form.Field name="interviewee">
             {(field) => (
               <Autocomplete
@@ -246,24 +254,15 @@ export function UploadCard() {
 
         <form.Field
           name="recordedOn"
-          validators={{ onChange: ({ value }) => recordedOnError(value) }}
+          validators={{ onChange: ({ value }) => datePartsError(value) }}
         >
           {(field) => (
-            <TextField
-              label="Recording date"
-              name={field.name}
-              placeholder="e.g. 2019, 2019-05 or 2019-05-28"
+            <RecordedOnField
               value={field.state.value}
-              disabled={uploading}
-              onChange={(e) => {
-                field.handleChange(e.target.value);
-              }}
+              onChange={field.handleChange}
               onBlur={field.handleBlur}
-              error={shownError(field.state.meta) !== undefined}
-              helperText={
-                shownError(field.state.meta) ?? "Optional. Give as much of the date as is known."
-              }
-              sx={{ maxWidth: { sm: "50%" } }}
+              error={shownError(field.state.meta)}
+              disabled={uploading}
             />
           )}
         </form.Field>
@@ -276,7 +275,8 @@ export function UploadCard() {
           sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}
         >
           <Typography variant="body2" color="text.secondary">
-            New interviews start Private. Processing starts when the upload completes.
+            It stays Private until you publish it. The transcript is made automatically once the
+            upload finishes.
           </Typography>
           <Button type="submit" variant="contained" disabled={uploading} sx={{ flexShrink: 0 }}>
             Upload
@@ -318,31 +318,29 @@ function FileDrop({
         }}
         onDrop={drop}
         sx={{
-          p: 2.5,
+          px: 2,
+          py: 3,
           border: "1px dashed",
-          borderColor: error ? "error.main" : over ? "primary.main" : "divider",
+          borderColor: error ? "error.main" : over ? "primary.main" : "text.disabled",
           borderRadius: 1,
           bgcolor: over ? "action.hover" : "background.default",
           display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 2,
-          alignItems: { sm: "center" },
+          flexDirection: "column",
+          alignItems: "center",
+          textAlign: "center",
+          gap: 1.5,
         }}
       >
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 500, overflowWrap: "anywhere" }}>
+        <UploadIcon aria-hidden sx={{ color: "primary.main", fontSize: 32 }} />
+        <Box sx={{ minWidth: 0, maxWidth: 1 }}>
+          <Typography sx={{ fontWeight: 600, overflowWrap: "anywhere" }}>
             {file ? file.name : "Drop a video or audio file here"}
           </Typography>
           <Typography variant="body2" color="text.secondary">
             {file ? formatBytes(file.size) : "For example MP4, MOV, MP3 or WAV"}
           </Typography>
         </Box>
-        <Button
-          variant="outlined"
-          disabled={disabled}
-          onClick={() => input.current?.click()}
-          sx={{ flexShrink: 0 }}
-        >
+        <Button variant="outlined" disabled={disabled} onClick={() => input.current?.click()}>
           {file ? "Choose another file" : "Choose file"}
         </Button>
         <input

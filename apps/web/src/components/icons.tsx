@@ -51,3 +51,36 @@ export function ChevronIcon(props: SvgIconProps) {
     </SvgIcon>
   );
 }
+
+export function CheckIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+    </SvgIcon>
+  );
+}
+
+/** An exclamation mark, for a step that didn't work. */
+export function AlertIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M11 4h2v11h-2zm0 13h2v2h-2z" />
+    </SvgIcon>
+  );
+}
+
+export function ArrowBackIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z" />
+    </SvgIcon>
+  );
+}
+
+export function UploadIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96M19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95A5.47 5.47 0 0 1 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11A2.98 2.98 0 0 1 22 15c0 1.65-1.35 3-3 3M8 13h2.55v3h2.9v-3H16l-4-4z" />
+    </SvgIcon>
+  );
+}

@@ -130,14 +130,9 @@ function Filters({ params }: { params: SearchParams }) {
         sx={{ display: { xs: open ? "flex" : "none", md: "flex" }, mt: { xs: 2, md: 0 } }}
       >
         <Typography
-          variant="overline"
+          variant="subtitle1"
           component="h2"
-          sx={{
-            display: { xs: "none", md: "block" },
-            borderBottom: 2,
-            borderColor: "text.primary",
-            pb: 0.5,
-          }}
+          sx={{ display: { xs: "none", md: "block" } }}
         >
           Filter results
         </Typography>
@@ -236,9 +231,13 @@ function Results({ params }: { params: SearchParams }) {
   const keywordOnly = data.pages.some((page) => page.search_mode === "keyword_only");
   return (
     <Stack spacing={2} component="section" aria-label="Search results">
-      <Box sx={{ borderBottom: 2, borderColor: "text.primary", pb: 0.5 }}>
-        <Typography variant="overline" component="h2">
-          Transcript moments, most relevant first
+      <Box>
+        <Typography variant="subtitle1" component="h2">
+          Relevant transcript moments
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Most relevant first. Each shows the original words, with the English below when there is a
+          translation.
         </Typography>
       </Box>
       {keywordOnly ? (
@@ -253,18 +252,14 @@ function Results({ params }: { params: SearchParams }) {
         </Typography>
       ) : (
         <>
-          <Typography variant="body2" color="text.secondary">
-            Each moment shows the original words, with the English translation below when there is
-            one. Choose a time to listen from there.
-          </Typography>
-          <Box sx={{ mt: "0 !important" }}>
+          <Stack spacing={2}>
             {moments.map((moment) => (
               <MomentCard
                 key={`${moment.interview.id}:${String(moment.start_ms)}`}
                 moment={moment}
               />
             ))}
-          </Box>
+          </Stack>
           {hasNextPage ? (
             <Button
               variant="outlined"

@@ -187,6 +187,16 @@ def test_a_visitor_link_to_a_private_interviews_media_is_refused(
     assert as_viewer(client).get(url).status_code == 404
 
 
+def test_visibility_filter_never_shows_visitors_private_interviews(
+    client: TestClient, interviews: dict[str, InterviewRow]
+) -> None:
+    body = as_viewer(client).get("/api/interviews?visibility=private").json()
+    assert (body["items"], body["total"]) == ([], 0)
+    public = as_viewer(client).get("/api/interviews?visibility=public").json()
+    assert str(interviews["private"].id) not in {i["id"] for i in public["items"]}
+    assert as_viewer(client).get("/api/interviews?visibility=restricted").status_code == 422
+
+
 def test_status_filter_never_shows_visitors_private_interviews(
     client: TestClient, interviews: dict[str, InterviewRow]
 ) -> None:

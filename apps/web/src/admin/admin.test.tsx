@@ -65,52 +65,74 @@ function requests() {
 }
 
 describe("admin page", () => {
-  it("lists every interview with its status, filters by status and publishes", async () => {
+  it("lists every recording with its next step, and filters by what to do next", async () => {
     stubApi(adminApi);
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
 
     const row = (await screen.findByRole("link", { name: "Test interview B" }, SLOW)).closest("li");
     if (!row) throw new Error("no row");
     expect(within(row).getByText("Processing")).toBeTruthy();
-    expect(screen.getByText("Done", { selector: ".MuiChip-label" })).toBeTruthy();
+    expect(within(row).getByText("The transcript is being made. Nothing to do yet.")).toBeTruthy();
+    expect(
+      within(row).getByRole("link", { name: "Check progress: Test interview B" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: `Open: ${interviewSummary.title}` }).closest("li"),
+    ).toHaveProperty("textContent", expect.stringContaining("Visitors can find and play it."));
 
-    // Making it Public asks first; Cancel sends nothing.
-    const toggle = within(row).getByRole("switch", { name: "Public: Test interview B" });
-    await userEvent.click(toggle);
-    const dialog = await screen.findByRole("dialog", { name: "Make “Test interview B” Public?" });
+    await userEvent.click(screen.getByRole("tab", { name: /Needs attention/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /Ready to publish/ }));
+    await vi.waitFor(() => {
+      expect(requests().some((r) => r.url.includes("limit=20&offset=0&status=failed"))).toBe(true);
+      expect(
+        requests().some((r) => r.url.includes("limit=20&offset=0&status=done&visibility=private")),
+      ).toBe(true);
+    });
+    // Each tab shows how many recordings are waiting in it.
+    expect(screen.getByRole("tab", { name: /^Published.*\(2\)$/ })).toBeTruthy();
+  });
+
+  it("keeps the view and page in the URL", async () => {
+    stubApi({ ...adminApi, "/api/interviews": { body: { items: [], total: 45 } } });
+    const router = renderApp("/admin?view=attention&page=2", fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByText("Nothing needs your attention.", {}, SLOW)).toBeTruthy();
+    expect(requests().some((r) => r.url.includes("limit=20&offset=20&status=failed"))).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Go to page 3" }));
+    expect(router.state.location.search).toEqual({ view: "attention", page: 3 });
+    await userEvent.click(screen.getByRole("tab", { name: "All" }));
+    expect(router.state.location.search).toEqual({});
+  });
+
+  it("publishes only after asking, and unpublishes at once", async () => {
+    const routes = {
+      ...adminApi,
+      [`/api/interviews/${id}`]: { body: { ...interviewDetail, visibility: "private" } },
+      [`/api/interviews/${id}/transcript`]: { body: { items: [] } },
+    };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    expect(await screen.findByRole("heading", { name: "Ready to publish" }, SLOW)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const dialog = await screen.findByRole("dialog", { name: "Publish “Test interview A”?" });
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(requests().some((r) => r.method === "PATCH")).toBe(false);
-    expect((toggle as HTMLInputElement).checked).toBe(false);
 
-    await userEvent.click(toggle);
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
     await userEvent.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Make Public" }),
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }),
     );
     expect(requests()).toContainEqual({
-      url: `/api/interviews/${privateOne.id}`,
+      url: `/api/interviews/${id}`,
       method: "PATCH",
       body: '{"visibility":"public"}',
     });
-    expect(await within(row).findByRole("alert")).toHaveProperty(
-      "textContent",
-      "Couldn't change visibility. Try again.",
-    );
 
-    await userEvent.click(screen.getByRole("tab", { name: "Failed" }));
-    await vi.waitFor(() => {
-      expect(requests().some((r) => r.url.includes("status=failed"))).toBe(true);
-    });
-  });
-
-  it("makes an interview Private without asking", async () => {
-    stubApi(adminApi);
-    renderApp("/admin", fakeAuthClient({ signedIn: true }));
-    const toggle = await screen.findByRole(
-      "switch",
-      { name: `Public: ${interviewSummary.title}` },
-      SLOW,
-    );
-    await userEvent.click(toggle);
+    cleanup();
+    stubApi({ ...routes, [`/api/interviews/${id}`]: { body: interviewDetail } });
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByRole("heading", { name: "Published" }, SLOW)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Unpublish" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(requests()).toContainEqual({
       url: `/api/interviews/${id}`,
@@ -119,14 +141,24 @@ describe("admin page", () => {
     });
   });
 
-  it("keeps the status filter and page in the URL", async () => {
-    stubApi({ ...adminApi, "/api/interviews": { body: { items: [], total: 45 } } });
-    const router = renderApp("/admin?status=failed&page=2", fakeAuthClient({ signedIn: true }));
-    expect(await screen.findByText("No interviews are failed.", {}, SLOW)).toBeTruthy();
-    expect(requests().some((r) => r.url.includes("limit=20&offset=20&status=failed"))).toBe(true);
-    await userEvent.click(screen.getByRole("button", { name: "Go to page 3" }));
-    await userEvent.click(screen.getByRole("tab", { name: "All" }));
-    expect(router.state.location.search).toEqual({});
+  it("says when publishing failed", async () => {
+    const routes = {
+      ...adminApi,
+      [`/api/interviews/${privateOne.id}`]: { body: { ...interviewDetail, ...privateOne } },
+      [`/api/interviews/${privateOne.id}/jobs`]: { status: 500, body: {} },
+      [`/api/interviews/${privateOne.id}/transcript`]: { body: { items: [] } },
+    };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${privateOne.id}`, fakeAuthClient({ signedIn: true }));
+    // While processing, publishing is under "Who can see it" (D-008 allows it).
+    expect(await screen.findByRole("heading", { name: "Being processed" }, SLOW)).toBeTruthy();
+    expect(await screen.findByText("The processing steps couldn't be loaded.")).toBeTruthy();
+    stubApi({ ...routes, [`/api/interviews/${privateOne.id}`]: { status: 500, body: {} } });
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    await userEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }),
+    );
+    expect(await screen.findByText("Couldn't publish it. Try again.")).toBeTruthy();
   });
 
   it("checks the form, then uploads with only the details given", async () => {
@@ -159,14 +191,24 @@ describe("admin page", () => {
     expect(screen.getByText("An existing interviewee")).toBeTruthy();
     await userEvent.click(screen.getByRole("combobox", { name: "Original language" }));
     await userEvent.click(await screen.findByRole("option", { name: "Nepal Bhasa" }));
-    const date = screen.getByRole("textbox", { name: "Recording date" });
-    await userEvent.type(date, "2023-02-29");
+    const pick = async (field: string, option: string) => {
+      await userEvent.click(screen.getByRole("combobox", { name: field }));
+      await userEvent.click(await screen.findByRole("option", { name: option }));
+    };
+    const year = screen.getByRole("textbox", { name: "Year" });
+    await pick("Month", "February");
     await userEvent.click(submit);
-    expect(await screen.findByText(/Use YYYY, YYYY-MM or YYYY-MM-DD/)).toBeTruthy();
+    expect(await screen.findByText("Add the year too, or leave the month empty")).toBeTruthy();
+    await userEvent.type(year, "2023");
+    await pick("Day", "29");
+    await userEvent.click(submit);
+    expect(await screen.findByText("February 2023 has no day 29")).toBeTruthy();
     expect(upload.start).not.toHaveBeenCalled();
 
-    await userEvent.clear(date);
-    await userEvent.type(date, "2019-05");
+    await pick("Day", "Not known");
+    await userEvent.clear(year);
+    await userEvent.type(year, "2019");
+    await pick("Month", "May");
     await userEvent.click(submit);
     expect(upload.start).toHaveBeenCalledWith(
       file,
@@ -190,10 +232,10 @@ describe("admin page", () => {
     await userEvent.click(submit);
     upload.finish(id);
     await userEvent.click(await screen.findByRole("link", { name: "Follow its progress" }));
-    expect(await screen.findByText("No steps have been queued yet.")).toBeTruthy();
+    expect(await screen.findByText("Nothing has started yet.")).toBeTruthy();
   });
 
-  it("shows one interview's status, steps and errors", async () => {
+  it("shows a stopped recording's problem, its steps and the technical details", async () => {
     stubApi({
       ...adminApi,
       [`/api/interviews/${id}`]: {
@@ -207,6 +249,7 @@ describe("admin page", () => {
           status_detail: "Playback copy failed",
         },
       },
+      [`/api/interviews/${id}/transcript`]: { body: { items: [] } },
       [`/api/interviews/${id}/jobs`]: {
         body: {
           items: [
@@ -225,12 +268,17 @@ describe("admin page", () => {
     });
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
 
-    expect(await screen.findByText("Playback copy failed", {}, SLOW)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Processing stopped" }, SLOW)).toBeTruthy();
+    expect(screen.getByText("Playback copy failed")).toBeTruthy();
     expect(screen.getByText("Not detected yet")).toBeTruthy();
-    expect(screen.getByText(/Only admins can see this interview/)).toBeTruthy();
-    const steps = await screen.findByRole("table", { name: "Processing steps" });
-    expect(within(steps).getByText("Playback copy")).toBeTruthy();
-    expect(within(steps).getByText("3 of 3")).toBeTruthy();
+    expect(screen.getByText("14 October 2026")).toBeTruthy();
+    expect(screen.getByText("Private: only admins can see it")).toBeTruthy();
+    const steps = await screen.findByRole("list", { name: "Processing steps" });
+    expect(within(steps).getByText("Getting the audio ready to play")).toBeTruthy();
+    expect(within(steps).getByText("Tried 3 times.")).toBeTruthy();
+    // The retry is the next step's button, not repeated in the list.
+    expect(within(steps).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
     expect(within(steps).queryByText("ffmpeg exited 1")).toBeNull(); // folded away
     await userEvent.click(within(steps).getByRole("button", { name: "Show technical details" }));
     expect(within(steps).getByText("ffmpeg exited 1")).toBeTruthy();

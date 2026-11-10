@@ -25,7 +25,7 @@ const detail: InterviewDetail = {
 const unchanged = {
   title: detail.title,
   interviewee: { id: 7, name: "Interviewee B" },
-  recordedOn: "2001-05",
+  recordedOn: { year: "2001", month: "5", day: "" },
   language: "",
 };
 
@@ -59,7 +59,7 @@ describe("details helpers", () => {
       changedFields(detail, {
         title: " New title ",
         interviewee: { id: null, name: "" },
-        recordedOn: "",
+        recordedOn: { year: "", month: "", day: "" },
         language: "new",
       }),
     ).toEqual({ title: "New title", interviewee_id: null, recorded_on: null, language: "new" });
@@ -76,6 +76,31 @@ describe("details helpers", () => {
     expect(
       changedFields({ ...detail, language_confirmed: "new" }, { ...unchanged, language: "" }),
     ).toEqual({ language: null });
+  });
+});
+
+describe("language check", () => {
+  it("confirms the detected language with one press", async () => {
+    const path = `/api/interviews/${detail.id}`;
+    stubApi({
+      "/api/auth/me": { body: { id: 1, email: "someone@example.org" } },
+      "/api/search/filters": { body: { languages: [], interviewees: [] } },
+      [path]: { body: detail },
+      [`${path}/jobs`]: { body: { items: [] } },
+      [`${path}/transcript`]: { body: { items: [] } },
+    });
+    renderApp(`/admin/interviews/${detail.id}`, fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByText("Is Nepali the right language?", {}, SLOW)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Yes, it's right" }));
+    await vi.waitFor(() => {
+      const patch = vi
+        .mocked(fetch)
+        .mock.calls.find(([url, init]) => url === path && init?.method === "PATCH");
+      expect(patch?.[1]?.body).toBe('{"language":"ne"}');
+    });
+    // "No, change it" opens the details form.
+    await userEvent.click(screen.getByRole("button", { name: "No, change it" }));
+    expect(await screen.findByRole("dialog", { name: "Edit details" })).toBeTruthy();
   });
 });
 
@@ -114,7 +139,7 @@ describe("edit details dialog", () => {
     stubApi({ ...routes, [path]: { status: 500, body: {} } });
     await userEvent.click(screen.getByRole("button", { name: "Edit details" }));
     const again = await screen.findByRole("dialog", { name: "Edit details" });
-    await userEvent.clear(within(again).getByRole("textbox", { name: /Recording date/ }));
+    await userEvent.type(within(again).getByRole("textbox", { name: /Interview title/ }), "!");
     await userEvent.click(within(again).getByRole("button", { name: "Save" }));
     expect(
       await within(again).findByText("The details couldn't be saved. Try again."),
