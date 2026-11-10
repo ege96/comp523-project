@@ -107,10 +107,37 @@ describe("admin page", () => {
     const routes = {
       ...adminApi,
       [`/api/interviews/${id}`]: { body: { ...interviewDetail, visibility: "private" } },
-      [`/api/interviews/${id}/transcript`]: { body: { items: [] } },
+      [`/api/interviews/${id}/transcript`]: {
+        body: {
+          items: [
+            {
+              seq: 0,
+              start_ms: 0,
+              end_ms: 5_000,
+              language: "ne",
+              original_machine: "Machine line",
+              original_edited: "Corrected line",
+              english_machine: null,
+              english_edited: null,
+              edited_at: "2026-11-02T10:00:00Z",
+              english_stale: false,
+              english_edit_stale: false,
+              edited_by: "a@example.org",
+            },
+          ],
+        },
+      },
     };
     stubApi(routes);
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    // The transcript itself is on its own page; this one sums it up.
+    expect(
+      await screen.findByText("1 line · 1 corrected · last corrected 2 November 2026", {}, SLOW),
+    ).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open the transcript" })).toHaveProperty(
+      "href",
+      expect.stringContaining(`/admin/interviews/${id}/transcript`),
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Finished, not published" }, SLOW),

@@ -74,9 +74,8 @@ export function FindReplacePanel({
       onSubmit={(e: SubmitEvent<HTMLFormElement>) => void submit(e)}
       spacing={1.5}
       aria-label="Find and replace"
-      sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 1 }}
+      sx={{ p: 2, border: 1, borderColor: "divider", borderRadius: 1, bgcolor: "background.paper" }}
     >
-      <Typography variant="h3">Find and replace</Typography>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
         <TextField
           label="Find"

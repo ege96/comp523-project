@@ -26,6 +26,8 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 //   /admin/interviews/$interviewId
 //                              one recording: next step, processing, details, transcript and
 //                              publishing (admins only)
+//   /admin/interviews/$interviewId/transcript
+//                              the transcript editor (admins only)
 // Only the home page is in the main bundle; the rest load on demand, and `defaultPreload:
 // "intent"` fetches a page's code when the pointer rests on a link to it.
 
@@ -102,6 +104,12 @@ const adminInterviewRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/AdminInterviewPage"), "AdminInterviewPage"),
 });
 
+const adminTranscriptRoute = createRoute({
+  getParentRoute: () => adminRoute,
+  path: "interviews/$interviewId/transcript",
+  component: lazyRouteComponent(() => import("./pages/AdminTranscriptPage"), "AdminTranscriptPage"),
+});
+
 const routeTree = rootRoute.addChildren([
   homeRoute,
   searchRoute,
@@ -109,7 +117,7 @@ const routeTree = rootRoute.addChildren([
   interviewRoute,
   aboutRoute,
   signInRoute,
-  adminRoute.addChildren([adminHomeRoute, adminInterviewRoute]),
+  adminRoute.addChildren([adminHomeRoute, adminInterviewRoute, adminTranscriptRoute]),
 ]);
 
 export function createAppRouter(history?: RouterHistory) {

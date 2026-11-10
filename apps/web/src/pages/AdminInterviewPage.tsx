@@ -19,7 +19,6 @@ import { PublishButton } from "../admin/PublishButton";
 import { languageMismatch, retryableJobs } from "../admin/rerun";
 import { RerunActions, RetryButton } from "../admin/RerunActions";
 import { StagePill } from "../admin/StagePill";
-import { TranscriptEditor } from "../admin/TranscriptEditor";
 import { TRANSLATION_LABELS } from "../admin/status";
 import { formatAdded, processingSteps, queueOf, type Queue, type Step } from "../admin/workflow";
 import { ApiError, interviewQueries } from "../api/client";
@@ -126,9 +125,7 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
         </Stack>
       </Box>
 
-      <Box id="transcript" sx={{ scrollMarginTop: 16 }}>
-        <TranscriptEditor interview={interview} />
-      </Box>
+      <TranscriptSummary interview={interview} />
     </>
   );
 }
@@ -232,9 +229,13 @@ function NextStep({
           actions: (
             <>
               <PublishButton interview={interview} />
-              <Button href="#transcript" variant="outlined">
+              <ButtonLink
+                to="/admin/interviews/$interviewId/transcript"
+                params={{ interviewId: interview.id }}
+                variant="outlined"
+              >
                 Correct the transcript
-              </Button>
+              </ButtonLink>
             </>
           ),
         };
@@ -244,7 +245,7 @@ function NextStep({
           body: (
             <Typography>
               Visitors can find it in search, play it and read the transcript. Corrections you make
-              below show to them too.
+              to the transcript show to them too.
             </Typography>
           ),
           actions: (
@@ -620,6 +621,60 @@ function WhoCanSee({ interview, queue }: { interview: InterviewDetail; queue: Qu
           <PublishButton interview={interview} />
         </>
       ) : null}
+    </Panel>
+  );
+}
+
+/** How the transcript stands, with the way into the editor (a page of its own: it's long). */
+function TranscriptSummary({ interview }: { interview: InterviewDetail }) {
+  const { viewer } = useAuth();
+  const { data, isError } = useQuery({
+    ...adminQueries.transcript(viewer, interview.id),
+    enabled: viewer.ready,
+  });
+  const lines = data?.items ?? [];
+  const corrected = lines.filter((l) => l.original_edited !== null || l.english_edited !== null);
+  const lastEdit = corrected.reduce<string | null>(
+    (latest, l) => (l.edited_at && (!latest || l.edited_at > latest) ? l.edited_at : latest),
+    null,
+  );
+  const facts = [
+    `${String(lines.length)} ${lines.length === 1 ? "line" : "lines"}`,
+    `${String(corrected.length)} corrected`,
+    lastEdit ? `last corrected ${formatAdded(lastEdit)}` : null,
+  ].filter(Boolean);
+  return (
+    <Panel title="Transcript">
+      {isError ? (
+        <Alert severity="error">The transcript couldn&apos;t be loaded.</Alert>
+      ) : !data ? (
+        <Skeleton variant="rounded" height={48} />
+      ) : lines.length === 0 ? (
+        <Typography color="text.secondary">
+          There&apos;s no transcript yet. It appears once transcription has finished.
+        </Typography>
+      ) : (
+        <Stack
+          direction={{ xs: "column", sm: "row" }}
+          spacing={2}
+          sx={{ alignItems: { sm: "center" }, justifyContent: "space-between" }}
+        >
+          <Stack spacing={0.5}>
+            <Typography>{facts.join(" · ")}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Correct any line while listening to the recording. The machine text is kept.
+            </Typography>
+          </Stack>
+          <ButtonLink
+            to="/admin/interviews/$interviewId/transcript"
+            params={{ interviewId: interview.id }}
+            variant="outlined"
+            sx={{ flexShrink: 0, alignSelf: { xs: "flex-start", sm: "center" } }}
+          >
+            Open the transcript
+          </ButtonLink>
+        </Stack>
+      )}
     </Panel>
   );
 }

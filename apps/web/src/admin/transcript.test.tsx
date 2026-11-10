@@ -73,11 +73,65 @@ function patches(method = "PATCH") {
 }
 
 describe("transcript editor", () => {
+  it("follows the recording, filters lines and opens the line playing", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
+    const edited = { ...english, original_edited: "Corrected speech B" };
+    const late = {
+      ...untranslated,
+      seq: 3,
+      start_ms: 620_000,
+      end_ms: 625_000,
+      original_machine: "Machine original D",
+    };
+    stubApi(api([nepali, edited, untranslated, late], {}));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+
+    expect(await screen.findByText("Machine original A", {}, SLOW)).toBeTruthy();
+    const audio = screen.getByLabelText<HTMLAudioElement>("Recording");
+    expect(screen.getByRole("button", { name: "Edit the line playing" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    // Playing at 1:12 marks the third line and keeps it in view.
+    fireEvent.play(audio);
+    audio.currentTime = 72;
+    fireEvent.timeUpdate(audio);
+    const playing = await screen.findByText("Machine original C");
+    expect(playing.closest("[aria-current=time]")).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(scroll).toHaveBeenCalled();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Edit the line playing" }));
+    expect(screen.getByRole("form", { name: "Edit line at 1:10" })).toBeTruthy();
+    expect(pause).toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    // A line's time plays straight through from there; "Jump to" moves by five minutes.
+    await userEvent.click(screen.getByRole("button", { name: "Play from 1:05" }));
+    expect(audio.currentTime).toBe(65);
+    const jumps = screen.getByRole("navigation", { name: "Jump to a time" });
+    await userEvent.click(within(jumps).getByRole("button", { name: "10:00" }));
+    expect(audio.currentTime).toBe(600);
+
+    await userEvent.click(screen.getByRole("button", { name: "Corrected 1" }));
+    expect(screen.getByText("Corrected speech B")).toBeTruthy();
+    expect(screen.queryByText("Machine original A")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "No English 2" }));
+    expect(screen.getAllByText("No English translation")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "All 4" }));
+    expect(screen.getByText("Machine original A")).toBeTruthy();
+    play.mockRestore();
+    pause.mockRestore();
+  });
+
   it("saves a correction, keeps the machine text and shows the line as edited", async () => {
     const saved = { ...nepali, english_edited: "Corrected english A", edited_by: "a@example.org" };
     const routes = api([nepali, english, untranslated], { body: saved });
     stubApi(routes);
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     expect(await screen.findByText("Machine original A", {}, SLOW)).toBeTruthy();
     expect(screen.getByText("No English translation")).toBeTruthy();
@@ -105,7 +159,7 @@ describe("transcript editor", () => {
   it("undoes an edit with the machine text and refuses empty text", async () => {
     const edited = { ...nepali, original_edited: "Edited original A", edited_by: null };
     stubApi(api([edited], { body: nepali }));
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     await userEvent.click(await screen.findByRole("button", { name: "Edit line at 0:00" }, SLOW));
     const form = screen.getByRole("form", { name: "Edit line at 0:00" });
@@ -130,7 +184,7 @@ describe("transcript editor", () => {
 
   it("closes without saving when nothing changed, and on cancel", async () => {
     stubApi(api([nepali], { body: nepali }));
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     const edit = await screen.findByRole("button", { name: "Edit line at 0:00" }, SLOW);
     await userEvent.click(edit);
@@ -144,7 +198,7 @@ describe("transcript editor", () => {
 
   it("explains a refused save and keeps what was typed", async () => {
     stubApi(api([nepali], { status: 409, body: { detail: "transcribing" } }));
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     await userEvent.click(await screen.findByRole("button", { name: "Edit line at 0:00" }, SLOW));
     const original = screen.getByRole("textbox", { name: "Original" });
@@ -156,12 +210,12 @@ describe("transcript editor", () => {
 
   it("says when there is no transcript, or it can't be loaded", async () => {
     stubApi(api([], {}));
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText(/There's no transcript yet/, {}, SLOW)).toBeTruthy();
 
     cleanup();
     stubApi({ ...api([], {}), [`${base}/transcript`]: { status: 500, body: {} } });
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText("The transcript couldn't be loaded.", {}, SLOW)).toBeTruthy();
   });
 });
@@ -182,7 +236,7 @@ describe("out-of-date English", () => {
       [`${base}/segments/2`]: { body: { ...toCheck, english_edit_stale: false } },
     };
     stubApi(routes);
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     expect(
       await screen.findByText(/The English of 2 lines are out of date/, {}, SLOW),
@@ -214,7 +268,7 @@ describe("out-of-date English", () => {
       ...api([stale], {}),
       [`${base}/retranslate`]: { status: 409, body: { detail: "transcribing" } },
     });
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText(/The English of 1 line is out of date/, {}, SLOW)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Update English now" }));
     expect(await screen.findByText(/This interview is being transcribed again/)).toBeTruthy();
@@ -226,7 +280,7 @@ describe("faster editing", () => {
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
     stubApi(api([nepali, english], {}));
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     await userEvent.click(await screen.findByRole("button", { name: "Play line at 1:05" }, SLOW));
     const audio = document.querySelector("audio");
@@ -250,7 +304,7 @@ describe("faster editing", () => {
     const routes = api([nepali, english, untranslated], { body: saved });
     routes[`${base}/segments/1`] = { body: english };
     stubApi(routes);
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
     await userEvent.click(await screen.findByText("Machine original A", {}, SLOW));
     const form = screen.getByRole("form", { name: "Edit line at 0:00" });
@@ -285,9 +339,10 @@ describe("faster editing", () => {
       [`${base}/transcript/replace`]: { body: { items: [fixedA, fixedC], skipped: 0 } },
     };
     stubApi(routes);
-    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    renderApp(`/admin/interviews/${id}/transcript`, fakeAuthClient({ signedIn: true }));
 
-    const panel = await screen.findByRole("form", { name: "Find and replace" }, SLOW);
+    await userEvent.click(await screen.findByRole("button", { name: "Find and replace" }, SLOW));
+    const panel = await screen.findByRole("form", { name: "Find and replace" });
     await userEvent.type(within(panel).getByRole("textbox", { name: "Find" }), "SWAYAMBU");
     // Searches the original by default, where it doesn't appear.
     expect(within(panel).getByText("0 lines match")).toBeTruthy();
