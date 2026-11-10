@@ -19,10 +19,11 @@ import { useSetVisibility } from "./api";
  */
 export function PublishButton({
   interview,
-  fullWidth = false,
+  quiet = false,
 }: {
   interview: Pick<InterviewSummary, "id" | "title" | "visibility">;
-  fullWidth?: boolean;
+  /** Outlined Publish, for a page whose main action is something else (e.g. Try again). */
+  quiet?: boolean;
 }) {
   const setVisibility = useSetVisibility();
   const [confirming, setConfirming] = useState(false);
@@ -36,7 +37,6 @@ export function PublishButton({
       {visibility === "public" ? (
         <Button
           variant="outlined"
-          fullWidth={fullWidth}
           disabled={setVisibility.isPending}
           onClick={() => {
             setVisibility.mutate({ id: interview.id, visibility: "private" });
@@ -46,8 +46,7 @@ export function PublishButton({
         </Button>
       ) : (
         <Button
-          variant="contained"
-          fullWidth={fullWidth}
+          variant={quiet ? "outlined" : "contained"}
           disabled={setVisibility.isPending}
           onClick={() => {
             setConfirming(true);

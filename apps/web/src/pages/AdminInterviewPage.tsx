@@ -122,11 +122,12 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
           alignItems: "start",
         }}
       >
-        <Processing interview={interview} queue={queue} jobs={jobs} />
+        {/* Where it stands (processing, then who can see it) on the left; facts on the right. */}
         <Stack spacing={3}>
-          <Details interview={interview} />
+          <Processing interview={interview} queue={queue} jobs={jobs} />
           <WhoCanSee interview={interview} queue={queue} />
         </Stack>
+        <Details interview={interview} />
       </Box>
 
       <Box id="transcript" sx={{ scrollMarginTop: 16 }}>
@@ -616,12 +617,14 @@ function WhoCanSee({ interview, queue }: { interview: InterviewDetail; queue: Qu
         <>
           {interview.visibility === "private" ? (
             <Typography variant="body2" color="text.secondary">
-              You can publish it before processing finishes. Visitors then see the transcript marked
-              as in progress.
+              {queue === "attention"
+                ? "You can still publish it. Visitors then see it marked “Transcript unavailable”."
+                : "You can publish it before processing finishes. Visitors then see the transcript marked as in progress."}
             </Typography>
           ) : null}
           <Box sx={{ alignSelf: "flex-start" }}>
-            <PublishButton interview={interview} />
+            {/* When processing stopped, Try again above is the main action. */}
+            <PublishButton interview={interview} quiet={queue === "attention"} />
           </Box>
         </>
       ) : null}
