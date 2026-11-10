@@ -4,27 +4,31 @@ import InputBase from "@mui/material/InputBase";
 import { useNavigate } from "@tanstack/react-router";
 import type { SubmitEvent } from "react";
 
+import type { SearchParams } from "../api/client";
 import { tokens } from "../theme";
 import { SearchIcon } from "./icons";
 
 /**
- * The search field, set on the blue plate: a white field with the button as a white tab.
+ * The search field: a paper field with the terracotta Search button inset.
  * Uncontrolled on purpose: the query only matters on submit, so typing re-renders nothing.
  * (A single field doesn't need TanStack Form; D-010 applies to the upload metadata form.)
+ * `filters`: on the search page, the filters already applied, kept when the words change.
  */
 export function SearchBox({
   defaultValue = "",
   large = false,
+  filters,
 }: {
   defaultValue?: string;
   large?: boolean;
+  filters?: Omit<SearchParams, "q" | "undated"> & { undated?: true };
 }) {
   const navigate = useNavigate();
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
     const q = new FormData(event.currentTarget).get("q");
     if (typeof q === "string" && q.trim())
-      void navigate({ to: "/search", search: { q: q.trim() } });
+      void navigate({ to: "/search", search: { ...filters, q: q.trim() } });
   };
   const height = large ? { xs: 52, md: 60 } : { xs: 48, md: 52 };
   return (

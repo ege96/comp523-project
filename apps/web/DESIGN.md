@@ -121,7 +121,7 @@ None. Separation by 1px `rule` lines and outlined paper panels (as in the mockup
 - **Header:** paper bar with bottom rule; terracotta waveform tile + Georgia wordmark; nav items Search · Interviews · About, current one underlined in terracotta.
 - **Search box:** paper field with a terracotta Search button inset; terracotta outline on focus.
 - **Catalogue (InterviewList):** outlined panel with a tinted header row on wide screens, one detail line on phones; title link stretched over the row.
-- **Moment:** outlined card as in the search mockup: Georgia title, details, a soft time pill ("0:44 – 1:40"), line pairs, then an "Open at this moment" button.
+- **Moment:** outlined card that leads with the evidence: a top row with the "Open at 0:44" button (play icon) and, for meaning-only matches, a small "Related by meaning" note; then the line pairs; then a compact record line (interview title in Mukta 600 · details) and any status pills.
 - **Pill (`components/Pill.tsx`):** the one soft pill for status and times, in four tones that mean the same thing everywhere. Amber: needs a look or not public (Needs attention, Private). Neutral: in progress (Processing, Transcript in progress). Terracotta tint: times and Not published. Green: Published.
 - **Admin stage pill:** names where an interview is, in the same words as the admin tabs.
 - **Next step panel:** outlined panel with a 4px left edge in the stage colour; "Next step" label, one heading, a sentence or two, and at most two buttons.

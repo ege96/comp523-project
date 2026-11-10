@@ -95,7 +95,7 @@ export function AboutPage() {
             <Question id="moments" title="What is a moment?">
               <Typography>
                 A moment is a short stretch of an interview, about a minute long, with the time it
-                starts. Choose “Open at this moment” to play the interview from there. Inside an
+                starts. Choose its “Open at” button to play the interview from there. Inside an
                 interview, use “Find in transcript” to look for other places a word comes up.
               </Typography>
             </Question>
@@ -103,8 +103,8 @@ export function AboutPage() {
             <Question id="exact-words" title="Why doesn't a result contain my words?">
               <Typography>
                 The search looks for meaning as well as exact words, so it also finds moments that
-                talk about the same thing in other words. Those results say “Related in meaning.
-                Your exact words may not appear here.”
+                talk about the same thing in other words. Those results say “Related by meaning”:
+                your exact words may not appear in them.
               </Typography>
             </Question>
 

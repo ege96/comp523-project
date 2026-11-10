@@ -22,8 +22,8 @@ const EXAMPLE = "How have festivals changed?";
 export function HomePage() {
   return (
     <>
-      <Plate pb={{ xs: 5, md: 7 }}>
-        <Stack spacing={{ xs: 2.5, md: 3 }} sx={{ maxWidth: 820, pt: { md: 2 } }}>
+      <Plate pb={{ xs: 4, md: 5 }}>
+        <Stack spacing={{ xs: 2.5, md: 3 }} sx={{ maxWidth: 820, pt: { md: 1 } }}>
           <Typography variant="overline" component="p" color="primary" sx={{ mb: -1 }}>
             Oral histories · Swayambhu, Kathmandu
           </Typography>
@@ -46,17 +46,40 @@ export function HomePage() {
             Explore recorded interviews with people connected to Swayambhu. Search their words or
             their meaning, listen to their stories, and read along.
           </Typography>
-          <SearchBox large />
-          <Typography variant="body2" color="text.secondary">
-            Try a question, like{" "}
-            <TextLink to="/search" search={{ q: EXAMPLE }} sx={{ fontWeight: 600 }}>
-              {EXAMPLE}
-            </TextLink>
-          </Typography>
+          <Box>
+            <SearchBox large />
+            <Stack
+              direction="row"
+              useFlexGap
+              sx={{
+                mt: 1.5,
+                justifyContent: "space-between",
+                alignItems: "baseline",
+                flexWrap: "wrap",
+                columnGap: 3,
+                rowGap: 1,
+              }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                Try a question, like{" "}
+                <TextLink to="/search" search={{ q: EXAMPLE }} sx={{ fontWeight: 600 }}>
+                  {EXAMPLE}
+                </TextLink>
+              </Typography>
+              <TextLink
+                to="/interviews"
+                variant="body2"
+                underline="hover"
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, fontWeight: 600 }}
+              >
+                Browse all interviews <ArrowForwardIcon fontSize="small" aria-hidden />
+              </TextLink>
+            </Stack>
+          </Box>
         </Stack>
       </Plate>
 
-      <Container sx={{ pt: { xs: 5, md: 7 } }}>
+      <Container sx={{ pt: { xs: 4, md: 6 } }}>
         <Stack
           direction="row"
           sx={{

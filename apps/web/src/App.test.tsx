@@ -128,7 +128,11 @@ describe("all interviews", () => {
   it("pages through the list with the page number in the URL", async () => {
     stubApi({ "/api/interviews": { body: { items: [interviewSummary], total: 45 } } });
     const router = renderApp("/");
-    await userEvent.click(await screen.findByRole("link", { name: /Browse all interviews/ }));
+    // Offered beside the search box and again above the recent interviews.
+    const browse = await screen.findAllByRole("link", { name: /Browse all interviews/ });
+    expect(browse).toHaveLength(2);
+    await userEvent.click(browse[0] as HTMLElement);
+    expect(await screen.findByText(/most recently added first/)).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "All interviews" })).toBeTruthy();
 
     await userEvent.click(await screen.findByRole("link", { name: "Go to page 3" }));
@@ -175,16 +179,31 @@ describe("search", () => {
     const router = renderApp("/search?q=rituals");
     const urls = () => vi.mocked(fetch).mock.calls.map(([url]) => url);
 
-    expect(await screen.findByRole("heading", { name: "Test interview A" })).toBeTruthy();
+    // The card is named by its interview; the evidence comes first, the record line last.
+    expect(await screen.findByRole("article", { name: "Test interview A" })).toBeTruthy();
     expect(screen.getByText("English text A").getAttribute("lang")).toBe("en");
     expect(screen.getAllByText("Original text A")[0]?.getAttribute("lang")).toBe("ne");
-    expect(screen.getAllByText(/Related in meaning/)).toHaveLength(1);
+    expect(screen.getAllByText("Related by meaning")).toHaveLength(1);
     expect(screen.getByText(/only match your words/)).toBeTruthy();
+    expect(screen.getByText(/Transcribed and translated by machine/)).toBeTruthy();
+    expect(screen.queryByText(/Filtered by/)).toBeNull();
+    const status = screen.getByRole("status");
+    expect(status.textContent).toBe("Results updated");
+    // The visible words start the accessible name (label in name).
+    const first = screen.getAllByRole("link", { name: /^Open at 12:34, / })[0] as HTMLElement;
+    expect(first.textContent).toBe("Open at 12:34");
 
-    await userEvent.click(screen.getByRole("button", { name: "Show more moments" }));
+    const more = screen.getByRole("button", { name: "Show more moments" });
+    await userEvent.click(more);
     await waitFor(() => {
       expect(urls()).toContain("/api/search?q=rituals&limit=20&offset=20");
     });
+    await waitFor(() => {
+      expect(status.textContent).toBe("More moments loaded");
+    });
+    // Still more to come, so focus stays on the button.
+    expect(document.activeElement).toBe(more);
+    expect(status.textContent).not.toMatch(/\d/); // never a count
 
     await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
     await userEvent.click(await screen.findByRole("option", { name: "Nepali" }));
@@ -193,8 +212,23 @@ describe("search", () => {
       expect(router.state.location.search).toEqual({ q: "rituals", language: "ne" });
     });
     expect(urls()).toContain("/api/search?q=rituals&limit=20&offset=0&language=ne");
+    // Keyboard users land on the results, and the filters are named above them.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Relevant transcript moments" }),
+      );
+    });
+    expect(screen.getByText(/Filtered by/).parentElement?.textContent).toBe("Filtered by: Nepali");
 
-    const open = await screen.findAllByRole("link", { name: "Open Test interview A at 12:34" });
+    // New words keep the filters.
+    const box = screen.getByRole("textbox", { name: "Search interview transcripts" });
+    await userEvent.clear(box);
+    await userEvent.type(box, "festivals{Enter}");
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ q: "festivals", language: "ne" });
+    });
+
+    const open = await screen.findAllByRole("link", { name: "Open at 12:34, Test interview A" });
     await userEvent.click(open[0] as HTMLElement);
     await screen.findByRole("heading", { level: 1, name: "Test interview A" });
     await screen.findByRole("button", { name: "Play from 12:34" });
@@ -211,23 +245,108 @@ describe("search", () => {
     });
     const router = renderApp("/search?q=x&interviewee=7&from=2001-01-01&undated=true");
     expect(await screen.findByText(/No moments matched/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("No moments matched");
+    expect(screen.getByText(/Filtered by/).parentElement?.textContent).toBe(
+      "Filtered by: Interviewee 7 · From 2001 · and undated",
+    );
     // On phones the filters fold behind a button that says how many are on.
     const toggle = screen.getByRole("button", { name: "Filters · 2 on" });
     await userEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("combobox", { name: "Interviewee" }).textContent).toBe("Interviewee 7");
-    expect(screen.getByRole("checkbox", { name: /undated/ })).toHaveProperty("checked", true);
-    expect(screen.getByRole("textbox", { name: "From year" })).toHaveProperty("value", "2001");
+    const undated = screen.getByRole("checkbox", { name: /undated/ });
+    expect(undated).toHaveProperty("checked", true);
+    expect(undated.getAttribute("aria-describedby")).toBe("undated-help");
+    const fromYear = screen.getByRole("textbox", { name: "From year" });
+    expect(fromYear).toHaveProperty("value", "2001");
+    // "Undated" only applies with a year range.
+    await userEvent.clear(fromYear);
+    expect(undated).toHaveProperty("disabled", true);
+    await userEvent.type(fromYear, "2001");
+    expect(undated).toHaveProperty("disabled", false);
     // Years typed the wrong way round become the span between them.
     await userEvent.type(screen.getByRole("textbox", { name: "To year" }), "1990");
     await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
     await waitFor(() => {
       expect(router.state.location.search).toMatchObject({ from: "1990-01-01", to: "2001-12-31" });
     });
-    await userEvent.click(await screen.findByRole("button", { name: "Clear" }));
+    expect((await screen.findByText(/Filtered by/)).parentElement?.textContent).toBe(
+      "Filtered by: Interviewee 7 · 1990–2001 · and undated",
+    );
+    // One "Clear filters", beside the no-results message.
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ q: "x" });
     });
+    expect(screen.queryByRole("button", { name: /Clear/ })).toBeNull();
+  });
+
+  it("names filters from the list, clears them from the rail, and keeps results when more fail", async () => {
+    const page = (n: number) => ({
+      ...moment,
+      interview: { ...interviewSummary, id: `i${String(n)}`, title: `Interview ${String(n)}` },
+    });
+    stubApi({
+      "/api/search": { body: { items: [page(1)], has_more: true, search_mode: "hybrid" } },
+      "/api/search/filters": {
+        body: { languages: [], interviewees: [{ id: 7, name: "Interviewee G" }] },
+      },
+    });
+    const router = renderApp("/search?q=x&interviewee=unknown&to=1995-12-31");
+    expect(await screen.findByText(/Filtered by/)).toBeTruthy();
+    expect(screen.getByText(/Filtered by/).parentElement?.textContent).toBe(
+      "Filtered by: Unknown interviewee · Up to 1995",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ q: "x" });
+    });
+    await router.navigate({
+      to: "/search",
+      search: { q: "x", interviewee: 7, from: "1990-01-01", to: "1990-12-31" },
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Filtered by/).parentElement?.textContent).toBe(
+        "Filtered by: Interviewee G · 1990",
+      );
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ q: "x" });
+    });
+
+    // The next page fails: the loaded moments stay, with a way to try again.
+    stubApi({ "/api/search": { status: 500, body: {} } });
+    const more = await screen.findByRole("button", { name: "Show more moments" });
+    await userEvent.click(more);
+    expect(await screen.findByText(/More moments couldn't be loaded/)).toBeTruthy();
+    expect(screen.getByRole("article", { name: "Interview 1" })).toBeTruthy();
+    expect(document.activeElement).toBe(more);
+    expect(more.textContent).toBe("Try loading more again");
+
+    // The last page loads: the button goes, and focus moves to the first new moment.
+    stubApi({
+      "/api/search": { body: { items: [page(2)], has_more: false, search_mode: "hybrid" } },
+    });
+    await userEvent.click(more);
+    await screen.findByRole("article", { name: "Interview 2" });
+    await waitFor(() => {
+      expect(document.activeElement?.textContent).toBe("Open at 12:34");
+    });
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Open at 12:34, Interview 2");
+    expect(screen.getByText(/End of results/)).toBeTruthy();
+  });
+
+  it("fails the whole search only when nothing has loaded, and explains a blank search", async () => {
+    stubApi({ "/api/search": { status: 500, body: {} } });
+    renderApp("/search?q=x");
+    expect(await screen.findByText(/Search isn't working right now/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe("");
+
+    cleanup();
+    renderApp("/search");
+    expect(await screen.findByText(/by meaning as well as by exact words/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "browse all interviews" })).toBeTruthy();
   });
 });
 

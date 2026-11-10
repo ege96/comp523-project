@@ -75,15 +75,22 @@ function InterviewRow({ interview }: { interview: InterviewSummary }) {
       }}
     >
       <Box sx={{ minWidth: 0 }}>
+        {/* Terracotta like every link, so the title reads as one; the focus ring goes round
+            the whole row, which the stretched link covers. */}
         <TextLink
           to="/interviews/$interviewId"
           params={{ interviewId: interview.id }}
-          underline="none"
-          color="inherit"
+          underline="hover"
+          color="primary"
           sx={{
             typography: "subtitle1",
             lineHeight: 1.35,
-            "&::after": { content: '""', position: "absolute", inset: 0 },
+            "&::after": { content: '""', position: "absolute", inset: 0, borderRadius: 1 },
+            "&:focus-visible": { outline: "none", textDecoration: "underline" },
+            "&:focus-visible::after": {
+              outline: `2px solid ${tokens.plate}`,
+              outlineOffset: -2,
+            },
           }}
         >
           {interview.title}

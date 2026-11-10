@@ -17,7 +17,10 @@ import { TextLink } from "../components/links";
 const route = getRouteApi("/interviews");
 const PAGE_SIZE = 20;
 
-/** Every interview the viewer may see, newest first. The API decides what that is. */
+/**
+ * Every interview the viewer may see, most recently added first (the API sorts by created_at).
+ * The API decides what that is.
+ */
 export function InterviewsPage() {
   const page = route.useSearch().page ?? 1;
   const { viewer } = useAuth();
@@ -34,7 +37,7 @@ export function InterviewsPage() {
         <Stack spacing={1}>
           <Typography variant="h1">All interviews</Typography>
           <Typography color="text.secondary">
-            Every public interview, newest first. To find a moment inside them,{" "}
+            Every public interview, most recently added first. To find a moment inside them,{" "}
             <TextLink to="/">search the transcripts</TextLink>.
           </Typography>
         </Stack>

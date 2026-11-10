@@ -17,7 +17,7 @@ import { NotFoundPage } from "./pages/NotFoundPage";
 //   /                          home: search box and recently added interviews
 //   /search?q=&language=&interviewee=&from=&to=&undated=
 //                              search results (transcript moments)
-//   /interviews?page=          all interviews, newest first
+//   /interviews?page=          all interviews, most recently added first
 //   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
 //   /about                     About & Help: what the archive is, and an FAQ for visitors
 //   /signin                    admin sign-in
