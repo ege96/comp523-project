@@ -58,7 +58,7 @@ export function AdminInterviewList({
     <Paper component="section" aria-labelledby="queue-title">
       <Stack spacing={1.5} sx={{ px: { xs: 2, sm: 3 }, pt: { xs: 2, sm: 3 } }}>
         <Typography id="queue-title" variant="h2">
-          Your interviews
+          All interviews
         </Typography>
         <Tabs
           value={view ?? "all"}
@@ -85,7 +85,7 @@ export function AdminInterviewList({
       <Box sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 3 } }}>
         {isError ? (
           <Alert severity="error" sx={{ mt: 2 }}>
-            Your interviews couldn&apos;t be loaded. Please try again.
+            The interviews couldn&apos;t be loaded. Please try again.
           </Alert>
         ) : isPending ? (
           <Skeleton variant="rounded" height={320} sx={{ mt: 2 }} />

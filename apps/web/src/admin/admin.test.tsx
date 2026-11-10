@@ -37,6 +37,7 @@ afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
   upload.start.mockClear();
+  upload.abort.mockClear();
 });
 
 const id = interviewSummary.id;
@@ -69,6 +70,8 @@ describe("admin page", () => {
     stubApi(adminApi);
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
 
+    // The shared archive, not the admin's own.
+    expect(await screen.findByRole("heading", { name: "All interviews" }, SLOW)).toBeTruthy();
     const row = (await screen.findByRole("link", { name: "Test interview B" }, SLOW)).closest("li");
     if (!row) throw new Error("no row");
     expect(within(row).getByText("Processing")).toBeTruthy();
@@ -82,10 +85,15 @@ describe("admin page", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: /Needs attention/ }));
     await userEvent.click(screen.getByRole("tab", { name: /Not published/ }));
+    await userEvent.click(screen.getByRole("tab", { name: /^Published/ }));
     await vi.waitFor(() => {
       expect(requests().some((r) => r.url.includes("limit=20&offset=0&status=failed"))).toBe(true);
       expect(
         requests().some((r) => r.url.includes("limit=20&offset=0&status=done&visibility=private")),
+      ).toBe(true);
+      // Published means finished too: a Public interview still processing is under Processing.
+      expect(
+        requests().some((r) => r.url.includes("limit=20&offset=0&status=done&visibility=public")),
       ).toBe(true);
     });
     // Each tab shows how many recordings are waiting in it.
@@ -143,6 +151,20 @@ describe("admin page", () => {
     ).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
     const dialog = await screen.findByRole("dialog", { name: "Publish “Test interview A”?" });
+    // It says what visitors get now, from this interview's state, in its description.
+    const description = document.getElementById(dialog.getAttribute("aria-describedby") ?? "");
+    expect(description?.textContent).toContain("What visitors will get");
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual([
+      "Play the recording",
+      "Read the transcript, marked as made by machine",
+      "No English translation yet",
+      "Find it in search",
+    ]);
+    expect(within(dialog).getByText(/agreed to share it publicly/)).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(requests().some((r) => r.method === "PATCH")).toBe(false);
 
@@ -160,6 +182,14 @@ describe("admin page", () => {
     stubApi({ ...routes, [`/api/interviews/${id}`]: { body: interviewDetail } });
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
     expect(await screen.findByRole("heading", { name: "Published" }, SLOW)).toBeTruthy();
+    // Correcting stays one click away once published; the preview says why it shows admin notes.
+    const nextStep = screen.getByRole("region", { name: "Published" });
+    expect(within(nextStep).getByRole("link", { name: "Correct the transcript" })).toHaveProperty(
+      "hash",
+      "#transcript",
+    );
+    expect(screen.getByRole("link", { name: "Preview the public page" })).toBeTruthy();
+    expect(screen.getByText(/you're signed in, so you also see admin-only notes/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Unpublish" }));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(requests()).toContainEqual({
@@ -183,9 +213,12 @@ describe("admin page", () => {
     expect(await screen.findByText("The processing steps couldn't be loaded.")).toBeTruthy();
     stubApi({ ...routes, [`/api/interviews/${privateOne.id}`]: { status: 500, body: {} } });
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    await userEvent.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }),
-    );
+    const dialog = await screen.findByRole("dialog");
+    // Still processing: it doesn't promise a transcript or search yet.
+    expect(within(dialog).getByText(/Transcript still being made/)).toBeTruthy();
+    expect(within(dialog).getByText("The English translation is still being made")).toBeTruthy();
+    expect(within(dialog).getByText("Search finds it once processing finishes")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
     expect(await screen.findByText("Couldn't publish it. Try again.")).toBeTruthy();
   });
 
@@ -195,8 +228,18 @@ describe("admin page", () => {
 
     const submit = await screen.findByRole("button", { name: "Upload" }, SLOW);
     await userEvent.click(submit);
-    expect(await screen.findByText("Choose a recording to upload")).toBeTruthy();
+    const fileError = await screen.findByText("Choose a recording to upload");
+    expect(fileError.getAttribute("role")).toBe("alert");
     expect(screen.getByText("Enter a title")).toBeTruthy();
+    // The file error belongs to Choose file, which gets the focus as the first problem.
+    const choose = screen.getByRole("button", { name: "Choose file" });
+    expect(choose.getAttribute("aria-describedby")).toBe(fileError.id);
+    expect(screen.getByLabelText("Recording file").getAttribute("aria-describedby")).toBe(
+      fileError.id,
+    );
+    await vi.waitFor(() => {
+      expect(document.activeElement).toBe(choose);
+    });
 
     const notes = new File(["x"], "notes.txt", { type: "text/plain" });
     fireEvent.drop(screen.getByText("Drop a video or audio file here"), {
@@ -263,6 +306,35 @@ describe("admin page", () => {
     expect(await screen.findByText("Nothing has started yet.")).toBeTruthy();
   });
 
+  it("asks before leaving the page during an upload, and stops it on leaving", async () => {
+    stubApi(adminApi);
+    const router = renderApp("/admin", fakeAuthClient({ signedIn: true }));
+    const submit = await screen.findByRole("button", { name: "Upload" }, SLOW);
+    const file = new File(["x"], "village-talk.mp3", { type: "audio/mpeg" });
+    await userEvent.upload(screen.getByLabelText("Recording file"), file);
+    await userEvent.click(submit);
+    expect(await screen.findByText(/Keep this page open/)).toBeTruthy();
+
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    const about = within(screen.getByRole("contentinfo")).getByRole("link", {
+      name: "About & Help",
+    });
+    await userEvent.click(about);
+    expect(confirm).toHaveBeenCalledWith("Leave this page? The upload will stop.");
+    expect(router.state.location.pathname).toBe("/admin");
+    expect(upload.abort).not.toHaveBeenCalled();
+    // Another tab of the list is the same page, so it doesn't ask.
+    await userEvent.click(screen.getByRole("tab", { name: /Needs attention/ }));
+    expect(router.state.location.search).toEqual({ view: "attention" });
+    expect(confirm).toHaveBeenCalledTimes(1);
+
+    confirm.mockReturnValue(true);
+    await userEvent.click(about);
+    expect(await screen.findByRole("heading", { level: 1, name: "About & Help" })).toBeTruthy();
+    expect(upload.abort).toHaveBeenCalled();
+  });
+
   it("shows a stopped recording's problem, its steps and the technical details", async () => {
     stubApi({
       ...adminApi,
@@ -305,11 +377,28 @@ describe("admin page", () => {
     expect(within(steps).getByText("Getting the audio ready to play")).toBeTruthy();
     expect(within(steps).getByText("Tried 3 times.")).toBeTruthy();
     // The retry is the next step's button, not repeated in the list.
-    expect(within(steps).queryByRole("button", { name: "Try again" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(within(steps).queryByRole("button", { name: "Retry processing" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry processing" })).toBeTruthy();
+    // The file couldn't be read, so a converted upload is offered beside the retry.
+    expect(screen.getByRole("link", { name: "Upload a converted file" }).getAttribute("href")).toBe(
+      "/admin#add-interview",
+    );
     expect(within(steps).queryByText("ffmpeg exited 1")).toBeNull(); // folded away
     await userEvent.click(within(steps).getByRole("button", { name: "Show technical details" }));
     expect(within(steps).getByText("ffmpeg exited 1")).toBeTruthy();
+    // Publishing a stopped interview says what visitors would miss.
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual([
+      "Play the recording",
+      "No transcript (marked “Transcript unavailable”)",
+      "No English translation yet",
+      "Search won't find it until processing works",
+    ]);
 
     // A re-index (e.g. after a search model change) runs while the interview stays published.
     cleanup();
@@ -337,6 +426,32 @@ describe("admin page", () => {
     expect(await screen.findByText(/Search is being updated for this interview/)).toBeTruthy();
     const indexing = await screen.findByRole("list", { name: "Processing steps" });
     expect(within(indexing).getByText("Making it searchable")).toBeTruthy();
+
+    // Once every step is done, the checklist folds into one line.
+    cleanup();
+    const done = (kind: string) => ({
+      kind,
+      state: "done",
+      attempts: 1,
+      max_attempts: 3,
+      last_error: null,
+      created_at: "2026-11-04T00:00:00Z",
+      finished_at: "2026-11-04T00:10:00Z",
+    });
+    stubApi({
+      ...adminApi,
+      [`/api/interviews/${id}/transcript`]: { body: { items: [] } },
+      [`/api/interviews/${id}/jobs`]: { body: { items: [done("playback"), done("index")] } },
+    });
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByText("All steps finished", {}, SLOW)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Processing steps" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show steps" }));
+    expect(screen.getByRole("list", { name: "Processing steps" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hide steps" })).toHaveProperty(
+      "ariaExpanded",
+      "true",
+    );
 
     cleanup();
     renderApp("/admin/interviews/missing", fakeAuthClient({ signedIn: true }));

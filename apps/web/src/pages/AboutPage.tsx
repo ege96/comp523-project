@@ -5,12 +5,13 @@ import Typography from "@mui/material/Typography";
 import type { ReactNode } from "react";
 
 import { TextLink } from "../components/links";
+import { Pill } from "../components/Pill";
 
 /**
  * About & Help for visitors (documentation plan §3): what the archive is, then an FAQ with
  * the question as a heading and the short answer first. The answers describe how the app
- * works today. Anything only the archive team can say (who runs it, how to cite, who to
- * contact) sits in a marked box until they send the wording.
+ * works today. Anything only the archive team can say (who runs it, who to contact) sits in a
+ * box marked Pending until they send the wording; citing has a suggested format, marked as such.
  */
 export function AboutPage() {
   return (
@@ -141,7 +142,34 @@ export function AboutPage() {
             </Question>
 
             <Question id="cite" title="How do I cite an interview?">
-              <ClientText>The citation format the archive would like scholars to use.</ClientText>
+              {/* Proposal: a suggested format from the fields every interview page shows, until
+                  the archive team sends the one they want (then drop the pending label). */}
+              <Typography>
+                Until the archive team confirms its preferred format, you can use this one, filling
+                in the parts in braces from the interview&apos;s page:
+              </Typography>
+              <Box
+                component="p"
+                sx={{
+                  m: 0,
+                  p: 2,
+                  bgcolor: "background.paper",
+                  border: 1,
+                  borderColor: "divider",
+                  borderRadius: 1,
+                  overflowWrap: "anywhere",
+                }}
+              >
+                “{"{Interview title}"}”, interview with {"{interviewee}"}, Swayambhu Stories
+                archive, {"{web address of the moment}"}. Accessed {"{date}"}.
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                The web address of a moment is the one your browser shows after you open the
+                interview at that moment, so readers start at the same place.
+              </Typography>
+              <Box>
+                <Pill tone="amber">Suggested format, pending the archive team&apos;s approval</Pill>
+              </Box>
             </Question>
 
             <Question
@@ -206,9 +234,12 @@ function ClientText({ children }: { children: ReactNode }) {
       role="note"
       sx={{ border: 1, borderStyle: "dashed", borderColor: "divider", borderRadius: 1, p: 2 }}
     >
-      <Typography variant="overline" color="text.secondary">
-        Text to come from the archive team
-      </Typography>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+        <Pill tone="amber">Pending</Pill>
+        <Typography variant="overline" color="text.secondary">
+          Text to come from the archive team
+        </Typography>
+      </Stack>
       <Typography variant="body2" color="text.secondary">
         {children}
       </Typography>

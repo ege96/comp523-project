@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { Job } from "../api/schemas";
 import { datePartsError, partsFromText, partsToText } from "./recordedOn";
-import { formatAdded, nextStep, processingSteps, queueOf } from "./workflow";
+import {
+  formatAdded,
+  nextStep,
+  processingSteps,
+  QUEUE_FILTERS,
+  queueOf,
+  visitorGets,
+} from "./workflow";
 
 function job(kind: string, state: Job["state"]): Job {
   return {
@@ -44,8 +51,45 @@ describe("admin workflow", () => {
     ]);
   });
 
-  it("writes the added date without the time", () => {
+  it("writes the added date without the time, as the same day wherever the admin is", () => {
     expect(formatAdded("2026-10-14T00:00:00Z")).toBe("14 October 2026");
+    expect(formatAdded("2026-10-14T23:59:00Z")).toBe("14 October 2026");
+  });
+
+  it("keeps the views apart: Published is only finished, public interviews", () => {
+    expect(QUEUE_FILTERS.published).toEqual({ status: "done", visibility: "public" });
+    expect(QUEUE_FILTERS.processing).toEqual({ status: "processing" });
+  });
+
+  it("says what visitors get from publishing now, without promising what isn't there", () => {
+    const media = { url: "/m", content_type: "audio/mp4", expires_at: "2026-10-14T06:00:00Z" };
+    const texts = (...args: Parameters<typeof visitorGets>) =>
+      visitorGets(...args).map((i) => (i.available ? "+ " : "- ") + i.text);
+    expect(texts({ status: "done", translation_status: "done", media })).toEqual([
+      "+ Play the recording",
+      "+ Read the transcript, marked as made by machine",
+      "+ Read the English translation",
+      "+ Find it in search",
+    ]);
+    expect(texts({ status: "processing", translation_status: "pending", media: null })).toEqual([
+      "- The recording isn't ready to play yet",
+      "- Transcript still being made, marked “Transcript in progress”",
+      "- The English translation is still being made",
+      "- Search finds it once processing finishes",
+    ]);
+    // English recordings need no translation line.
+    expect(
+      texts({ status: "failed", translation_status: "not_needed", media: null }, [
+        job("index", "done"),
+      ]),
+    ).toEqual([
+      "- No recording to play: it couldn't be prepared",
+      "- No transcript (marked “Transcript unavailable”)",
+      "+ Find it in search",
+    ]);
+    expect(texts({ status: "done", translation_status: "failed", media })[2]).toBe(
+      "- Original words only; the English didn't work",
+    );
   });
 });
 

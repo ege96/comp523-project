@@ -111,16 +111,13 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
               ? "Public: visitors can find it"
               : "Private: only admins can see it"}
           </Typography>
-          {/* Published: the next step below has this link as a button already. */}
-          {queue === "published" ? null : (
-            <TextLink
-              to="/interviews/$interviewId"
-              params={{ interviewId: interview.id }}
-              variant="body2"
-            >
-              See it as a visitor would
-            </TextLink>
-          )}
+          {/* The viewer opens with the admin's session, so it also shows admin-only notes. */}
+          <Typography variant="body2" color="text.secondary">
+            <TextLink to="/interviews/$interviewId" params={{ interviewId: interview.id }}>
+              Preview the public page
+            </TextLink>{" "}
+            (you&apos;re signed in, so you also see admin-only notes)
+          </Typography>
         </Stack>
       </Stack>
 
@@ -137,7 +134,7 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
         {/* Where it stands (processing, then who can see it) on the left; facts on the right. */}
         <Stack spacing={3}>
           <Processing interview={interview} queue={queue} jobs={jobs} />
-          <WhoCanSee interview={interview} queue={queue} />
+          <WhoCanSee interview={interview} queue={queue} jobs={jobs.data?.items} />
         </Stack>
         <Details interview={interview} />
       </Box>
@@ -200,6 +197,8 @@ function NextStep({
   const retryable = [...retryableJobs(jobs ?? [])];
   const steps = processingSteps(jobs ?? []);
   const labelOf = (job: Job) => steps.find((s) => s.job === job)?.label ?? "this step";
+  // The file itself couldn't be read: retrying rarely helps, a converted file usually does.
+  const unreadable = retryable.some((job) => job.kind === "playback");
   const content: { heading: string; body: ReactNode; actions?: ReactNode } = (() => {
     switch (queue) {
       case "attention":
@@ -211,20 +210,37 @@ function NextStep({
                 {interview.status_detail ?? "One of the processing steps didn't work."}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Trying again often works. If it keeps stopping, the steps below have details to pass
-                on to whoever looks after the archive.
+                {unreadable
+                  ? "The recording's file couldn't be read. Retrying sometimes works; if not, convert the file (for example to MP4 or MP3) and upload it as a new interview. "
+                  : "Retrying often works. "}
+                If it keeps stopping, the steps below have details to pass on to whoever looks after
+                the archive.
               </Typography>
             </>
           ),
-          actions: retryable.map((job) => (
-            <RetryButton
-              key={job.kind}
-              interview={interview}
-              job={job}
-              variant="contained"
-              label={retryable.length > 1 ? `Try again: ${labelOf(job)}` : "Try again"}
-            />
-          )),
+          actions:
+            retryable.length === 0 ? undefined : (
+              <>
+                {retryable.map((job) => (
+                  <RetryButton
+                    key={job.kind}
+                    interview={interview}
+                    job={job}
+                    variant="contained"
+                    label={
+                      retryable.length > 1
+                        ? `Retry processing: ${labelOf(job)}`
+                        : "Retry processing"
+                    }
+                  />
+                ))}
+                {unreadable ? (
+                  <ButtonLink to="/admin" hash="add-interview" variant="outlined">
+                    Upload a converted file
+                  </ButtonLink>
+                ) : null}
+              </>
+            ),
         };
       case "processing":
         return {
@@ -265,7 +281,7 @@ function NextStep({
           ),
           actions: (
             <>
-              <PublishButton interview={interview} />
+              <PublishButton interview={interview} jobs={jobs} />
               <Button href="#transcript" variant="outlined">
                 Correct the transcript
               </Button>
@@ -286,14 +302,10 @@ function NextStep({
           ),
           actions: (
             <>
-              <ButtonLink
-                to="/interviews/$interviewId"
-                params={{ interviewId: interview.id }}
-                variant="outlined"
-              >
-                See it as a visitor would
-              </ButtonLink>
-              <PublishButton interview={interview} />
+              <Button href="#transcript" variant="outlined">
+                Correct the transcript
+              </Button>
+              <PublishButton interview={interview} jobs={jobs} />
             </>
           ),
         };
@@ -315,7 +327,7 @@ function NextStep({
         <Stack spacing={1} sx={{ maxWidth: "70ch" }}>
           {content.body}
         </Stack>
-        {content.actions && (!Array.isArray(content.actions) || content.actions.length > 0) ? (
+        {content.actions ? (
           <Stack
             direction={{ xs: "column", sm: "row" }}
             spacing={1.5}
@@ -349,6 +361,24 @@ function Processing({
   const [fixing, setFixing] = useState(mismatch !== null);
   const steps = processingSteps(jobs.data?.items ?? []);
   const retryable = retryableJobs(jobs.data?.items ?? []);
+  // Proposal: once everything has finished, the steps fold into one line; anything waiting,
+  // running or failed keeps them open.
+  const allDone =
+    interview.status === "done" && steps.length > 0 && steps.every((s) => s.job.state === "done");
+  const [showSteps, setShowSteps] = useState(false);
+  const toggleSteps = (
+    <Button
+      size="small"
+      aria-expanded={showSteps}
+      aria-controls="processing-steps"
+      onClick={() => {
+        setShowSteps((open) => !open);
+      }}
+      sx={{ paddingInline: 1, flexShrink: 0 }}
+    >
+      {showSteps ? "Hide steps" : "Show steps"}
+    </Button>
+  );
   return (
     <Panel title="Processing">
       {jobs.isError ? (
@@ -358,17 +388,40 @@ function Processing({
       ) : steps.length === 0 ? (
         <Typography color="text.secondary">Nothing has started yet.</Typography>
       ) : (
-        <Box component="ol" aria-label="Processing steps" sx={{ listStyle: "none", m: 0, p: 0 }}>
-          {steps.map((step) => (
-            <StepRow
-              key={step.key}
-              step={step}
-              interview={interview}
-              // On a stopped recording the retry is the next step's button, up above.
-              retry={queue !== "attention" && retryable.has(step.job)}
-            />
-          ))}
-        </Box>
+        <>
+          {allDone ? (
+            <Box
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "28px minmax(0, 1fr) auto",
+                columnGap: 1.5,
+                alignItems: "center",
+              }}
+            >
+              <StepMark state="done" />
+              <Typography>All steps finished</Typography>
+              {toggleSteps}
+            </Box>
+          ) : null}
+          {!allDone || showSteps ? (
+            <Box
+              component="ol"
+              id="processing-steps"
+              aria-label="Processing steps"
+              sx={{ listStyle: "none", m: 0, p: 0 }}
+            >
+              {steps.map((step) => (
+                <StepRow
+                  key={step.key}
+                  step={step}
+                  interview={interview}
+                  // On a stopped recording the retry is the next step's button, up above.
+                  retry={queue !== "attention" && retryable.has(step.job)}
+                />
+              ))}
+            </Box>
+          ) : null}
+        </>
       )}
       {interview.translation_status === "not_needed" ? (
         <Typography variant="body2" color="text.secondary">
@@ -446,7 +499,9 @@ function StepRow({
             <Typography variant="body2" color="text.secondary">
               Tried {job.attempts === 1 ? "once" : `${String(job.attempts)} times`}.
             </Typography>
-            {retry ? <RetryButton interview={interview} job={job} /> : null}
+            {retry ? (
+              <RetryButton interview={interview} job={job} label="Retry processing" />
+            ) : null}
             {job.last_error ? <TechnicalDetail text={job.last_error} /> : null}
           </>
         ) : null}
@@ -636,15 +691,27 @@ function LanguageCheck({
   );
 }
 
-function WhoCanSee({ interview, queue }: { interview: InterviewDetail; queue: Queue }) {
+function WhoCanSee({
+  interview,
+  queue,
+  jobs,
+}: {
+  interview: InterviewDetail;
+  queue: Queue;
+  jobs: Job[] | undefined;
+}) {
   // Ready and published recordings have Publish / Unpublish in the next step already.
   const showButton = queue === "attention" || queue === "processing";
   return (
     <Panel title="Who can see it">
       <Typography variant="body2">
-        {interview.visibility === "public"
-          ? "Public. Anyone can find it in search, play it and read the transcript, labelled as machine-made with your corrections marked."
-          : "Private. Only admins can see it. Visitors can't find it or play it."}
+        {interview.visibility === "private"
+          ? "Private. Only admins can see it. Visitors can't find it or play it."
+          : queue === "published"
+            ? "Public. Anyone can find it in search, play it and read the transcript, labelled as machine-made with your corrections marked."
+            : queue === "processing"
+              ? "Public. Anyone on the web can open it; visitors see the transcript marked as in progress until processing finishes."
+              : "Public. Anyone on the web can open it; visitors see it marked “Transcript unavailable” until processing works."}
       </Typography>
       {showButton ? (
         <>
@@ -656,8 +723,8 @@ function WhoCanSee({ interview, queue }: { interview: InterviewDetail; queue: Qu
             </Typography>
           ) : null}
           <Box sx={{ alignSelf: "flex-start" }}>
-            {/* When processing stopped, Try again above is the main action. */}
-            <PublishButton interview={interview} quiet={queue === "attention"} />
+            {/* When processing stopped, Retry processing above is the main action. */}
+            <PublishButton interview={interview} jobs={jobs} quiet={queue === "attention"} />
           </Box>
         </>
       ) : null}

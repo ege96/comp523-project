@@ -96,8 +96,8 @@ describe("re-running steps on the admin page", () => {
     ).toBeTruthy();
     expect(screen.getByText(/The English translation didn't work/)).toBeTruthy();
     const steps = await screen.findByRole("list", { name: "Processing steps" });
-    expect(within(steps).getAllByRole("button", { name: "Try again" })).toHaveLength(1);
-    await userEvent.click(within(steps).getByRole("button", { name: "Try again" }));
+    expect(within(steps).getAllByRole("button", { name: "Retry processing" })).toHaveLength(1);
+    await userEvent.click(within(steps).getByRole("button", { name: "Retry processing" }));
     await vi.waitFor(() => {
       expect(posts()).toEqual(['{"step":"translate","replace_corrections":false}']);
     });
@@ -125,7 +125,7 @@ describe("re-running steps on the admin page", () => {
     routes[`${path}/rerun`] = { status: 500, body: {} };
     await userEvent.click(screen.getByRole("button", { name: "Translate again" }));
     expect(await screen.findByText("That step couldn't be started. Try again.")).toBeTruthy();
-    await userEvent.click(within(steps).getByRole("button", { name: "Try again" }));
+    await userEvent.click(within(steps).getByRole("button", { name: "Retry processing" }));
     expect(await within(steps).findByRole("alert")).toHaveProperty(
       "textContent",
       "That didn't start. Check your connection and try again.",

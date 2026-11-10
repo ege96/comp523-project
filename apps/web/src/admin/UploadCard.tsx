@@ -10,6 +10,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { useForm } from "@tanstack/react-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type DragEvent, type SubmitEvent } from "react";
 
 import { searchQueries } from "../api/client";
@@ -31,6 +32,9 @@ type UploadState =
   | { phase: "error"; message: string };
 
 const NO_INTERVIEWEE: Interviewee = { id: null, name: "" };
+
+const LEAVE_WARNING = "Leave this page? The upload will stop.";
+const FILE_ERROR_ID = "upload-file-error";
 
 function baseName(file: File): string {
   return file.name.replace(/\.[^.]+$/, "");
@@ -63,18 +67,27 @@ export function UploadCard() {
     enabled: viewer.ready,
   });
 
-  // Leaving the page stops the upload, so ask first. It resumes if the same file is chosen
-  // again with the same details.
+  // Leaving the page stops the upload, so ask first, whether the admin closes the tab or follows
+  // a link in the app. Changing tabs or pages of the list stays on this page, so it isn't asked.
+  // The upload resumes if the same file is chosen again with the same details.
+  useBlocker({
+    shouldBlockFn: ({ current, next }) =>
+      current.pathname !== next.pathname && !window.confirm(LEAVE_WARNING),
+    enableBeforeUnload: uploading,
+    disabled: !uploading,
+  });
+  // Leaving after saying yes stops the upload, as the question says.
+  const handle = useRef<UploadHandle | null>(null);
   useEffect(() => {
-    if (!uploading) return;
-    const warn = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warn);
-    return () => {
-      window.removeEventListener("beforeunload", warn);
-    };
-  }, [uploading]);
+    handle.current = upload.phase === "uploading" ? upload.handle : null;
+  }, [upload]);
+  useEffect(
+    () => () => {
+      handle.current?.abort();
+    },
+    [],
+  );
+  const formRef = useRef<HTMLFormElement>(null);
 
   const form = useForm({
     defaultValues: {
@@ -123,7 +136,13 @@ export function UploadCard() {
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void form.handleSubmit();
+    void form.handleSubmit().then(() => {
+      if (form.state.isValid) return;
+      // Once the errors have rendered, take the admin to the first one.
+      window.setTimeout(() => {
+        formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      }, 0);
+    });
   };
 
   const cancel = () => {
@@ -134,7 +153,7 @@ export function UploadCard() {
 
   return (
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
-      <Stack component="form" spacing={2.5} noValidate onSubmit={submit}>
+      <Stack component="form" ref={formRef} spacing={2.5} noValidate onSubmit={submit}>
         <Stack spacing={0.5}>
           <Typography variant="h2">Add an interview</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -340,7 +359,13 @@ function FileDrop({
             {file ? formatBytes(file.size) : "For example MP4, MOV, MP3 or WAV"}
           </Typography>
         </Box>
-        <Button variant="outlined" disabled={disabled} onClick={() => input.current?.click()}>
+        <Button
+          variant="outlined"
+          disabled={disabled}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? FILE_ERROR_ID : undefined}
+          onClick={() => input.current?.click()}
+        >
           {file ? "Choose another file" : "Choose file"}
         </Button>
         <input
@@ -349,6 +374,7 @@ function FileDrop({
           hidden
           accept="audio/*,video/*"
           aria-label="Recording file"
+          aria-describedby={error ? FILE_ERROR_ID : undefined}
           onChange={(e) => {
             const chosen = e.target.files?.[0];
             if (chosen) onFile(chosen);
@@ -357,7 +383,14 @@ function FileDrop({
         />
       </Box>
       {error ? (
-        <Typography variant="caption" color="error" sx={{ mx: 1.75 }}>
+        <Typography
+          id={FILE_ERROR_ID}
+          role="alert"
+          variant="caption"
+          color="error"
+          component="p"
+          sx={{ mx: 1.75 }}
+        >
           {error}
         </Typography>
       ) : null}

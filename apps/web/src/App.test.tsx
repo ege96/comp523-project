@@ -487,3 +487,27 @@ describe("interview viewer", () => {
     expect(await screen.findByText("This interview doesn't exist, or isn't public.")).toBeTruthy();
   });
 });
+
+describe("sign-in and about: next steps and pending wording", () => {
+  it("offers a way on when sign-in is unavailable", async () => {
+    stubApi(list);
+    renderApp("/signin"); // no Firebase config: sign-in is unavailable
+    expect(await screen.findByText(/contact whoever runs the archive/)).toBeTruthy();
+    // Try again reloads the page (jsdom can't reload, so only its presence is checked).
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back to the archive" }).getAttribute("href")).toBe(
+      "/",
+    );
+  });
+
+  it("suggests a citation format, marked as pending the archive team's approval", async () => {
+    stubApi(list);
+    renderApp("/about");
+    expect(
+      await screen.findByRole("heading", { name: "How do I cite an interview?" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/archive, \{web address of the moment\}\. Accessed/)).toBeTruthy();
+    expect(screen.getByText("Suggested format, pending the archive team's approval")).toBeTruthy();
+    expect(screen.getAllByText("Pending").length).toBeGreaterThan(0);
+  });
+});
