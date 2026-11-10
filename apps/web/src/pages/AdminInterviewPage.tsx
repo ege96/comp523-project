@@ -39,10 +39,19 @@ const route = getRouteApi("/admin/interviews/$interviewId");
 export function AdminInterviewPage() {
   const { interviewId } = route.useParams();
   const { viewer } = useAuth();
+  // Jobs can run while the status stays done: a re-index after a search model change, or
+  // the search update after an edit. Keep watching until they end, since a failure changes
+  // the status.
+  const jobs = useQuery({
+    ...adminQueries.jobs(viewer, interviewId),
+    enabled: viewer.ready,
+  });
+  const busy = anyActive(jobs.data?.items);
   const { data, error } = useQuery({
     ...interviewQueries.detail(viewer, interviewId),
     enabled: viewer.ready,
-    refetchInterval: (q) => (q.state.data?.status === "processing" ? PROCESSING_POLL_MS : false),
+    refetchInterval: (q) =>
+      q.state.data?.status === "processing" || busy ? PROCESSING_POLL_MS : false,
   });
 
   return (
@@ -78,7 +87,10 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
   const jobs = useQuery({
     ...adminQueries.jobs(viewer, interview.id),
     enabled: viewer.ready,
-    refetchInterval: interview.status === "processing" ? PROCESSING_POLL_MS : false,
+    refetchInterval: (q) =>
+      interview.status === "processing" || anyActive(q.state.data?.items)
+        ? PROCESSING_POLL_MS
+        : false,
   });
   const queue = queueOf(interview);
   return (
@@ -159,6 +171,23 @@ const ACCENT = {
 } as const satisfies Record<Queue, string>;
 
 /** The one thing to do now, in a sentence, with its button. */
+function anyActive(jobs: readonly Job[] | undefined): boolean {
+  return jobs?.some((j) => j.state === "queued" || j.state === "running") ?? false;
+}
+
+/** A search update in the background, while the interview itself is finished. */
+function SearchUpdating({ jobs }: { jobs: Job[] | undefined }) {
+  const indexing = processingSteps(jobs ?? []).some(
+    (s) => s.key === "index" && (s.job.state === "queued" || s.job.state === "running"),
+  );
+  return indexing ? (
+    <Typography variant="body2" color="text.secondary" role="status">
+      Search is being updated for this interview. Until that finishes, search may show older wording
+      or miss it. Nothing to do.
+    </Typography>
+  ) : null;
+}
+
 function NextStep({
   interview,
   queue,
@@ -231,6 +260,7 @@ function NextStep({
                   : null}
                 You can correct the transcript at any time, whether it&apos;s published or not.
               </Typography>
+              <SearchUpdating jobs={jobs} />
             </>
           ),
           actions: (
@@ -246,10 +276,13 @@ function NextStep({
         return {
           heading: "Published",
           body: (
-            <Typography>
-              Visitors can find it in search, play it and read the transcript. Corrections you make
-              below show to them too.
-            </Typography>
+            <>
+              <Typography>
+                Visitors can find it in search, play it and read the transcript. Corrections you
+                make below show to them too.
+              </Typography>
+              <SearchUpdating jobs={jobs} />
+            </>
           ),
           actions: (
             <>

@@ -311,6 +311,33 @@ describe("admin page", () => {
     await userEvent.click(within(steps).getByRole("button", { name: "Show technical details" }));
     expect(within(steps).getByText("ffmpeg exited 1")).toBeTruthy();
 
+    // A re-index (e.g. after a search model change) runs while the interview stays published.
+    cleanup();
+    stubApi({
+      ...adminApi,
+      [`/api/interviews/${id}/transcript`]: { body: { items: [] } },
+      [`/api/interviews/${id}/jobs`]: {
+        body: {
+          items: [
+            {
+              kind: "index",
+              state: "running",
+              attempts: 1,
+              max_attempts: 3,
+              last_error: null,
+              created_at: "2026-11-04T00:00:00Z",
+              finished_at: null,
+            },
+          ],
+        },
+      },
+    });
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    expect(await screen.findByRole("heading", { name: "Published" }, SLOW)).toBeTruthy();
+    expect(await screen.findByText(/Search is being updated for this interview/)).toBeTruthy();
+    const indexing = await screen.findByRole("list", { name: "Processing steps" });
+    expect(within(indexing).getByText("Making it searchable")).toBeTruthy();
+
     cleanup();
     renderApp("/admin/interviews/missing", fakeAuthClient({ signedIn: true }));
     expect(await screen.findByText("This interview doesn't exist.")).toBeTruthy();
