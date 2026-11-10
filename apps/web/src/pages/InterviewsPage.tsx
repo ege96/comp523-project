@@ -12,6 +12,7 @@ import type { ComponentProps } from "react";
 import { interviewQueries } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 import { InterviewList } from "../components/InterviewList";
+import { TextLink } from "../components/links";
 
 const route = getRouteApi("/interviews");
 const PAGE_SIZE = 20;
@@ -28,13 +29,19 @@ export function InterviewsPage() {
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
 
   return (
-    <Container sx={{ py: 6 }}>
+    <Container sx={{ pt: { xs: 3, md: 5 } }}>
       <Stack spacing={3}>
-        <Typography variant="h1">All interviews</Typography>
+        <Stack spacing={1}>
+          <Typography variant="h1">All interviews</Typography>
+          <Typography color="text.secondary">
+            Every public recording, newest first. To find a moment inside them,{" "}
+            <TextLink to="/">search the transcripts</TextLink>.
+          </Typography>
+        </Stack>
         {isError ? (
           <Alert severity="error">Interviews couldn&apos;t be loaded. Please try again.</Alert>
         ) : isPending ? (
-          <Skeleton variant="rounded" height={480} />
+          <Skeleton variant="rectangular" height={480} />
         ) : data.items.length === 0 ? (
           <Typography color="text.secondary">
             {page > 1 ? "There are no more interviews." : "No interviews have been published yet."}
@@ -46,7 +53,8 @@ export function InterviewsPage() {
           <Pagination
             page={page}
             count={pages}
-            sx={{ alignSelf: "center" }}
+            shape="rounded"
+            sx={{ alignSelf: "flex-start" }}
             renderItem={(item) => (
               <PaginationItem {...item} component={PageAnchor} toPage={item.page} />
             )}

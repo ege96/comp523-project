@@ -1,15 +1,19 @@
-import Chip from "@mui/material/Chip";
-import Paper from "@mui/material/Paper";
+import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
 
 import type { Moment } from "../api/schemas";
 import { formatClock, formatRecordedOn } from "../format";
+import { tokens } from "../theme";
 import { PlayIcon } from "./icons";
 import { InterviewChips } from "./InterviewChips";
-import { ButtonLink } from "./links";
+import { TextLink } from "./links";
+import { LinePair } from "./LinePair";
 
-/** One search hit: a stretch of transcript, opened in the viewer at its first line. */
+/**
+ * One search hit: a stretch of transcript, opened in the viewer at its first line. The time
+ * sits on a small blue plate in the margin and is the link; the spoken words lead the entry.
+ */
 export function MomentCard({ moment }: { moment: Moment }) {
   const { interview, excerpt } = moment;
   const recorded = formatRecordedOn(interview);
@@ -18,66 +22,96 @@ export function MomentCard({ moment }: { moment: Moment }) {
     interview.primary_language?.name,
     recorded ? `Recorded ${recorded}` : null,
   ].filter(Boolean);
-  const english = excerpt.flatMap((s) => (s.english_text ? [s.english_text] : [])).join(" ");
   // Semantic alone means the words themselves may not appear (search API, PR #27).
   const relatedOnly = !moment.matched_by.includes("keyword");
-  const span = `${formatClock(moment.start_ms)} – ${formatClock(moment.end_ms)}`;
+  const start = formatClock(moment.start_ms);
 
   return (
-    <Paper component="article" sx={{ p: 3 }}>
-      <Stack spacing={1.5}>
-        <Stack
-          direction="row"
-          spacing={2}
-          sx={{ justifyContent: "space-between", alignItems: "flex-start" }}
+    <Box
+      component="article"
+      sx={{
+        position: "relative",
+        display: "grid",
+        gridTemplateColumns: { xs: "1fr", sm: "6.5rem minmax(0, 1fr)" },
+        columnGap: 3,
+        rowGap: 1.5,
+        py: 3,
+        borderBottom: 1,
+        borderColor: "divider",
+      }}
+    >
+      <TextLink
+        to="/interviews/$interviewId"
+        params={{ interviewId: interview.id }}
+        search={{ t: moment.start_ms }}
+        underline="none"
+        aria-label={`Open ${interview.title} at ${start}`}
+        sx={{
+          alignSelf: "start",
+          justifySelf: "start",
+          display: "flex",
+          flexDirection: { xs: "row", sm: "column" },
+          alignItems: { xs: "baseline", sm: "flex-start" },
+          gap: { xs: 1, sm: 0 },
+          minWidth: { sm: "6.5rem" },
+          px: 1.5,
+          py: { xs: 0.75, sm: 1 },
+          bgcolor: tokens.plate,
+          color: tokens.onPlate,
+          borderRadius: "2px",
+          fontVariantNumeric: "tabular-nums",
+          "&:hover": { bgcolor: tokens.plateDeep },
+        }}
+      >
+        <Box component="span" sx={{ fontSize: "1.25rem", fontWeight: 800, lineHeight: 1.2 }}>
+          {start}
+        </Box>
+        <Box component="span" sx={{ fontSize: "0.8125rem", color: tokens.onPlateMuted }}>
+          to {formatClock(moment.end_ms)}
+        </Box>
+        <Box
+          component="span"
+          sx={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 0.5,
+            fontSize: "0.8125rem",
+            fontWeight: 600,
+            mt: { sm: 1 },
+            ml: { xs: "auto", sm: 0 },
+          }}
         >
-          <Typography variant="h3" component="h2">
+          <PlayIcon sx={{ fontSize: "0.875rem" }} aria-hidden />
+          Listen
+        </Box>
+      </TextLink>
+
+      <Stack spacing={1.5} sx={{ minWidth: 0 }}>
+        <Box>
+          <Typography variant="subtitle1" component="h3" sx={{ lineHeight: 1.35 }}>
             {interview.title}
           </Typography>
-          <Chip
-            size="small"
-            label={span}
-            aria-label={`From ${span}`}
-            sx={{ bgcolor: "rgba(150, 58, 53, 0.1)", color: "primary.main", flexShrink: 0 }}
-          />
-        </Stack>
-        <Typography variant="body2" color="text.secondary">
-          {details.join(" · ")}
-        </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {details.join(" · ")}
+          </Typography>
+        </Box>
         <InterviewChips interview={interview} />
-        <Stack component="blockquote" spacing={1} sx={{ m: 0 }}>
-          {english ? <Typography>“{english}”</Typography> : null}
-          {/* The original words, always kept; `lang` lets the browser pick a Devanagari font. */}
-          <Stack spacing={0.5}>
-            {excerpt.map((s) => (
-              <Typography
-                key={s.seq}
-                lang={s.language ?? undefined}
-                variant={english ? "body2" : "body1"}
-                color={english ? "text.secondary" : "text.primary"}
-              >
-                {s.original_text}
-              </Typography>
-            ))}
-          </Stack>
+        <Stack component="blockquote" spacing={1.25} sx={{ m: 0 }}>
+          {excerpt.map((s) => (
+            <LinePair
+              key={s.seq}
+              original={s.original_text}
+              english={s.english_text}
+              lang={s.language}
+            />
+          ))}
         </Stack>
         {relatedOnly ? (
           <Typography variant="caption" color="text.secondary">
             Related in meaning. Your exact words may not appear here.
           </Typography>
         ) : null}
-        <ButtonLink
-          to="/interviews/$interviewId"
-          params={{ interviewId: interview.id }}
-          search={{ t: moment.start_ms }}
-          variant="outlined"
-          endIcon={<PlayIcon />}
-          aria-label={`Open ${interview.title} at ${formatClock(moment.start_ms)}`}
-          sx={{ alignSelf: "flex-start" }}
-        >
-          Open at this moment
-        </ButtonLink>
       </Stack>
-    </Paper>
+    </Box>
   );
 }

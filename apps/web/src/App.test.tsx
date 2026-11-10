@@ -21,7 +21,8 @@ describe("app shell and sign-in", () => {
     renderApp("/");
 
     expect(await screen.findByRole("link", { name: "Test interview A" })).toBeTruthy();
-    expect(screen.getByText("Interviewee: Unknown · Nepali · 1:02:03")).toBeTruthy();
+    // One line on phones, columns on wide screens (both are in the DOM; CSS picks one).
+    expect(screen.getByText("Unknown interviewee · Nepali · 1:02:03 · May 2001")).toBeTruthy();
     expect(screen.getByText("May 2001")).toBeTruthy();
     expect(screen.getByText("Transcript in progress")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "Upload & review" })).toBeNull();
@@ -175,7 +176,7 @@ describe("search", () => {
     const urls = () => vi.mocked(fetch).mock.calls.map(([url]) => url);
 
     expect(await screen.findByRole("heading", { name: "Test interview A" })).toBeTruthy();
-    expect(screen.getByText("“English text A”")).toBeTruthy();
+    expect(screen.getByText("English text A").getAttribute("lang")).toBe("en");
     expect(screen.getAllByText("Original text A")[0]?.getAttribute("lang")).toBe("ne");
     expect(screen.getAllByText(/Related in meaning/)).toHaveLength(1);
     expect(screen.getByText(/only match your words/)).toBeTruthy();
@@ -210,6 +211,10 @@ describe("search", () => {
     });
     const router = renderApp("/search?q=x&interviewee=7&from=2001-01-01&undated=true");
     expect(await screen.findByText(/No moments matched/)).toBeTruthy();
+    // On phones the filters fold behind a button that says how many are on.
+    const toggle = screen.getByRole("button", { name: "Filters · 2 on" });
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("combobox", { name: "Interviewee" }).textContent).toBe("Interviewee 7");
     expect(screen.getByRole("checkbox", { name: /undated/ })).toHaveProperty("checked", true);
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -308,8 +313,10 @@ describe("interview viewer", () => {
 
     await userEvent.type(find, "stupa");
     expect(screen.getByRole("status").textContent).toBe("1 of 2 lines");
+    // With a translation the viewer opens on both languages, so both are searched.
     expect([...document.querySelectorAll("mark")].map((m) => m.textContent)).toEqual([
       "Stupa",
+      "stupa",
       "STUPA",
     ]);
     expect(scroll).toHaveBeenCalled();
@@ -330,6 +337,22 @@ describe("interview viewer", () => {
     expect(screen.getByRole("link", { name: "Learn more" }).getAttribute("href")).toBe(
       "/about#machine-transcripts",
     );
+  });
+
+  it("opens on both languages when there is a translation, and can show one", async () => {
+    stubApi({
+      [`/api/interviews/${id}`]: { body: { ...interviewDetail, translation_status: "done" } },
+      [`/api/interviews/${id}/segments`]: {
+        body: { items: [{ ...segments.items[0], english_text: "English text A" }] },
+      },
+    });
+    renderApp(`/interviews/${id}`);
+    const both = await screen.findByRole("tab", { name: "Original + English" });
+    expect(both.getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Original text A").getAttribute("lang")).toBe("ne");
+    expect(screen.getByText("English text A")).toBeTruthy();
+    await userEvent.click(screen.getByRole("tab", { name: "Original" }));
+    expect(screen.queryByText("English text A")).toBeNull();
   });
 
   it("treats a 404 as missing or private, without saying which", async () => {

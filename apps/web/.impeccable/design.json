@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-10T00:00:00Z",
+  "title": "Design System: Swayambhu Stories",
+  "extensions": {
+    "colorMeta": {
+      "plate": { "role": "primary", "displayName": "Enamel Plate Blue", "canonical": "#173a8c" },
+      "here": {
+        "role": "accent",
+        "displayName": "Vermilion (you are here)",
+        "canonical": "#c2321d"
+      },
+      "mark": { "role": "accent", "displayName": "Marigold (find match)", "canonical": "#ffd257" },
+      "ground": { "role": "neutral", "displayName": "White Ground", "canonical": "#ffffff" }
+    },
+    "focus": { "ring": "2px solid #173a8c, offset 2px; white on the plate" },
+    "motion": { "here": "background-color 160ms ease-out on the time button" },
+    "breakpoints": { "md": "900px" }
+  }
+}

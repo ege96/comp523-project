@@ -1,83 +1,146 @@
-import AppBar from "@mui/material/AppBar";
 import Box from "@mui/material/Box";
-import Button from "@mui/material/Button";
+import ButtonBase from "@mui/material/ButtonBase";
 import Container from "@mui/material/Container";
 import Stack from "@mui/material/Stack";
-import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
-import { Outlet } from "@tanstack/react-router";
+import { createLink, Outlet, useRouterState } from "@tanstack/react-router";
 
 import { useAuth } from "../auth/useAuth";
-import { WaveformIcon } from "./icons";
-import { ButtonLink, TextLink } from "./links";
+import { tokens } from "../theme";
+import { TextLink } from "./links";
 
-const activeNav = { style: { boxShadow: "inset 0 -2px 0 currentColor" } } as const;
+// A nav item is lettering on the plate; the current one is underlined like a sign's rule.
+const navItemSx = {
+  color: tokens.onPlate,
+  fontWeight: 600,
+  fontSize: "0.9375rem",
+  px: { xs: 1, sm: 1.5 },
+  minHeight: 40,
+  textDecoration: "none",
+  borderBottom: "3px solid transparent",
+  "&:hover": { borderBottomColor: tokens.onPlateMuted },
+  "&[aria-current='page']": { borderBottomColor: tokens.onPlate },
+  "&.Mui-focusVisible, &:focus-visible": {
+    outline: `2px solid ${tokens.onPlate}`,
+    outlineOffset: 2,
+  },
+} as const;
+
+const NavLink = createLink(ButtonBase);
 
 export function AppShell() {
   const { state, signOut } = useAuth();
   const signedIn = state.status === "signedIn";
+  const path = useRouterState({ select: (s) => s.location.pathname });
+  // Home is the search page's front door, so both count as "Search".
+  const onSearch = path === "/" || path === "/search";
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <AppBar
-        position="static"
-        color="inherit"
-        elevation={0}
-        sx={{ borderBottom: 1, borderColor: "divider" }}
+      <Box
+        component="a"
+        href="#main"
+        sx={{
+          position: "absolute",
+          left: 8,
+          top: -48,
+          zIndex: 10,
+          bgcolor: tokens.ground,
+          color: tokens.ink,
+          px: 2,
+          py: 1,
+          "&:focus": { top: 8 },
+        }}
       >
+        Skip to content
+      </Box>
+      <Box component="header" sx={{ bgcolor: tokens.plate, color: tokens.onPlate }}>
         <Container>
-          <Toolbar disableGutters sx={{ gap: 1, minHeight: 72 }}>
+          <Stack
+            direction="row"
+            sx={{
+              alignItems: "center",
+              flexWrap: "wrap",
+              columnGap: 3,
+              minHeight: { xs: 56, md: 72 },
+              borderBottom: `1px solid ${tokens.plateDeep}`,
+            }}
+          >
             <TextLink
               to="/"
               underline="none"
-              color="inherit"
-              sx={{ mr: "auto", display: "flex", alignItems: "center", gap: 1.5 }}
+              sx={{
+                mr: "auto",
+                py: 1,
+                color: tokens.onPlate,
+                display: "flex",
+                flexDirection: "column",
+                lineHeight: 1,
+                "&:focus-visible": { outline: `2px solid ${tokens.onPlate}`, outlineOffset: 2 },
+              }}
             >
+              {/* Proposal: the place name in Devanagari above the Roman, as on Kathmandu's
+                  street signs. The archive team should confirm the spelling and script. */}
               <Box
-                aria-hidden
+                component="span"
+                lang="ne"
                 sx={{
-                  display: "grid",
-                  placeItems: "center",
-                  width: 36,
-                  height: 36,
-                  borderRadius: 1,
-                  bgcolor: "primary.main",
-                  color: "primary.contrastText",
+                  fontSize: { xs: "0.9375rem", md: "1.0625rem" },
+                  fontWeight: 600,
+                  color: tokens.onPlateMuted,
+                  lineHeight: 1.3,
                 }}
               >
-                <WaveformIcon fontSize="small" />
+                स्वयम्भू
               </Box>
-              <Typography variant="h3" component="span">
+              <Box
+                component="span"
+                sx={{
+                  fontSize: { xs: "1.25rem", md: "1.4375rem" },
+                  fontWeight: 800,
+                  letterSpacing: "-0.01em",
+                }}
+              >
                 Swayambhu Stories
-              </Typography>
+              </Box>
             </TextLink>
-            <nav aria-label="Main">
-              <Stack direction="row" spacing={1}>
-                <ButtonLink to="/" activeOptions={{ exact: true }} activeProps={activeNav}>
-                  Archive
-                </ButtonLink>
-                <ButtonLink to="/about" activeProps={activeNav}>
+            <Box component="nav" aria-label="Main" sx={{ mx: { xs: -1, sm: 0 } }}>
+              <Stack direction="row" sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                <NavLink to="/" sx={navItemSx} aria-current={onSearch ? "page" : undefined}>
+                  Search
+                </NavLink>
+                <NavLink to="/interviews" sx={navItemSx} activeProps={{ "aria-current": "page" }}>
+                  Interviews
+                </NavLink>
+                <NavLink to="/about" sx={navItemSx} activeProps={{ "aria-current": "page" }}>
                   About
-                </ButtonLink>
+                </NavLink>
                 {signedIn && state.role === "admin" ? (
-                  <ButtonLink to="/admin" activeProps={activeNav}>
+                  <NavLink to="/admin" sx={navItemSx} activeProps={{ "aria-current": "page" }}>
                     Upload &amp; review
-                  </ButtonLink>
+                  </NavLink>
                 ) : null}
                 {signedIn ? (
-                  <Button color="inherit" onClick={() => void signOut()}>
+                  <ButtonBase sx={navItemSx} onClick={() => void signOut()}>
                     Sign out
-                  </Button>
+                  </ButtonBase>
                 ) : null}
               </Stack>
-            </nav>
-          </Toolbar>
+            </Box>
+          </Stack>
         </Container>
-      </AppBar>
-      <Box component="main" sx={{ flex: 1 }}>
+      </Box>
+      <Box component="main" id="main" tabIndex={-1} sx={{ flex: 1, outline: "none" }}>
         <Outlet />
       </Box>
-      <Box component="footer" sx={{ borderTop: 1, borderColor: "divider", py: 3 }}>
-        <Container sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+      <Box component="footer" sx={{ borderTop: 1, borderColor: "divider", py: 3, mt: 8 }}>
+        <Container
+          sx={{
+            display: "flex",
+            flexWrap: "wrap",
+            justifyContent: "space-between",
+            gap: 2,
+          }}
+        >
           <Typography variant="body2" color="text.secondary">
             Swayambhu Stories · A living oral-history archive
           </Typography>
