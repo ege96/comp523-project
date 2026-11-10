@@ -28,7 +28,7 @@ export function AdminPage() {
           <Stack spacing={1}>
             <Typography variant="h1">Upload &amp; review</Typography>
             <Typography color="text.secondary" sx={{ maxWidth: "60ch" }}>
-              Add recordings, check their transcripts, then publish them for visitors.
+              Add interviews, check their transcripts, then publish them for visitors.
             </Typography>
           </Stack>
           <Stack spacing={1.5} sx={{ alignItems: { sm: "flex-end" } }}>
@@ -39,12 +39,12 @@ export function AdminPage() {
             ) : null}
             {/* Below lg the upload form sits under the list, so offer a way straight to it. */}
             <Button
-              href="#add-recording"
+              href="#add-interview"
               variant="outlined"
               startIcon={<UploadIcon aria-hidden />}
               sx={{ display: { lg: "none" }, alignSelf: { xs: "flex-start", sm: "flex-end" } }}
             >
-              Add a recording
+              Add an interview
             </Button>
           </Stack>
         </Stack>
@@ -56,8 +56,8 @@ export function AdminPage() {
             alignItems: "start",
           }}
         >
-          {/* On a phone the recordings come first: checking on them is the common visit. */}
-          <Box id="add-recording" sx={{ order: { xs: 2, lg: 1 }, scrollMarginTop: 16 }}>
+          {/* On a phone the interviews come first: checking on them is the common visit. */}
+          <Box id="add-interview" sx={{ order: { xs: 2, lg: 1 }, scrollMarginTop: 16 }}>
             <UploadCard />
           </Box>
           <Box sx={{ order: { xs: 1, lg: 2 } }}>

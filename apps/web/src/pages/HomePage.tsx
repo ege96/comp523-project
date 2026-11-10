@@ -70,7 +70,7 @@ export function HomePage() {
           <Box>
             <Typography variant="h2">Recently added</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-              Recordings with timestamped transcripts. English translations are shown when
+              Interviews with timestamped transcripts. English translations are shown when
               available.
             </Typography>
           </Box>

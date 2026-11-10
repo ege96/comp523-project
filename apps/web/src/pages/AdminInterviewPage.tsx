@@ -54,7 +54,7 @@ export function AdminInterviewPage() {
           underline="hover"
           sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, alignSelf: "flex-start" }}
         >
-          <ArrowBackIcon fontSize="small" aria-hidden /> All recordings
+          <ArrowBackIcon fontSize="small" aria-hidden /> All interviews
         </TextLink>
         {/* A failed refresh keeps showing what was loaded; the admin may be mid-edit. */}
         {data ? (
@@ -99,13 +99,16 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
               ? "Public: visitors can find it"
               : "Private: only admins can see it"}
           </Typography>
-          <TextLink
-            to="/interviews/$interviewId"
-            params={{ interviewId: interview.id }}
-            variant="body2"
-          >
-            See it as a visitor would
-          </TextLink>
+          {/* Published: the next step below has this link as a button already. */}
+          {queue === "published" ? null : (
+            <TextLink
+              to="/interviews/$interviewId"
+              params={{ interviewId: interview.id }}
+              variant="body2"
+            >
+              See it as a visitor would
+            </TextLink>
+          )}
         </Stack>
       </Stack>
 
@@ -218,7 +221,7 @@ function NextStep({
           body: (
             <>
               <Typography>
-                The transcript is done. Visitors can&apos;t see this recording until it&apos;s
+                The transcript is done. Visitors can&apos;t see this interview until it&apos;s
                 published.
               </Typography>
               <Typography variant="body2" color="text.secondary">
@@ -617,7 +620,9 @@ function WhoCanSee({ interview, queue }: { interview: InterviewDetail; queue: Qu
               as in progress.
             </Typography>
           ) : null}
-          <PublishButton interview={interview} />
+          <Box sx={{ alignSelf: "flex-start" }}>
+            <PublishButton interview={interview} />
+          </Box>
         </>
       ) : null}
     </Panel>

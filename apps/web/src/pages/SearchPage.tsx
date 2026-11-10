@@ -84,8 +84,11 @@ function Filters({ params }: { params: SearchParams }) {
       return typeof value === "string" && value ? value : undefined;
     };
     const interviewee = text("interviewee");
-    const from = text("from");
-    const to = text("to");
+    // Years typed the wrong way round still mean the span between them.
+    const years = [text("fromYear"), text("toYear")];
+    if (years[0] && years[1] && years[0] > years[1]) years.reverse();
+    const from = years[0] && `${years[0]}-01-01`;
+    const to = years[1] && `${years[1]}-12-31`;
     void navigate({
       to: "/search",
       search: {
@@ -179,20 +182,24 @@ function Filters({ params }: { params: SearchParams }) {
           <Typography variant="body2" component="p" sx={{ fontWeight: 600 }}>
             Recording date
           </Typography>
-          <TextField
-            name="from"
-            type="date"
-            label="From"
-            defaultValue={params.from ?? ""}
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
-          <TextField
-            name="to"
-            type="date"
-            label="To"
-            defaultValue={params.to ?? ""}
-            slotProps={{ inputLabel: { shrink: true } }}
-          />
+          {/* Proposal: whole years, like the rest of the app's dates; most are known only
+              to the year. The URL keeps full dates, so a shared link still works. */}
+          <Stack direction="row" spacing={1.5}>
+            <TextField
+              name="fromYear"
+              label="From year"
+              defaultValue={params.from?.slice(0, 4) ?? ""}
+              slotProps={{ htmlInput: { inputMode: "numeric", pattern: "[0-9]{4}", maxLength: 4 } }}
+              sx={{ flex: 1, minWidth: 0 }}
+            />
+            <TextField
+              name="toYear"
+              label="To year"
+              defaultValue={params.to?.slice(0, 4) ?? ""}
+              slotProps={{ htmlInput: { inputMode: "numeric", pattern: "[0-9]{4}", maxLength: 4 } }}
+              sx={{ flex: 1, minWidth: 0 }}
+            />
+          </Stack>
           <FormControlLabel
             control={<Checkbox name="undated" defaultChecked={params.undated ?? false} />}
             label="Also show undated interviews"

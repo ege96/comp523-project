@@ -5,9 +5,9 @@ import Typography from "@mui/material/Typography";
 
 import type { Moment } from "../api/schemas";
 import { formatClock, formatRecordedOn } from "../format";
-import { tokens } from "../theme";
 import { PlayIcon } from "./icons";
 import { InterviewChips } from "./InterviewChips";
+import { Pill } from "./Pill";
 import { ButtonLink } from "./links";
 import { LinePair } from "./LinePair";
 import { visuallyHidden } from "./visuallyHidden";
@@ -44,26 +44,12 @@ export function MomentCard({ moment }: { moment: Moment }) {
               {details.join(" · ")}
             </Typography>
           </Box>
-          <Box
-            component="span"
-            sx={{
-              flexShrink: 0,
-              px: 1.25,
-              py: 0.25,
-              borderRadius: 999,
-              bgcolor: "#f3e2df",
-              color: tokens.plateDeep,
-              fontSize: "0.8125rem",
-              fontWeight: 600,
-              fontVariantNumeric: "tabular-nums",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <Pill tone="terracotta" numeric>
             <Box component="span" sx={visuallyHidden}>
               From{" "}
             </Box>
             {start} – {formatClock(moment.end_ms)}
-          </Box>
+          </Pill>
         </Stack>
         <InterviewChips interview={interview} />
         <Stack component="blockquote" spacing={1.25} sx={{ m: 0 }}>

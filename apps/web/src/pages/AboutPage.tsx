@@ -95,9 +95,8 @@ export function AboutPage() {
             <Question id="moments" title="What is a moment?">
               <Typography>
                 A moment is a short stretch of an interview, about a minute long, with the time it
-                starts. Press the time to play the recording from there, or open the whole
-                interview. Inside an interview, use “Find in transcript” to look for other places a
-                word comes up.
+                starts. Choose “Open at this moment” to play the interview from there. Inside an
+                interview, use “Find in transcript” to look for other places a word comes up.
               </Typography>
             </Question>
 

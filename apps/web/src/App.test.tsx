@@ -217,7 +217,14 @@ describe("search", () => {
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("combobox", { name: "Interviewee" }).textContent).toBe("Interviewee 7");
     expect(screen.getByRole("checkbox", { name: /undated/ })).toHaveProperty("checked", true);
-    await userEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.getByRole("textbox", { name: "From year" })).toHaveProperty("value", "2001");
+    // Years typed the wrong way round become the span between them.
+    await userEvent.type(screen.getByRole("textbox", { name: "To year" }), "1990");
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ from: "1990-01-01", to: "2001-12-31" });
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Clear" }));
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ q: "x" });
     });

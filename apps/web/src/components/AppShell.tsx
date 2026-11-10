@@ -13,6 +13,8 @@ import { TextLink } from "./links";
 // Terracotta nav lettering; the current page is underlined.
 const navItemSx = {
   color: tokens.plate,
+  // A <button> (Sign out) does not inherit the font on its own; links do.
+  fontFamily: "inherit",
   fontWeight: 600,
   fontSize: "0.9375rem",
   px: { xs: 1, sm: 1.5 },

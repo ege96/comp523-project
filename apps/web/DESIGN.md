@@ -122,11 +122,13 @@ None. Separation by 1px `rule` lines and outlined paper panels (as in the mockup
 - **Search box:** paper field with a terracotta Search button inset; terracotta outline on focus.
 - **Catalogue (InterviewList):** outlined panel with a tinted header row on wide screens, one detail line on phones; title link stretched over the row.
 - **Moment:** outlined card as in the search mockup: Georgia title, details, a soft time pill ("0:44 – 1:40"), line pairs, then an "Open at this moment" button.
-- **Admin stage pill:** soft pill naming where a recording is: Needs attention (amber), Processing (neutral), Not published (terracotta tint), Published (green). Same words as the admin tabs.
+- **Pill (`components/Pill.tsx`):** the one soft pill for status and times, in four tones that mean the same thing everywhere. Amber: needs a look or not public (Needs attention, Private). Neutral: in progress (Processing, Transcript in progress). Terracotta tint: times and Not published. Green: Published.
+- **Admin stage pill:** names where an interview is, in the same words as the admin tabs.
 - **Next step panel:** outlined panel with a 4px left edge in the stage colour; "Next step" label, one heading, a sentence or two, and at most two buttons.
 - **Processing checklist:** one line per step in plain words with a mark (tick, spinner, empty ring, red "!"); a failed step says how many tries and folds the technical text.
 - **Transcript editor:** a panel on the recording's page. Toolbar (filters, Find and replace, "Edit the line playing", "Follow the recording"), then the recording (video at 360px when the file is video, else audio) with a Jump-to row beside a bordered box of lines that scrolls on its own (max 72vh), so the recording stays next to the text. The line playing gets the `hereTint` row with a 3px terracotta left edge.
-- **Recording date:** Year, Month and Day fields, each optional from the right.
+- **Recording date:** Year, Month and Day fields, each optional from the right. Search filters by From year / To year (Proposal); the URL keeps full dates.
+- **Words:** an "interview" is the archive item everywhere, public and admin; "recording" means only the audio or video. A changed line is "Corrected" on both sides.
 - **LinePair:** original above, English below in `ink-muted`; whichever half is alone leads at full size.
 - **Transcript line:** time button (terracotta text; filled when current, row tinted), line pair, "Corrected" caption.
 

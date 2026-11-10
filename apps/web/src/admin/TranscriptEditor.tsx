@@ -1,7 +1,6 @@
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Chip from "@mui/material/Chip";
 import Collapse from "@mui/material/Collapse";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
@@ -560,14 +559,9 @@ function LineView({
           </Typography>
         ) : null}
         {edited ? (
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-            <Chip size="small" variant="outlined" label="Edited" />
-            {line.edited_by ? (
-              <Typography variant="caption" color="text.secondary">
-                by {line.edited_by}
-              </Typography>
-            ) : null}
-          </Stack>
+          <Typography variant="caption" color="text.secondary">
+            {line.edited_by ? `Corrected by ${line.edited_by}` : "Corrected"}
+          </Typography>
         ) : null}
       </Stack>
       <Button

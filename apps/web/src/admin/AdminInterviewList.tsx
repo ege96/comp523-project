@@ -58,7 +58,7 @@ export function AdminInterviewList({
     <Paper component="section" aria-labelledby="queue-title">
       <Stack spacing={1.5} sx={{ px: { xs: 2, sm: 3 }, pt: { xs: 2, sm: 3 } }}>
         <Typography id="queue-title" variant="h2">
-          Your recordings
+          Your interviews
         </Typography>
         <Tabs
           value={view ?? "all"}
@@ -67,7 +67,7 @@ export function AdminInterviewList({
           }}
           variant="scrollable"
           allowScrollButtonsMobile
-          aria-label="Show recordings that are"
+          aria-label="Show interviews that are"
           sx={{
             borderBottom: 1,
             borderColor: "divider",
@@ -85,13 +85,13 @@ export function AdminInterviewList({
       <Box sx={{ px: { xs: 2, sm: 3 }, pb: { xs: 2, sm: 3 } }}>
         {isError ? (
           <Alert severity="error" sx={{ mt: 2 }}>
-            Your recordings couldn&apos;t be loaded. Please try again.
+            Your interviews couldn&apos;t be loaded. Please try again.
           </Alert>
         ) : isPending ? (
           <Skeleton variant="rounded" height={320} sx={{ mt: 2 }} />
         ) : data.items.length === 0 ? (
           <Typography color="text.secondary" sx={{ py: 4 }}>
-            {view ? QUEUE_EMPTY[view] : "No recordings yet. Add one to start."}
+            {view ? QUEUE_EMPTY[view] : "No interviews yet. Add one to start."}
           </Typography>
         ) : (
           <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0 }}>

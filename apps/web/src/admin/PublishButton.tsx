@@ -32,7 +32,7 @@ export function PublishButton({
     : interview.visibility;
   const titleId = `publish-title-${interview.id}`;
   return (
-    <Stack spacing={0.5} sx={{ alignItems: fullWidth ? "stretch" : "flex-start" }}>
+    <Stack spacing={0.5} sx={{ alignItems: "stretch" }}>
       {visibility === "public" ? (
         <Button
           variant="outlined"

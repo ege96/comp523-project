@@ -29,7 +29,7 @@ export const QUEUE_FILTERS = {
 export const QUEUE_EMPTY = {
   attention: "Nothing needs your attention.",
   processing: "Nothing is being processed right now.",
-  ready: "Every finished recording is published.",
+  ready: "Every finished interview is published.",
   published: "Nothing has been published yet.",
 } as const satisfies Record<Queue, string>;
 

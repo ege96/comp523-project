@@ -230,7 +230,7 @@ function AboutRecording({ interview }: { interview: InterviewDetail }) {
         component="h2"
         sx={{ borderBottom: 1, borderColor: "divider", pb: 0.5 }}
       >
-        About this recording
+        About this interview
       </Typography>
       {interview.description ? (
         <Typography variant="body2">{interview.description}</Typography>

@@ -34,7 +34,7 @@ export function InterviewsPage() {
         <Stack spacing={1}>
           <Typography variant="h1">All interviews</Typography>
           <Typography color="text.secondary">
-            Every public recording, newest first. To find a moment inside them,{" "}
+            Every public interview, newest first. To find a moment inside them,{" "}
             <TextLink to="/">search the transcripts</TextLink>.
           </Typography>
         </Stack>

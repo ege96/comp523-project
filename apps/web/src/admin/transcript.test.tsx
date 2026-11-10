@@ -147,8 +147,7 @@ describe("transcript editor", () => {
       { url: `${base}/segments/0`, body: { english_text: "Corrected english A" } },
     ]);
     expect(screen.getByText("Corrected english A")).toBeTruthy();
-    expect(screen.getByText("Edited")).toBeTruthy();
-    expect(screen.getByText("by a@example.org")).toBeTruthy();
+    expect(screen.getByText("Corrected by a@example.org")).toBeTruthy();
   });
 
   it("undoes an edit with the machine text and refuses empty text", async () => {

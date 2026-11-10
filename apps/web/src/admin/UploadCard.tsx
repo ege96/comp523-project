@@ -136,7 +136,7 @@ export function UploadCard() {
     <Paper sx={{ p: { xs: 2, sm: 3 } }}>
       <Stack component="form" spacing={2.5} noValidate onSubmit={submit}>
         <Stack spacing={0.5}>
-          <Typography variant="h2">Add a recording</Typography>
+          <Typography variant="h2">Add an interview</Typography>
           <Typography variant="body2" color="text.secondary">
             Only the file and a title are needed. Everything else can be added later.
           </Typography>
