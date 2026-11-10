@@ -350,6 +350,11 @@ describe("faster editing", () => {
       "value",
       "Machine original A draft",
     );
+    // Leaving the page with a draft asks first; saying no stays.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("link", { name: /All interviews/ }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/didn't save will be lost/));
+    expect(screen.getByRole("textbox", { name: "Original" })).toBeTruthy();
     // Cancel throws it away on purpose.
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText(/Unsaved changes/)).toBeNull();

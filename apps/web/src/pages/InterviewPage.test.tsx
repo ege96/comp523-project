@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { interviewDetail, interviewSummary, segments } from "../test/fixtures";
-import { renderApp, stubApi } from "../test/renderApp";
+import { fakeAuthClient, renderApp, stubApi } from "../test/renderApp";
 
 afterEach(() => {
   cleanup();
@@ -272,5 +272,25 @@ describe("interview viewer: links", () => {
     const all = await screen.findByRole("link", { name: "All interviews" });
     expect(all.getAttribute("href")).toBe("/interviews");
     expect(screen.queryByRole("link", { name: "Back to results" })).toBeNull();
+  });
+});
+
+describe("interview viewer: admins", () => {
+  it("offers admins a way to the edit page, and visitors nothing", async () => {
+    const routes = {
+      "/api/auth/me": { body: { id: 1, email: "someone@example.org" } },
+      [detailPath]: { body: interviewDetail },
+      [segmentsPath]: { body: segments },
+    };
+    stubApi(routes);
+    renderApp(`/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+    const edit = await screen.findByRole("link", { name: "Edit in Upload & review" });
+    expect(edit.getAttribute("href")).toBe(`/admin/interviews/${id}`);
+
+    cleanup();
+    stubApi(routes);
+    renderApp(`/interviews/${id}`);
+    expect(await screen.findByRole("heading", { name: "Test interview A" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Edit in Upload & review" })).toBeNull();
   });
 });

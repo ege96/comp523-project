@@ -14,6 +14,7 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Typography from "@mui/material/Typography";
 import { useForm } from "@tanstack/react-form";
 import { useQuery } from "@tanstack/react-query";
+import { useBlocker } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type KeyboardEvent, type SubmitEvent } from "react";
 
 import { ApiError } from "../api/client";
@@ -39,6 +40,8 @@ type Player = ReturnType<typeof useSegmentPlayer>;
 /** Where to go after a line closes: stay put, or open the next or previous line. */
 type Move = "next" | null;
 type Draft = { original: string; english: string };
+
+const LEAVE_WITH_DRAFTS = "Leave this page? Lines you changed but didn't save will be lost.";
 
 /** Which lines the editor shows. */
 export type LineFilter = "all" | "corrected" | "missing";
@@ -89,6 +92,13 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
   // Unsaved text per line, so opening another line, changing the filter or replacing text
   // never throws away what was typed. Cancel discards it on purpose.
   const [drafts, setDrafts] = useState<ReadonlyMap<number, Draft>>(new Map());
+  // Typed but unsaved text would be lost by leaving the page, so ask first.
+  useBlocker({
+    shouldBlockFn: ({ current, next }) =>
+      current.pathname !== next.pathname && !window.confirm(LEAVE_WITH_DRAFTS),
+    enableBeforeUnload: drafts.size > 0,
+    disabled: drafts.size === 0,
+  });
   // The line whose Edit button gets focus back once its form closes.
   const refocus = useRef<number | null>(null);
   const [saved, setSaved] = useState(false);
@@ -384,8 +394,12 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
             gap: { xs: 2, md: 3 },
             gridTemplateColumns: {
               xs: "minmax(0, 1fr)",
+              // A video gets close to half the width so faces are visible while checking
+              // lines; audio needs only a slim column for its controls.
               md: interview.media
-                ? `${isVideo ? "360px" : "280px"} minmax(0, 1fr)`
+                ? isVideo
+                  ? "minmax(0, 5fr) minmax(0, 6fr)"
+                  : "280px minmax(0, 1fr)"
                 : "minmax(0, 1fr)",
             },
             alignItems: "start",
@@ -404,7 +418,9 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
                   width: 1,
                   display: "block",
                   borderRadius: 1,
-                  ...(isVideo ? { bgcolor: "#000", aspectRatio: "16 / 9" } : { height: 40 }),
+                  ...(isVideo
+                    ? { bgcolor: "#000", aspectRatio: "auto 16 / 9", maxHeight: "70vh" }
+                    : { height: 40 }),
                 }}
               />
               {jumpTo}

@@ -18,10 +18,10 @@ import { ApiError, interviewQueries } from "../api/client";
 import type { InterviewDetail, Segment } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
 import { toVtt } from "../captions";
-import { ArrowBackIcon, SearchIcon } from "../components/icons";
+import { ArrowBackIcon, EditIcon, SearchIcon } from "../components/icons";
 import { InterviewChips } from "../components/InterviewChips";
 import { LinePair } from "../components/LinePair";
-import { TextLink } from "../components/links";
+import { ButtonLink, TextLink } from "../components/links";
 import { formatClock, formatRecordedOn } from "../format";
 import { searchOrigin } from "../searchOrigin";
 import { theme, tokens } from "../theme";
@@ -38,7 +38,8 @@ export function InterviewPage() {
   const navigate = route.useNavigate();
   // The results this was opened from, for "Back to results"; none on a direct visit.
   const origin = searchOrigin(useLocation());
-  const { viewer } = useAuth();
+  const { viewer, state: auth } = useAuth();
+  const isAdmin = auth.status === "signedIn" && auth.role === "admin";
   // Both requests start together rather than one waiting on the other.
   const interview = useQuery({
     ...interviewQueries.detail(viewer, interviewId),
@@ -119,14 +120,38 @@ export function InterviewPage() {
 
   return (
     <Container sx={{ pt: { xs: 2, md: 4 } }}>
-      <TextLink
-        {...(origin ? { to: "/search", search: origin } : { to: "/interviews" })}
-        underline="hover"
-        sx={{ display: "inline-flex", alignItems: "center", gap: 0.5, mb: { xs: 1.5, md: 2 } }}
+      <Stack
+        direction="row"
+        spacing={2}
+        useFlexGap
+        sx={{
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          mb: { xs: 1.5, md: 2 },
+        }}
       >
-        <ArrowBackIcon fontSize="small" aria-hidden />
-        {origin ? "Back to results" : "All interviews"}
-      </TextLink>
+        <TextLink
+          {...(origin ? { to: "/search", search: origin } : { to: "/interviews" })}
+          underline="hover"
+          sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
+        >
+          <ArrowBackIcon fontSize="small" aria-hidden />
+          {origin ? "Back to results" : "All interviews"}
+        </TextLink>
+        {/* Admins reading the public page can jump straight to fixing it. */}
+        {isAdmin ? (
+          <ButtonLink
+            to="/admin/interviews/$interviewId"
+            params={{ interviewId }}
+            variant="outlined"
+            size="small"
+            startIcon={<EditIcon aria-hidden />}
+          >
+            Edit in Upload &amp; review
+          </ButtonLink>
+        ) : null}
+      </Stack>
       <Stack spacing={1} sx={{ mb: { xs: 2, md: 4 }, maxWidth: "48rem" }}>
         <Typography
           variant="h1"
@@ -138,26 +163,32 @@ export function InterviewPage() {
         <InterviewChips interview={interview.data} />
       </Stack>
       {/* Phones: one column, the player pinned while the transcript scrolls (audio only: a
-          pinned video would cover the text). Wide screens: player and details in a pinned
-          side column. The aside dissolves into the column on phones so the player can pin. */}
+          pinned video would cover the text). Wide screens: player and details in a side
+          column as tall as the transcript, where only the player stays pinned, so long
+          details never end up out of reach below the screen. The aside dissolves into the
+          column on phones so the player can pin. */}
       <Box
         sx={{
           display: { xs: "block", md: "grid" },
           columnGap: 6,
-          gridTemplateColumns: "minmax(0, 20rem) minmax(0, 1fr)",
+          // A video gets about half the width (more on wide screens) so faces and gestures
+          // are visible; audio needs only a slim column.
+          gridTemplateColumns: video
+            ? { md: "minmax(0, 1fr) minmax(0, 1fr)", lg: "minmax(0, 7fr) minmax(0, 6fr)" }
+            : "minmax(0, 20rem) minmax(0, 1fr)",
           alignItems: "start",
         }}
       >
         <Box
           component="aside"
           aria-label="Recording"
-          sx={{ display: { xs: "contents", md: "block" }, position: "sticky", top: 24 }}
+          sx={{ display: { xs: "contents", md: "block" }, alignSelf: "stretch" }}
         >
           <Box
             ref={measurePin}
             sx={{
-              position: { xs: pinned ? "sticky" : "static", md: "static" },
-              top: 0,
+              position: { xs: pinned ? "sticky" : "static", md: "sticky" },
+              top: { xs: 0, md: 24 },
               zIndex: 2,
               mx: { xs: -2, sm: -3, md: 0 },
             }}
@@ -334,7 +365,16 @@ function Player({
           key={attempt}
           {...props}
           playsInline
-          sx={{ display: "block", width: "100%", bgcolor: "black" }}
+          sx={{
+            display: "block",
+            width: "100%",
+            // The file's own shape once it loads (a phone video may be upright), 16:9 until
+            // then so the page doesn't jump.
+            aspectRatio: "auto 16 / 9",
+            // Never taller than most of the screen, so the transcript stays reachable.
+            maxHeight: "70vh",
+            bgcolor: "black",
+          }}
         >
           {captions.map((track) => (
             <CaptionTrack key={track.label} {...track} />
