@@ -384,8 +384,12 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
             gap: { xs: 2, md: 3 },
             gridTemplateColumns: {
               xs: "minmax(0, 1fr)",
+              // A video gets close to half the width so faces are visible while checking
+              // lines; audio needs only a slim column for its controls.
               md: interview.media
-                ? `${isVideo ? "360px" : "280px"} minmax(0, 1fr)`
+                ? isVideo
+                  ? "minmax(0, 5fr) minmax(0, 6fr)"
+                  : "280px minmax(0, 1fr)"
                 : "minmax(0, 1fr)",
             },
             alignItems: "start",
@@ -404,7 +408,9 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
                   width: 1,
                   display: "block",
                   borderRadius: 1,
-                  ...(isVideo ? { bgcolor: "#000", aspectRatio: "16 / 9" } : { height: 40 }),
+                  ...(isVideo
+                    ? { bgcolor: "#000", aspectRatio: "16 / 9", maxHeight: "70vh" }
+                    : { height: 40 }),
                 }}
               />
               {jumpTo}
