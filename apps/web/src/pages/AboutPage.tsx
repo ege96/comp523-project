@@ -81,17 +81,21 @@ export function AboutPage() {
             <Question id="searching" title="How do I search?">
               <Typography>
                 Type a few words about what you&apos;re looking for, such as a place, a festival or
-                a ritual, and press Search. Searches in English work best for now. You can narrow
-                the results by the interview&apos;s language, the interviewee and the recording
-                date.
+                a ritual, and press Search. Searches in English work best for now. Results are
+                moments from the transcripts. Interviews whose title, interviewee or details match
+                your words are listed above them. You can narrow the results by language (any
+                language heard in the interview), interviewee, recording date, and audio or video.
+                &ldquo;All interviews&rdquo; lists every public interview with the same filters,
+                without a search.
               </Typography>
             </Question>
 
             <Question id="moments" title="What is a moment?">
               <Typography>
-                A moment is a short stretch of an interview, about a minute long, with the time it
-                starts. Choose its “Open at” button to play the interview from there. Inside an
-                interview, use “Find in transcript” to look for other places a word comes up.
+                A moment is a line of an interview&apos;s transcript, with the time it starts and
+                the lines around it. Choose its “Open at” link to play the interview from there.
+                Inside an interview, use “Find in transcript” to look for other places a word comes
+                up.
               </Typography>
             </Question>
 
