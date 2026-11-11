@@ -2,7 +2,7 @@
 
 Shared by the worker (all three) and the API (embedding search queries). Callers only see
 these interfaces. Which implementation runs is a config choice
-(`factory.py`), so a provider can change without touching pipeline code (D-011..D-013).
+(`factory.py`), so a provider can change without touching pipeline code.
 Model names, keys and dimensions always come from config, never from code.
 """
 

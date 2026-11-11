@@ -1,9 +1,9 @@
-"""Reading interviews, their transcripts and their media (Proposal: paths and shapes).
+"""Reading interviews, their transcripts and their media.
 
 Anonymous visitors and admins use the same routes. What each may see is decided only by
 `visibility.visible_to`: a Private interview is a 404 for visitors, exactly like one that
 doesn't exist, so its existence isn't revealed. Visitors see Public interviews whatever their
-status (D-008), with the status and translation state to label them.
+status, with the status and translation state to label them.
 """
 
 import uuid
@@ -81,7 +81,7 @@ class InterviewDetail(InterviewSummary):
     media: Media | None
     # Which step is running or why it failed. Admins only; always None for visitors.
     status_detail: str | None
-    # What primary_language is made of (D-004), for the admin's language correction.
+    # What primary_language is made of, for the admin's language correction.
     # Admins only; always None for visitors.
     language_detected: str | None
     # The detected language's share of the speech whose language is known, 0 to 1.
@@ -169,7 +169,7 @@ def list_interviews(
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
     one status and/or visibility (for the admin's work queue: "not published" is done and
-    private) and matching the same metadata filters as search (F7). The filters only narrow
+    private) and matching the same metadata filters as search. The filters only narrow
     what `summary_query` already allows, so a visitor asking for private interviews gets
     none."""
     query = summary_query(viewer).where(*where)
@@ -273,7 +273,7 @@ def get_media(
     scope: Annotated[media_urls.Scope, Query()] = "public",
 ) -> FileResponse:
     """Stream a media file from a link made by the interview detail route. Supports HTTP
-    Range requests, so players can seek without downloading the whole file (NF5).
+    Range requests, so players can seek without downloading the whole file.
 
     A visitor's link stops working as soon as its interview is made Private."""
     if not media_urls.is_valid(settings, media_id, expires, scope, sig):

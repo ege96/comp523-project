@@ -70,7 +70,7 @@ export function useSegmentPlayer(interviewId: string) {
     onEnded: () => {
       setPlaying(null);
     },
-    // Media links are signed and expire (P-024): fetch the interview again for a fresh one.
+    // Media links are signed and expire: fetch the interview again for a fresh one.
     onError: () => {
       setPlaying(null);
       void queryClient.invalidateQueries({

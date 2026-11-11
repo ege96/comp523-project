@@ -172,8 +172,7 @@ export function FilterPanel({
           <Typography variant="body2" component="p" sx={{ fontWeight: 600 }}>
             Recording date
           </Typography>
-          {/* Proposal: whole years, like the rest of the app's dates; most are known only
-              to the year. The URL keeps full dates, so a shared link still works. */}
+          {/* The form edits whole-year bounds. */}
           <Stack direction="row" spacing={1.5}>
             <TextField
               name="fromYear"

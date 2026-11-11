@@ -1,11 +1,7 @@
 import type { InterviewDetail, InterviewSummary, Job } from "../api/schemas";
 import { retryStepFor } from "./rerun";
 
-/**
- * Proposal: the admin home sorts recordings into what an admin does next, in plain words, not
- * processing states. Each view is one API filter (status and/or visibility), and the views
- * don't overlap: each interview is in exactly the one `queueOf` names.
- */
+// Queue filters must partition interviews the same way as queueOf.
 export const QUEUES = ["attention", "processing", "ready", "published"] as const;
 export type Queue = (typeof QUEUES)[number];
 
@@ -77,7 +73,7 @@ const STEPS = [
 export type Step = { key: string; label: string; job: Job };
 
 /**
- * One line per step, from its latest job (jobs come oldest first), in the worker's order.
+ * One line per step, taking the last job in ascending job-ID order.
  * Steps that were never queued are left out, so an English recording has no translation step.
  */
 export function processingSteps(jobs: readonly Job[]): Step[] {
@@ -93,11 +89,7 @@ export function processingSteps(jobs: readonly Job[]): Step[] {
   return [...known, ...other];
 }
 
-/**
- * "20 October 2026": a plain date, without the time of day nobody needs here.
- * Proposal: it is the UTC calendar day, so every admin sees the same date for an interview
- * wherever their computer's clock is set.
- */
+// Use the UTC calendar date consistently across admin time zones.
 export function formatAdded(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -110,12 +102,7 @@ export function formatAdded(iso: string): string {
 /** One thing visitors get once it's published: there now, or not yet. */
 export type VisitorItem = { text: string; available: boolean };
 
-/**
- * Proposal: what publishing gives visitors right now, from the interview's current state, so the
- * publish dialog never promises a recording, transcript or search result that isn't there yet.
- * A finished interview stays findable while search re-indexes it; for a stopped one, the jobs
- * (when loaded) say whether indexing got done before it stopped.
- */
+// Use processing jobs to estimate publication availability.
 export function visitorGets(
   interview: Pick<InterviewDetail, "status" | "translation_status" | "media">,
   jobs?: readonly Job[],

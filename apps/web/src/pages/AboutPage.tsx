@@ -7,12 +7,6 @@ import type { ReactNode } from "react";
 import { TextLink } from "../components/links";
 import { Pill } from "../components/Pill";
 
-/**
- * About & Help for visitors (documentation plan §3): what the archive is, then an FAQ with
- * the question as a heading and the short answer first. The answers describe how the app
- * works today. Anything only the archive team can say (who runs it, who to contact) sits in a
- * box marked Pending until they send the wording; citing has a suggested format, marked as such.
- */
 export function AboutPage() {
   return (
     <Container sx={{ pt: { xs: 3, md: 5 } }}>
@@ -142,8 +136,6 @@ export function AboutPage() {
             </Question>
 
             <Question id="cite" title="How do I cite an interview?">
-              {/* Proposal: a suggested format from the fields every interview page shows, until
-                  the archive team sends the one they want (then drop the pending label). */}
               <Typography>
                 Until the archive team confirms its preferred format, you can use this one, filling
                 in the parts in braces from the interview&apos;s page:

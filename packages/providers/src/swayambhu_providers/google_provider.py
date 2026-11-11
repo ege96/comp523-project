@@ -1,4 +1,4 @@
-"""Google Cloud Translation, basic edition (NMT) over the v2 REST API with an API key (D-011).
+"""Google Cloud Translation, basic edition (NMT) over the v2 REST API with an API key.
 
 Verify that Nepal Bhasa ("new") is still listed and check output quality before relying on
 it; a failed or empty translation must leave the segment untranslated, not invent text.

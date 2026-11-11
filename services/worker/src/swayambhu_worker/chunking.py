@@ -1,4 +1,4 @@
-"""Grouping display segments into search chunks (P-014). Sizes are first guesses for the
+"""Grouping display segments into search chunks. Sizes are first guesses for the
 evaluation harness to tune; a new strategy gets a new name (`swayambhu_core.models.CHUNKER`)
 so both can be compared."""
 

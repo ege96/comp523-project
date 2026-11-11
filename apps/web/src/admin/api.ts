@@ -89,7 +89,7 @@ async function patchInterview(token: string | null, id: string, update: Intervie
   if (!res.ok) throw new ApiError(res.status, url);
 }
 
-/** Publish (Public) or hide (Private) an interview. Allowed at any time (D-008). */
+/** Publish (Public) or hide (Private) an interview. Allowed at any time. */
 export function useSetVisibility() {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
@@ -107,7 +107,7 @@ export function useSetVisibility() {
 }
 
 /**
- * Correct an interview's details after upload (D-004). Only the fields given change; null
+ * Correct an interview's details after upload. Only the fields given change; null
  * clears an optional one, and `language: null` goes back to the detected language.
  */
 export function useUpdateInterview(interviewId: string) {
@@ -241,7 +241,7 @@ export function useRetranslate(interviewId: string) {
   });
 }
 
-/** Transcribing again was refused because this many lines have corrections (P-013). */
+/** Transcribing again was refused because this many lines have corrections. */
 export class CorrectionsWouldBeLost extends Error {
   constructor(readonly correctedLines: number) {
     super(`${String(correctedLines)} corrected lines would be replaced`);

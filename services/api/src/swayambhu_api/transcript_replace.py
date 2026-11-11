@@ -1,4 +1,4 @@
-"""Find and replace across one interview's transcript (Proposal: path and shapes).
+"""Find and replace across one interview's transcript.
 
 Speech recognition tends to get the same name or place wrong every time it comes up, so an
 admin can fix every occurrence at once instead of line by line. Each changed line is stored

@@ -1,4 +1,4 @@
-"""Admin accounts. Per D-005 there is one signed-in role: a row in `admins` is an admin."""
+"""Admin accounts. There is one signed-in role: a row in `admins` is an admin."""
 
 from dataclasses import dataclass
 from typing import Protocol

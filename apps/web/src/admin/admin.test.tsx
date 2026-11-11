@@ -208,7 +208,7 @@ describe("admin page", () => {
     };
     stubApi(routes);
     renderApp(`/admin/interviews/${privateOne.id}`, fakeAuthClient({ signedIn: true }));
-    // While processing, publishing is under "Who can see it" (D-008 allows it).
+    // While processing, publishing is under "Who can see it".
     expect(await screen.findByRole("heading", { name: "Being processed" }, SLOW)).toBeTruthy();
     expect(await screen.findByText("The processing steps couldn't be loaded.")).toBeTruthy();
     stubApi({ ...routes, [`/api/interviews/${privateOne.id}`]: { status: 500, body: {} } });

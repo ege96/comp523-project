@@ -155,7 +155,7 @@ def test_resumed_upload_queues_processing_and_publishing_shows_it_to_visitors(
     ]  # fmt: skip
     assert client.get(f"/api/interviews/{uuid.uuid4()}/jobs").status_code == 404
 
-    # Admins can list what's processing; visitors see nothing until it's published (D-008).
+    # Admins can list what's processing; visitors see nothing until it's published.
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
     assert client.get("/api/interviews?status=processing").json()["total"] == 1
     assert client.get("/api/interviews?status=done").json()["total"] == 0

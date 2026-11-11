@@ -1,4 +1,4 @@
-"""Admins correcting transcripts (Proposal: paths and shapes).
+"""Admins correcting transcripts.
 
 An edit goes into `segments.original_edited` / `english_edited`; the machine output stays
 untouched beside it, so an edit can always be undone by sending `null`. Saving queues the

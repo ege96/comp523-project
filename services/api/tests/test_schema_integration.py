@@ -84,7 +84,7 @@ def test_anonymous_sees_only_public_interviews_and_segments(session: Session) ->
 
 
 def test_publish_does_not_depend_on_status(session: Session) -> None:
-    """D-008: a Public interview is visible while still processing."""
+    """A Public interview is visible while still processing."""
     interview_id = add_interview(session, "In progress", "public")
     status = session.scalar(
         select(InterviewRow.status).where(InterviewRow.id == interview_id, visible_to(None))

@@ -1,4 +1,4 @@
-"""Media storage behind an interface (D-007). The provider is still undecided (Q-01).
+"""Media storage interfaces and local filesystem implementation.
 
 Keys are opaque, `/`-separated paths such as `interviews/<id>/original.mp3`. Only this
 module turns a key into a location, so swapping the local disk for object storage means

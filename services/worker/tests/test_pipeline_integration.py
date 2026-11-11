@@ -261,7 +261,7 @@ def test_edited_transcripts_are_not_replaced(
         first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
         assert session.scalar(first) == "सच्याइएको"
 
-    # After the admin confirms losing the corrections (P-013), it transcribes again.
+    # After the admin confirms losing the corrections, it transcribes again.
     with new_session() as session:
         jobs.enqueue(session, "retranscribe", interview_id)
         session.commit()

@@ -4,7 +4,7 @@ import { API_BASE_URL } from "../config";
 
 /**
  * What the upload API accepts as tus `Upload-Metadata` besides the file's name and type
- * (D-004: only the title is required). Undefined fields are left out.
+ * Undefined fields are left out.
  */
 export type RecordingMetadata = {
   title: string;
@@ -24,7 +24,7 @@ export type UploadHandle = {
 };
 
 // The API holds one PATCH body in memory and refuses chunks over 64 MiB. Smaller chunks
-// also lose less on a dropped connection, which matters for slow links (NF3).
+// also lose less on a dropped connection, which matters for slow links.
 const CHUNK_BYTES = 16 * 1024 * 1024;
 // A flaky link gets about a minute and a half of retries before the upload reports an error.
 const RETRY_DELAYS_MS = [0, 1_000, 3_000, 5_000, 10_000, 20_000, 30_000];

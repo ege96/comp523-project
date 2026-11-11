@@ -1,4 +1,4 @@
-"""The worker's job queue: a Postgres table (`jobs`) instead of a separate broker (Q-18).
+"""The worker's job queue: a Postgres table (`jobs`) instead of a separate broker.
 
 None of these functions commit; the caller owns the transaction. Commit right after `claim`
 so other workers see the job as taken.

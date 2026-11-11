@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderSettings(BaseSettings):
-    """AI provider settings shared by the API and the worker (D-011..D-013).
+    """AI provider settings shared by the API and the worker.
 
     Each service's settings class inherits these, so both read the same environment
     variables. That matters for embeddings: the API embeds search queries with the model the

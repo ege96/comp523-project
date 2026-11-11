@@ -1,4 +1,4 @@
-"""Database tables, as SQLAlchemy ORM models (Proposal P-010), shared by the API and worker.
+"""Database tables, as SQLAlchemy ORM models, shared by the API and worker.
 
 The API's Alembic migrations (`services/api/.../migrations/versions`) create these tables; an
 API integration test fails if the models and the migrations drift apart. Keep ORM rows inside
@@ -46,7 +46,7 @@ class Base(DeclarativeBase):
 
 
 class AdminRow(Base):
-    """D-005: the only signed-in role. Anonymous visitors have no row.
+    """The only signed-in role. Anonymous visitors have no row.
 
     An admin is invited by email; auth_provider/auth_subject are filled in on their first
     verified sign-in and are what identify them afterwards (Firebase uid today).
@@ -71,15 +71,15 @@ class AdminRow(Base):
 
 
 # Status-like columns are text + CHECK rather than Postgres ENUMs: a value can be added or
-# dropped with an ordinary migration. Proposal P-012, see notes/schema_proposal.md.
+# dropped with an ordinary migration.
 VISIBILITIES = ("public", "private")
-# No manual review step: a finished transcript is "done" (amends D-008, Eric 2026-11-05).
+# No manual review step: a finished transcript is "done".
 STATUSES = ("processing", "done", "failed")
 TRANSLATION_STATUSES = ("not_needed", "pending", "done", "failed")
 DATE_PRECISIONS = ("year", "month", "day")
 MEDIA_KINDS = ("original", "playback")
 REPRESENTATIONS = ("original", "english")
-# retranscribe: transcribe again, replacing admins' corrections (they confirmed it, P-013).
+# retranscribe: transcribe again, replacing admins' corrections (after confirmation).
 JOB_KINDS = ("transcribe", "translate", "index", "playback", "retranslate", "retranscribe")
 JOB_STATES = ("queued", "running", "done", "failed")
 
@@ -95,7 +95,7 @@ def _created_at() -> Mapped[datetime]:
 class LanguageRow(Base):
     """Languages an interview or segment can be in. Seeded by migration 0002 with en, ne, new.
 
-    A table rather than a CHECK so a new language is a row, not a schema change (NF8), and the
+    A table rather than a CHECK so a new language is a row, not a schema change, and the
     filter dropdown can list them with their names.
     """
 
@@ -119,7 +119,7 @@ class IntervieweeRow(Base):
 
 
 class InterviewRow(Base):
-    """One recording and its metadata (D-004). Status and visibility are independent (D-008).
+    """One recording and its metadata. Status and visibility are independent.
 
     Every query that returns interviews, segments, search hits or media must filter through
     `visibility.visible_to(viewer)`.
@@ -148,7 +148,7 @@ class InterviewRow(Base):
     description: Mapped[str | None] = mapped_column(Text)
     consent_note: Mapped[str | None] = mapped_column(Text)
 
-    # The main language: detected by the worker, confirmed or overridden by an admin (D-004).
+    # The main language: detected by the worker, confirmed or overridden by an admin.
     # Every language heard in the recording is in interview_languages.
     language_detected: Mapped[str | None] = mapped_column(ForeignKey("languages.code"))
     language_detected_confidence: Mapped[float | None] = mapped_column(Float)
@@ -202,7 +202,7 @@ class InterviewLanguageRow(Base):
 
 class MediaFileRow(Base):
     """A stored media object. `storage_key` is opaque to everything but the storage
-    interface (D-007); URLs are minted per request after the visibility check, never stored.
+    interface; URLs are minted per request after the visibility check, never stored.
     """
 
     __tablename__ = "media_files"
@@ -284,7 +284,7 @@ class SegmentRow(Base):
     )
 
 
-# The chunking strategy the worker builds and search reads (P-014). Rows from any other
+# The chunking strategy the worker builds and search reads. Rows from any other
 # strategy are kept for comparison only.
 CHUNKER = "time-60s-v1"
 
@@ -340,7 +340,7 @@ class ChunkEmbeddingRow(Base):
 
 
 class JobRow(Base):
-    """A unit of worker work on one interview (Proposal for Q-18: a Postgres table, no broker).
+    """A unit of worker work on one interview.
 
     Workers claim queued jobs with `FOR UPDATE SKIP LOCKED`, so several can run at once.
     A running job whose `heartbeat_at` is older than the worker's lease is reclaimed, which

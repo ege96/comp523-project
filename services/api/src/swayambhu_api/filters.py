@@ -1,4 +1,4 @@
-"""Metadata filters shared by search and the interview list (Proposal: parameter names).
+"""Metadata filters shared by search and the interview list.
 
 Each filter only narrows a query that already applies `visible_to`, so no filter can widen
 what a viewer may see.

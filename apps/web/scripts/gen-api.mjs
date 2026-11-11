@@ -1,4 +1,4 @@
-// Regenerates src/api/schema.gen.ts from the FastAPI app's OpenAPI schema (D-009).
+// Regenerates src/api/schema.gen.ts from the FastAPI app's OpenAPI schema.
 // Run `npm run gen:api` after changing an API route or response model. Needs uv.
 // Node instead of a shell one-liner so it also works from Windows' cmd.
 import { execFileSync } from "node:child_process";

@@ -14,21 +14,6 @@ import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { trackSearchOrigins } from "./searchOrigin";
 
-// Proposal: URL paths. The handoff names screens (§5), not URLs.
-//   /                          home: search box and recently added interviews
-//   /search?q=&language=&interviewee=&from=&to=&undated=&media=
-//                              search results (transcript moments, and interviews whose
-//                              details match)
-//   /interviews?page=&language=&interviewee=&from=&to=&undated=&media=
-//                              all interviews, most recently added first, with the same filters
-//   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
-//   /about                     About & Help: what the archive is, and an FAQ for visitors
-//   /signin                    admin sign-in
-//   /admin?view=&page=         add recordings; recordings sorted by what to do next, view =
-//                              attention|processing|ready|published (admins only)
-//   /admin/interviews/$interviewId
-//                              one recording: next step, processing, details, transcript and
-//                              publishing (admins only)
 // Only the home page is in the main bundle; the rest load on demand, and `defaultPreload:
 // "intent"` fetches a page's code when the pointer rests on a link to it.
 

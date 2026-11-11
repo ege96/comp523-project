@@ -309,7 +309,7 @@ function Player({
     lastMs.current = ms;
     onTime(ms);
   };
-  // Media links are signed and expire (P-024); the API issues a fresh one on each load.
+  // Media links are signed and expire; the API issues a fresh one on each load.
   const props = {
     ref,
     src,
@@ -526,7 +526,7 @@ const translationMissing = {
 
 type View = "both" | "original" | "english";
 
-// Full names where there is room; at 320px all three must still fit (Proposal).
+// Full names where there is room; at 320px all three must still fit.
 const TAB_LABELS = {
   wide: { both: "Original + English", original: "Original", english: "English translation" },
   narrow: { both: "Both", original: "Original", english: "English" },

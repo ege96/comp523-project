@@ -112,7 +112,7 @@ function filterQuery(base: Record<string, string>, filters: InterviewFilters): U
 const SEARCH_PAGE_SIZE = 20;
 
 export const searchQueries = {
-  // Pages until the API says there's no more; it never reports a total (handoff: no counts).
+  // Pages until the API says there's no more; it never reports a total.
   moments: (viewer: Viewer, params: SearchParams) =>
     infiniteQueryOptions({
       queryKey: ["search", viewer.key, params],

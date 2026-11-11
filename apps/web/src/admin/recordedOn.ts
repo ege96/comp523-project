@@ -1,7 +1,3 @@
-/**
- * A recording date as three parts, so an admin can give just a year, or a month and year,
- * without knowing the YYYY-MM-DD format the API takes (D-004: only as precise as is known).
- */
 export type DateParts = { year: string; month: string; day: string };
 
 export const NO_DATE: DateParts = { year: "", month: "", day: "" };
@@ -27,7 +23,7 @@ export function partsFromText(text: string): DateParts {
   return { year, month: month && String(Number(month)), day: day && String(Number(day)) };
 }
 
-/** The API's form: "", "2019", "2019-05" or "2019-05-28". Assumes `datePartsError` passed. */
+// Serialize the known date parts. An empty string represents an unset form field.
 export function partsToText({ year, month, day }: DateParts): string {
   const y = year.trim();
   if (!y) return "";

@@ -14,12 +14,7 @@ import { CheckIcon } from "../components/icons";
 import { useSetVisibility } from "./api";
 import { visitorGets } from "./workflow";
 
-/**
- * Publish (Private -> Public) or Unpublish. Publishing is allowed at any time, even while
- * processing (D-008); the dialog says what visitors get right now, from the interview's state.
- * Publishing asks first, because it can expose a sensitive recording (handoff §6).
- * Unpublishing happens at once: it only hides.
- */
+// Confirm before making a recording public. Publishing can happen during processing.
 export function PublishButton({
   interview,
   jobs,
@@ -73,7 +68,6 @@ export function PublishButton({
           Try again.
         </Typography>
       ) : null}
-      {/* Proposal: dialog wording (not yet in the decisions log). */}
       <Dialog
         open={confirming}
         onClose={() => {

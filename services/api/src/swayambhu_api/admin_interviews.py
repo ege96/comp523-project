@@ -1,5 +1,5 @@
 """Admin-only interview routes: publish or hide an interview, correct its details, and follow
-or re-run its processing (Proposal: paths and shapes). Recordings arrive through `uploads` (tus).
+or re-run its processing. Recordings arrive through `uploads` (tus).
 
 Every route here takes `CurrentAdmin`, so anonymous visitors get a 401 and signed-in
 non-admins a 403 before anything else runs.
@@ -32,11 +32,11 @@ router = APIRouter()
 
 
 class InterviewUpdate(BaseModel):
-    """Only the fields sent change. For the optional details (D-004), null means unknown."""
+    """Only the fields sent change. For the optional details, null means unknown."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    # D-008: publishing is allowed at any time, even while processing; there is no review step.
+    # Publishing is allowed at any time, even while processing; there is no review step.
     visibility: Literal["public", "private"] | None = None
     title: str | None = Field(default=None, min_length=1, max_length=500)
     # An existing interviewee, or the name of a new one (names aren't unique, so a name
@@ -45,7 +45,7 @@ class InterviewUpdate(BaseModel):
     interviewee_name: str | None = Field(default=None, min_length=1, max_length=500)
     # YYYY, YYYY-MM or YYYY-MM-DD; null: the date is unknown.
     recorded_on: str | None = Field(default=None, pattern=DATE_PATTERN)
-    # The admin's confirmed original language (D-004); null goes back to the detected one.
+    # The admin's confirmed original language; null goes back to the detected one.
     language: str | None = None
 
     @model_validator(mode="after")
@@ -168,7 +168,7 @@ class Rerun(BaseModel):
     # translate: new machine English (corrections to it are kept), then search again.
     # index: search again. playback: a new copy for the player.
     step: Literal["transcribe", "translate", "index", "playback"]
-    # Transcribe again even though admins corrected lines; the corrections are lost (P-013).
+    # Transcribe again even though admins corrected lines; the corrections are lost.
     replace_corrections: bool = False
 
 

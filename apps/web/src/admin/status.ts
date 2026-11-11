@@ -4,7 +4,6 @@ import type { InterviewSummary, Job } from "../api/schemas";
 
 type Status = InterviewSummary["status"];
 
-/** Admin-facing names for processing status (no review step; amends D-008). Visitors see `transcriptLabel` instead. */
 export const STATUS_LABELS = {
   processing: "Processing",
   done: "Done",
@@ -37,7 +36,7 @@ export function jobLabel(job: Pick<Job, "kind">): string {
 }
 
 /**
- * Proposal: the languages an admin can pick at upload. They match the API's seeded
+ * The languages an admin can pick at upload. They match the API's seeded
  * `languages` table; the API has no route listing them yet, and refuses unknown codes.
  */
 export const UPLOAD_LANGUAGES = [

@@ -8,12 +8,6 @@ import type { SearchParams } from "../api/client";
 import { tokens } from "../theme";
 import { SearchIcon } from "./icons";
 
-/**
- * The search field: a paper field with the terracotta Search button inset.
- * Uncontrolled on purpose: the query only matters on submit, so typing re-renders nothing.
- * (A single field doesn't need TanStack Form; D-010 applies to the upload metadata form.)
- * `filters`: on the search page, the filters already applied, kept when the words change.
- */
 export function SearchBox({
   defaultValue = "",
   large = false,

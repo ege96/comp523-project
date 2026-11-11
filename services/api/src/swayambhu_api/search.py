@@ -1,19 +1,19 @@
-"""Searching transcripts for timestamped moments (Proposal: paths, shapes and ranking).
+"""Searching transcripts for timestamped moments.
 
-Two searches run on every query and are merged with reciprocal rank fusion (Q-14):
-- keyword: Postgres full-text search over display segments (P-016), with English stemming on
+Transcript search merges available keyword and semantic hits with reciprocal rank fusion:
+- keyword: Postgres full-text search over display segments, with English stemming on
   English text and the `simple` configuration on original text, so a Devanagari query
   matches Nepali or Nepal Bhasa words directly;
 - semantic: the query's embedding against the stored chunk embeddings of the configured model
-  (both the original and English representations), by exact cosine distance (P-015).
+  (both the original and English representations), by exact cosine distance.
 
-A moment is one search chunk (P-014). A keyword hit in a chunk anchors the moment at the
+A moment is one search chunk. A keyword hit in a chunk anchors the moment at the
 matching line; a semantic-only hit starts at the chunk's first line. A keyword hit in an
 interview that hasn't been indexed yet is its own moment, so visitors find what is ready
-(D-008). Results are ranked, never counted: there is no total, only whether more exist.
+Results are ranked, never counted: there is no total, only whether more exist.
 
 Interviews whose details (title, description, people, place) match the query's words come
-back beside the moments (F5), since such a match has no timestamp of its own.
+back beside the moments, since such a match has no timestamp of its own.
 
 Every query joins `interviews` and filters with `visible_to`, like the rest of the API.
 """
@@ -92,7 +92,6 @@ def get_embedder() -> Embedder | None:
 
 
 EmbedderDep = Annotated[Embedder | None, Depends(get_embedder)]
-
 
 Source = Literal["keyword", "semantic"]
 
@@ -206,7 +205,7 @@ def _keyword_hits(
 def _detail_matches(
     session: DbSession, viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]]
 ) -> list[InterviewSummary]:
-    """Interviews whose details contain the query's words (F5). The details are a few short
+    """Interviews whose details contain the query's words. The details are a few short
     fields per interview, so they are matched on the fly rather than indexed."""
     details = func.concat_ws(
         " ",

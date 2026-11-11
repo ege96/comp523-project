@@ -1,7 +1,7 @@
-"""Who can see which interviews: the one place that decides (Proposal P-017).
+"""Who can see which interviews: the one place that decides.
 
 Visibility is Public or Private and is enforced here, on the server. Admins see everything
-(D-005); anonymous visitors see Public interviews whatever their status (D-008). Every query
+Anonymous visitors see Public interviews whatever their status. Every query
 that returns interviews, segments, search hits or media joins `interviews` and filters with
 `visible_to`, so no route writes its own visibility check.
 """

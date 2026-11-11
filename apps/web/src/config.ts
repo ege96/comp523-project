@@ -5,7 +5,7 @@ export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? "";
 
 export type FirebaseWebConfig = { apiKey: string; authDomain: string; projectId: string };
 
-// Proposal: the Firebase *web* config comes from VITE_FIREBASE_API_KEY and
+// The Firebase *web* config comes from VITE_FIREBASE_API_KEY and
 // VITE_FIREBASE_PROJECT_ID (VITE_FIREBASE_AUTH_DOMAIN optional) at build time. These are public
 // by design (they name the project; they are not secrets). Unset means sign-in is unavailable.
 function readFirebaseConfig(): FirebaseWebConfig | null {

@@ -2,10 +2,8 @@
 
 Steps commit early, and the runner commits at the end; sessions use expire_on_commit=False.
 Languages come from the transcriber when it reports them, else from the translator's
-detection (from text, so Nepal Bhasa may read as Nepali: admins confirm it, D-004).
-Each step reads what the previous one stored, so a failed step is retried on its own
-without redoing (and re-paying for) the earlier ones. Each step replaces its own output,
-so running it twice is harmless.
+detection (from text, so Nepal Bhasa may read as Nepali: admins confirm it).
+Steps read persisted outputs so a retry can restart the failed step.
 """
 
 import hashlib
@@ -48,7 +46,6 @@ _LANGUAGE_ALIASES = {
     "nepal bhasa": "new",
     "nepalbhasa": "new",
 }
-
 
 PLAYBACK_FAILED = "Playback copy failed"
 
@@ -205,7 +202,7 @@ def retranscribe(
     heartbeat: Heartbeat,
 ) -> None:
     """Transcribe again although admins corrected lines: they confirmed losing the
-    corrections (P-013), say after fixing the language."""
+    corrections, say after fixing the language."""
     transcribe(session, interview_id, providers, store, heartbeat, replace_edits=True)
 
 
@@ -294,7 +291,7 @@ def retranslate(
 
 
 def give_up_translating(session: Session, interview_id: uuid.UUID, error: str) -> None:
-    """English is allowed to fail (F13): index what there is and leave the gap visible."""
+    """English is allowed to fail: index what there is and leave the gap visible."""
     interview = _interview(session, interview_id)
     interview.translation_status = "failed"
     interview.status_detail = f"English translation failed. {error}"
@@ -493,12 +490,12 @@ def _failed(interview_id: uuid.UUID, session: Session, detail: str) -> None:
 
 
 def give_up_transcribing(session: Session, interview_id: uuid.UUID, error: str) -> None:
-    """No transcript: show it to admins as Failed (D-016)."""
+    """No transcript: show it to admins as Failed."""
     _failed(interview_id, session, f"Transcription failed. {error}")
 
 
 def give_up_indexing(session: Session, interview_id: uuid.UUID, error: str) -> None:
-    """The transcript exists but search can't find it: Failed, so admins retry it."""
+    """Record the indexing failure without removing the transcript."""
     _failed(interview_id, session, f"Search indexing failed. {error}")
 
 

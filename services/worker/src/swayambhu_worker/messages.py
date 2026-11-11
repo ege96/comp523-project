@@ -1,6 +1,6 @@
 """Plain-language failure messages for admins, each with what to do next.
 
-Admins aren't programmers (documentation plan §4), so they see these on the interview page
+Admins aren't programmers, so they see these on the interview page
 instead of the provider's raw response. The raw error is still kept in the job's
 `last_error` and the worker log, for the operator.
 """

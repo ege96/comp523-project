@@ -19,7 +19,6 @@ afterEach(() => {
 const id = interviewDetail.id;
 const base = `/api/interviews/${id}`;
 
-// Obviously made-up lines (project rule: no mockup text).
 const nepali: AdminSegment = {
   seq: 0,
   start_ms: 0,

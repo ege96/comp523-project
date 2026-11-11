@@ -32,7 +32,7 @@ export type DetailsValues = {
   language: string;
 };
 
-/** Only what the admin changed, so a save never overwrites another admin's change. */
+// Build the patch from fields that differ from the supplied interview.
 export function changedFields(interview: InterviewDetail, value: DetailsValues): InterviewUpdate {
   const update: InterviewUpdate = {};
   const title = value.title.trim();

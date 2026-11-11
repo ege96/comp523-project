@@ -1,4 +1,4 @@
-"""Expiring, signed links to media files (Proposal).
+"""Expiring, signed links to media files.
 
 A browser's <audio>/<video> element can't send the sign-in token, so the interview detail
 response, which has already checked visibility, hands out a link that proves it: the media

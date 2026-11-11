@@ -1,4 +1,4 @@
-"""OpenAI transcription and embeddings over the REST API (D-012, D-013).
+"""OpenAI transcription and embeddings over the REST API.
 
 Verify model names, request limits and supported languages against OpenAI's docs before
 production use; they change often.

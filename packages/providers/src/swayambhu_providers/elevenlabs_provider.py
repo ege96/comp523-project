@@ -1,4 +1,4 @@
-"""ElevenLabs Scribe speech-to-text over the REST API (D-013 alternative).
+"""ElevenLabs Scribe speech-to-text over the REST API.
 
 Verify the endpoint, model id and language coverage against ElevenLabs' docs before
 production use.

@@ -1,4 +1,4 @@
-"""Cutting a recording into short pieces at its quietest moments, with FFmpeg (P-014, D-013).
+"""Cutting a recording into short pieces at its quietest moments, with FFmpeg.
 
 Each piece is transcribed on its own, so segment timestamps come from the cut points and
 don't depend on whether a provider returns timestamps. Thresholds are first guesses, to be
@@ -151,7 +151,7 @@ def has_video(path: Path) -> bool:
 def make_playback(
     source: Path, target_stem: Path, heartbeat: Callable[[], None] | None = None
 ) -> tuple[Path, str]:
-    """A copy every browser plays and can seek in while streaming (NF5): H.264/AAC MP4 at
+    """A copy every browser plays and can seek in while streaming: H.264/AAC MP4 at
     up to 720p for video, AAC M4A for audio. `+faststart` puts the index first, so playback
     starts before the whole file arrives. Returns the file and its content type."""
     common = ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-map_metadata", "-1"]

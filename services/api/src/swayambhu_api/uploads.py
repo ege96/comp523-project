@@ -1,4 +1,4 @@
-"""Resumable recording uploads over the tus protocol (Proposal; https://tus.io), served by
+"""Resumable recording uploads using the tus protocol (https://tus.io), served by
 tuspyserver.
 
 An admin's browser (tus-js-client) or script (tuspy, or curl) creates an upload at
@@ -9,7 +9,7 @@ the media, so a finished one is moved into place rather than copied. Only then i
 interview created and its processing queued, so an abandoned upload leaves no interview
 behind; the worker deletes abandoned uploads after `UPLOAD_RETENTION_DAYS`.
 
-Every tus route is admin-only (D-005). The final PATCH's response carries the new interview's
+Every tus route is admin-only. The final PATCH's response carries the new interview's
 id in `Upload-Interview-Id`.
 """
 
@@ -44,8 +44,7 @@ DATE_PATTERN = r"^\d{4}(-\d{2}(-\d{2})?)?$"
 
 
 class UploadMetadata(BaseModel):
-    """What the admin knows about a recording, sent as tus `Upload-Metadata` (D-004: only the
-    title is required). tus sends every value as a string."""
+    """Recording metadata received as strings in the tus Upload-Metadata header."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -108,7 +107,7 @@ def _check_references(session: Session, metadata: UploadMetadata) -> None:
 def require_upload_admin(request: Request, admin: CurrentAdmin, settings: SettingsDep) -> Admin:
     """The admin check on every tus route, plus the limits that keep a pod's memory bounded.
 
-    tuspyserver holds one PATCH body in memory before writing it, so each chunk is capped.
+    Validate the declared chunk size before tuspyserver streams it into storage.
     Its creation-with-upload and concatenation extensions read whole bodies at once, so
     they're refused: create empty, then PATCH.
     """

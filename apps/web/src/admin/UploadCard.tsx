@@ -51,11 +51,6 @@ function fileError(file: File | null): string | undefined {
   return undefined;
 }
 
-/**
- * Upload a recording with its metadata (D-004: only the title is required). The file goes
- * up in resumable chunks; the interview appears once the last byte is in, Private, and
- * processing starts on its own.
- */
 export function UploadCard() {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();

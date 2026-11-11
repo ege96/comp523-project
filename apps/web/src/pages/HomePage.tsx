@@ -14,8 +14,6 @@ import { TextLink } from "../components/links";
 import { Plate } from "../components/Plate";
 import { SearchBox } from "../components/SearchBox";
 
-// Proposal: the home page shows the 5 most recently added interviews; the rest are a click away
-// on /interviews. Search-first: no themes, featured items or recommendations (handoff, settled).
 const RECENT_COUNT = 5;
 const EXAMPLE = "How have festivals changed?";
 
