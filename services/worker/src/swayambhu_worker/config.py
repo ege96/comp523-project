@@ -17,5 +17,7 @@ class WorkerSettings(ProviderSettings):
     media_root: Path = Path("/data/media")
     # A running job whose worker hasn't heartbeated for this long is taken over by another.
     job_lease_seconds: float = 600.0
+    # The longest one FFmpeg or FFprobe run may take before it's stopped and the job retried.
+    media_timeout_seconds: float = 4 * 3600.0
     # Unfinished uploads untouched this long are deleted. Keep the API's value the same.
     upload_retention_days: int = 3

@@ -11,13 +11,12 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import delete, exists, func, or_, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import exists, or_, select, update
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
+from swayambhu_core import jobs, transcripts
+from swayambhu_core.languages import sync_interview_languages
 from swayambhu_core.models import (
     IntervieweeRow,
-    InterviewLanguageRow,
     InterviewRow,
     JobRow,
     LanguageRow,
@@ -26,7 +25,7 @@ from swayambhu_core.models import (
 
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.db import DbSession
-from swayambhu_api.uploads import DATE_PATTERN, recorded_date
+from swayambhu_api.recording_dates import DATE_PATTERN, recorded_date
 
 router = APIRouter()
 
@@ -87,31 +86,6 @@ def _interview(session: Session, interview_id: uuid.UUID) -> InterviewRow:
     return interview
 
 
-def _sync_languages(session: Session, interview: InterviewRow) -> None:
-    """The language filter matches every language heard plus the confirmed one, so a
-    corrected language is findable at once. The worker keeps this up to date the same way."""
-    codes: set[str] = {
-        code
-        for code in session.scalars(
-            select(SegmentRow.language)
-            .where(SegmentRow.interview_id == interview.id, SegmentRow.language.is_not(None))
-            .distinct()
-        )
-        if code
-    }
-    if interview.language_confirmed:
-        codes.add(interview.language_confirmed)
-    session.execute(
-        delete(InterviewLanguageRow).where(InterviewLanguageRow.interview_id == interview.id)
-    )
-    if codes:
-        session.execute(
-            insert(InterviewLanguageRow).values(
-                [{"interview_id": interview.id, "language_code": c} for c in sorted(codes)]
-            )
-        )
-
-
 @router.patch("/api/interviews/{interview_id}", status_code=status.HTTP_204_NO_CONTENT)
 def update_interview(
     interview_id: uuid.UUID, update: InterviewUpdate, _admin: CurrentAdmin, session: DbSession
@@ -147,7 +121,7 @@ def update_interview(
         if update.language is not None and session.get(LanguageRow, update.language) is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Unknown language")
         interview.language_confirmed = update.language
-        _sync_languages(session, interview)
+        sync_interview_languages(session, interview.id)
     session.commit()
 
 
@@ -199,6 +173,8 @@ def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: D
     (409, with `corrected_lines`) unless `replace_corrections` says to go ahead.
     """
     interview = _interview(session, interview_id)
+    # Locked, so a line saved at the same moment is counted here, or refused once this commits.
+    transcripts.lock_interview(session, interview_id)
     kinds = _RERUN_KINDS[body.step]
     if session.scalar(
         select(
@@ -213,9 +189,7 @@ def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: D
     lines = SegmentRow.interview_id == interview_id
     kind: str = body.step
     if body.step == "transcribe":
-        corrected = session.scalar(
-            select(func.count()).where(lines, SegmentRow.edited_at.is_not(None))
-        )
+        corrected = transcripts.corrections_blocking_replacement(session, interview_id, None)
         if corrected and not body.replace_corrections:
             raise HTTPException(
                 status.HTTP_409_CONFLICT,
@@ -237,7 +211,7 @@ def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: D
                 .where(lines, or_(SegmentRow.language.is_(None), SegmentRow.language != "en"))
                 .values(language=interview.language_confirmed)
             )
-            _sync_languages(session, interview)
+            sync_interview_languages(session, interview.id)
         interview.translation_status = "pending"
     if body.step != "playback":
         interview.status = "processing"

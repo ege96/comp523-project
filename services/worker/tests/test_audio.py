@@ -1,4 +1,5 @@
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -91,6 +92,39 @@ def test_playback_copy_of_video_is_mp4_at_most_720p(tmp_path: Path) -> None:
         capture_output=True, text=True, check=True,
     )  # fmt: skip
     assert probe.stdout.strip() == "720"
+
+
+def test_audio_with_cover_art_gets_an_audio_playback_copy(tmp_path: Path) -> None:
+    tone = make_audio(tmp_path / "tone.wav", SPEECH_AND_PAUSES, 3)
+    cover = tmp_path / "cover.jpg"
+    source = tmp_path / "song.m4a"
+    ffmpeg = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    subprocess.run(  # noqa: S603
+        [*ffmpeg, "-f", "lavfi", "-i", "color=red:size=64x64", "-frames:v", "1", str(cover)],
+        check=True,
+    )
+    subprocess.run(  # noqa: S603
+        [
+            *ffmpeg, "-i", str(tone), "-i", str(cover), "-map", "0:a", "-map", "1:v",
+            "-c:a", "aac", "-c:v", "mjpeg", "-disposition:v:0", "attached_pic", str(source),
+        ],
+        check=True,
+    )  # fmt: skip
+    assert not audio.has_video(source)
+    made, content_type = audio.make_playback(source, tmp_path / "playback")
+    assert (made.name, content_type) == ("playback.m4a", "audio/mp4")
+
+
+def test_a_slow_media_command_keeps_the_lease_then_stops_at_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(audio, "HEARTBEAT_SECONDS", 0.1)
+    beats: list[float] = []
+    began = time.monotonic()
+    with audio.supervised(lambda: beats.append(1), 0.5), pytest.raises(audio.MediaTimeoutError):
+        audio._run(["sleep", "30"])
+    assert time.monotonic() - began < 5
+    assert len(beats) >= 2
 
 
 def test_unreadable_audio_is_an_audio_error(tmp_path: Path) -> None:

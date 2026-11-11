@@ -12,6 +12,7 @@ import uuid
 from pathlib import Path
 
 from sqlalchemy.orm import Session
+from swayambhu_core.languages import sync_interview_languages
 from swayambhu_core.models import InterviewRow
 from swayambhu_core.recordings import add_original, original_key
 from swayambhu_core.storage import LocalMediaStore, MediaStore, file_sha256
@@ -27,6 +28,7 @@ def ingest(
     interview = InterviewRow(title=title, language_confirmed=language)
     session.add(interview)
     session.flush()
+    sync_interview_languages(session, interview.id)  # filed under its confirmed language
     key = original_key(interview.id, path.suffix)
     store.put(key, path)
     add_original(

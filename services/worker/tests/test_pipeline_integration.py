@@ -157,9 +157,9 @@ def test_a_recording_becomes_segments_translations_embeddings_and_playback(
         playback = session.scalars(
             select(MediaFileRow).where(MediaFileRow.kind == "playback")
         ).one()
-        assert (playback.content_type, playback.storage_key) == (
-            "audio/mp4", f"interviews/{interview_id}/playback.m4a",
-        )  # fmt: skip
+        assert playback.content_type == "audio/mp4"
+        assert playback.storage_key.startswith(f"interviews/{interview_id}/playback-")
+        assert playback.storage_key.endswith(".m4a")
         with store.local_copy(playback.storage_key) as copy:
             assert copy.stat().st_size == playback.size_bytes
 

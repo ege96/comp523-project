@@ -1,6 +1,6 @@
 import base64
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date
 from pathlib import Path
 
@@ -220,7 +220,76 @@ def test_oversized_chunks_and_bodies_on_create_are_refused(
     )  # fmt: skip
     assert with_body.status_code == 400  # creation-with-upload would read it all into memory
     location = create(client).headers["location"]
-    assert send(client, location, 0, RECORDING[:70_000]).status_code == 413  # over 60 000
-    assert client.head(location, headers=TUS).headers["upload-offset"] == "0"
     assert client.delete(location, headers=TUS).status_code == 204
     assert db_session.scalars(select(JobRow)).all() == []
+
+
+def _chunked(data: bytes) -> Iterator[bytes]:
+    yield data  # a streamed body, so no Content-Length is sent
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("headers", "body", "expected"),
+    [
+        ({}, _chunked, 411),  # no Content-Length
+        ({"Content-Type": "application/octet-stream"}, bytes, 415),
+        ({"Tus-Resumable": "0.2.2"}, bytes, 412),
+        ({}, lambda data: data + RECORDING[: 70_000 - len(data)], 413),  # over 60 000
+    ],
+)
+def test_refused_chunks_leave_the_offset_and_stored_bytes_unchanged(
+    client: TestClient,
+    admin: Admin,
+    settings: Settings,
+    headers: dict[str, str],
+    body: Callable[[bytes], bytes | Iterator[bytes]],
+    expected: int,
+) -> None:
+    location = create(client).headers["location"]
+    assert send(client, location, 0, RECORDING[:1000]).status_code == 204
+    res = client.patch(
+        location,
+        content=body(RECORDING[1000:2000]),
+        headers={**TUS, "Upload-Offset": "1000",
+                 "Content-Type": "application/offset+octet-stream", **headers},
+    )  # fmt: skip
+    assert res.status_code == expected, res.text
+    assert client.head(location, headers=TUS).headers["upload-offset"] == "1000"
+    staged = uploads.uploads_dir(settings) / location.rsplit("/", 1)[1]
+    assert staged.read_bytes() == RECORDING[:1000]
+
+
+@pytest.mark.integration
+def test_finishing_is_retried_after_a_failed_commit_without_losing_the_upload(
+    client: TestClient,
+    admin: Admin,
+    settings: Settings,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    location = create(client).headers["location"]
+    staged = uploads.uploads_dir(settings) / location.rsplit("/", 1)[1]
+    commit = Session.commit
+
+    def fail_once(session: Session) -> None:
+        monkeypatch.setattr(Session, "commit", commit)
+        raise OSError("database went away")
+
+    assert send(client, location, 0, RECORDING[:50_000]).status_code == 204
+    monkeypatch.setattr(Session, "commit", fail_once)
+    failing = TestClient(app, raise_server_exceptions=False)
+    assert send(failing, location, 50_000, RECORDING[50_000:]).status_code == 500
+    assert staged.read_bytes() == RECORDING  # still there to retry
+    assert db_session.scalars(select(InterviewRow)).all() == []
+    assert not (settings.media_root / "interviews").exists() or not any(
+        (settings.media_root / "interviews").rglob("*.mp3")
+    )
+
+    res = send(client, location, len(RECORDING), b"")  # the client's retry
+    assert res.status_code == 204, res.text
+    interview_id = uuid.UUID(res.headers[uploads.INTERVIEW_ID_HEADER])
+    media = db_session.scalars(select(MediaFileRow)).one()
+    assert media.interview_id == interview_id
+    assert (settings.media_root / media.storage_key).read_bytes() == RECORDING
+    assert not staged.exists()

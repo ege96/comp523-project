@@ -49,6 +49,7 @@ def build_runner(settings: WorkerSettings) -> JobRunner:
         providers,
         LocalMediaStore(settings.media_root),
         timedelta(seconds=settings.job_lease_seconds),
+        media_timeout=timedelta(seconds=settings.media_timeout_seconds),
     )
 
 
