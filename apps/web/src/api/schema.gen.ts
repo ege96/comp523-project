@@ -86,7 +86,8 @@ export interface paths {
          * @description Stream a media file from a link made by the interview detail route. Supports HTTP
          *     Range requests, so players can seek without downloading the whole file.
          *
-         *     A visitor's link stops working as soon as its interview is made Private.
+         *     A visitor's link stops working as soon as its interview is made Private. The database
+         *     session is closed before the file is sent, so a long download holds no connection.
          */
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
@@ -107,7 +108,8 @@ export interface paths {
         /**
          * Search
          * @description Transcript moments most relevant to `q`, best first. Paging goes as deep as
-         *     SEARCH_CANDIDATES hits from each search.
+         *     SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
+         *     them again.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -698,6 +700,11 @@ export interface components {
             items: components["schemas"]["Moment"][];
             /** Interviews */
             interviews: components["schemas"]["InterviewSummary"][];
+            /**
+             * More Metadata Matches
+             * @default false
+             */
+            more_metadata_matches: boolean;
             /** Has More */
             has_more: boolean;
             /**

@@ -341,8 +341,8 @@ describe("search", () => {
       "Filtered by: Interviewee 7 · From 2001 · and undated",
     );
     // On phones the filters fold behind a button that says how many are on.
-    // (Whether it is visible depends on the viewport's media queries, so it is found hidden or not.)
-    const toggle = screen.getByRole("button", { name: "Filters · 2 on", hidden: true });
+    // Found by text: jsdom applies the desktop media queries, which hide this button.
+    const toggle = screen.getByText("Filters · 2 on", { selector: "button" });
     await userEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("combobox", { name: "Interviewee" }).textContent).toBe("Interviewee 7");
