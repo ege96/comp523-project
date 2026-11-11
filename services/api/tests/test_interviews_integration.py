@@ -7,6 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
+from starlette.responses import FileResponse
+from starlette.types import Receive, Scope, Send
 from swayambhu_core.models import (
     IntervieweeRow,
     InterviewLanguageRow,
@@ -17,6 +19,7 @@ from swayambhu_core.models import (
 
 from swayambhu_api import media_urls
 from swayambhu_api.config import Settings
+from swayambhu_api.db import get_engine
 from tests.fakes import ADMIN, as_viewer
 
 pytestmark = pytest.mark.integration
@@ -158,6 +161,27 @@ def test_media_links_stream_with_ranges_and_refuse_tampering(
     for path in settings.media_root.rglob("*.m4a"):
         path.unlink()
     assert anonymous.get(url).status_code == 404  # file gone from the volume
+
+
+def test_media_is_sent_after_its_database_connection_is_returned(
+    client: TestClient,
+    interviews: dict[str, InterviewRow],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = get_engine(settings).pool
+    in_use: list[int] = []
+    send_file = FileResponse.__call__
+
+    async def record(self: FileResponse, scope: Scope, receive: Receive, send: Send) -> None:
+        in_use.append(pool.checkedout())
+        await send_file(self, scope, receive, send)
+
+    monkeypatch.setattr(FileResponse, "__call__", record)
+    anonymous = as_viewer(client)
+    url = anonymous.get(f"/api/interviews/{interviews['public'].id}").json()["media"]["url"]
+    assert anonymous.get(url).content == PLAYBACK
+    assert in_use == [0]
 
 
 def test_hiding_an_interview_stops_visitor_media_links_at_once(

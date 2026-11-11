@@ -47,3 +47,16 @@ def test_put_can_move_instead_of_copying(tmp_path: Path) -> None:
     assert not upload.exists()
     with store.local_copy("a/original.wav") as stored:
         assert stored.read_bytes() == b"audio"
+
+
+def test_put_keeping_source_leaves_the_source_for_the_caller_to_delete(tmp_path: Path) -> None:
+    upload = tmp_path / "uploads" / "abc"
+    upload.parent.mkdir()
+    upload.write_bytes(b"audio")
+    store = LocalMediaStore(tmp_path / "media")
+    store.put_keeping_source("a/original.wav", upload)
+    store.put_keeping_source("a/original.wav", upload)  # a retry replaces it
+    assert upload.read_bytes() == b"audio"
+    with store.local_copy("a/original.wav") as path:
+        assert path.read_bytes() == b"audio"
+    assert [p.name for p in path.parent.iterdir()] == ["original.wav"]  # no partials left

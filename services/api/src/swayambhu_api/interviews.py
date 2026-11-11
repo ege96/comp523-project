@@ -28,7 +28,7 @@ from swayambhu_core.storage import LocalMediaStore
 from swayambhu_api import media_urls
 from swayambhu_api.auth import CurrentViewer
 from swayambhu_api.config import Settings, get_settings
-from swayambhu_api.db import DbSession
+from swayambhu_api.db import DbSession, new_session
 from swayambhu_api.filters import InterviewFilters
 from swayambhu_api.visibility import visible_to
 
@@ -266,7 +266,6 @@ def list_segments(
 )
 def get_media(
     media_id: int,
-    session: DbSession,
     settings: SettingsDep,
     expires: Annotated[int, Query()],
     sig: Annotated[str, Query()],
@@ -275,7 +274,8 @@ def get_media(
     """Stream a media file from a link made by the interview detail route. Supports HTTP
     Range requests, so players can seek without downloading the whole file.
 
-    A visitor's link stops working as soon as its interview is made Private."""
+    A visitor's link stops working as soon as its interview is made Private. The database
+    session is closed before the file is sent, so a long download holds no connection."""
     if not media_urls.is_valid(settings, media_id, expires, scope, sig):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This media link is invalid or expired")
     query = select(MediaFileRow).where(MediaFileRow.id == media_id)
@@ -283,7 +283,8 @@ def get_media(
         query = query.join(InterviewRow, InterviewRow.id == MediaFileRow.interview_id).where(
             visible_to(None)
         )
-    media = session.scalar(query)
+    with new_session(settings) as session:
+        media = session.scalar(query)
     if media is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
     try:

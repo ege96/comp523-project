@@ -6,7 +6,9 @@ adding an implementation here and changing config.
 """
 
 import hashlib
+import os
 import shutil
+import uuid
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
@@ -51,6 +53,25 @@ class LocalMediaStore:
         else:
             shutil.copyfile(source, partial)
         partial.replace(target)  # atomic, so readers never see half a file
+
+    def put_keeping_source(self, key: str, source: Path) -> None:
+        """Store `source` under `key`, replacing anything already there, and leave `source`
+        in place, so the caller can delete it once the new object is safely recorded.
+
+        A hard link when both are on the same volume (no copy of a multi-GB file), otherwise
+        a copy."""
+        target = self._path(key)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Unique per call, so two callers storing the same key don't collide.
+        partial = target.with_name(f"{target.name}.{uuid.uuid4().hex}.partial")
+        try:
+            try:
+                os.link(source, partial)
+            except OSError:
+                shutil.copyfile(source, partial)
+            partial.replace(target)  # atomic, so readers never see half a file
+        finally:
+            partial.unlink(missing_ok=True)
 
     @contextmanager
     def local_copy(self, key: str) -> Iterator[Path]:

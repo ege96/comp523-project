@@ -48,7 +48,10 @@ class Settings(ProviderSettings):
     search_excerpt_ms: int = 30_000
     # Largest recording an admin may upload, bounded to protect media storage.
     max_upload_bytes: int = 10 * 1024**3
-    # Maximum declared tus PATCH size. Clients send smaller chunks.
+    # Largest Content-Length a tus PATCH may declare. The body is streamed to disk, not held
+    # in memory; the cap keeps each request short enough to finish within proxy timeouts
+    # and to hold the upload's lock only briefly. Clients send smaller chunks (tus-js-client
+    # `chunkSize`).
     upload_chunk_max_bytes: int = 64 * 1024**2
     # How long an unfinished upload can be resumed before it is deleted. Keep the worker's
     # UPLOAD_RETENTION_DAYS the same: the worker does the deleting.
