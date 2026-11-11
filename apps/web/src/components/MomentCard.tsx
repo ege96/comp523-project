@@ -11,10 +11,6 @@ import { InterviewChips } from "./InterviewChips";
 import { ButtonLink } from "./links";
 import { LinePair } from "./LinePair";
 
-/**
- * One search hit. The spoken words lead: a top row with the time to open at, then the lines
- * (original above English) in the strongest type, then a compact line naming the interview.
- */
 export function MomentCard({ moment }: { moment: Moment }) {
   const { interview, excerpt } = moment;
   const titleId = useId();
@@ -24,7 +20,7 @@ export function MomentCard({ moment }: { moment: Moment }) {
     interview.primary_language?.name,
     recorded ? `Recorded ${recorded}` : null,
   ].filter(Boolean);
-  // Semantic alone means the words themselves may not appear (search API, PR #27).
+  // Semantic alone means the words themselves may not appear.
   const relatedOnly = !moment.matched_by.includes("keyword");
   const start = formatClock(moment.start_ms);
 

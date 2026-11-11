@@ -1,19 +1,19 @@
-"""Searching transcripts for timestamped moments (Proposal: paths, shapes and ranking).
+"""Searching transcripts for timestamped moments.
 
-Two searches run on every query and are merged with reciprocal rank fusion (Q-14):
-- keyword: Postgres full-text search over display segments (P-016), with English stemming on
+Transcript search merges available keyword and semantic hits with reciprocal rank fusion:
+- keyword: Postgres full-text search over display segments, with English stemming on
   English text and the `simple` configuration on original text, so a Devanagari query
   matches Nepali or Nepal Bhasa words directly;
 - semantic: the query's embedding against the stored chunk embeddings of the configured model
-  (both the original and English representations), by exact cosine distance (P-015).
+  (both the original and English representations), by exact cosine distance.
 
-A moment is one search chunk (P-014). A keyword hit in a chunk anchors the moment at the
+A moment is one search chunk. A keyword hit in a chunk anchors the moment at the
 matching line; a semantic-only hit starts at the chunk's first line. A keyword hit in an
 interview that hasn't been indexed yet is its own moment, so visitors find what is ready
-(D-008). Results are ranked, never counted: there is no total, only whether more exist.
+Results are ranked, never counted: there is no total, only whether more exist.
 
 Interviews whose details (title, description, people, place) match the query's words come
-back beside the moments (F5), since such a match has no timestamp of its own.
+back beside the moments, since such a match has no timestamp of its own.
 
 Every query joins `interviews` and filters with `visible_to`, like the rest of the API.
 """
@@ -93,7 +93,6 @@ def get_embedder() -> Embedder | None:
 
 EmbedderDep = Annotated[Embedder | None, Depends(get_embedder)]
 
-
 Source = Literal["keyword", "semantic"]
 
 
@@ -114,6 +113,9 @@ class SearchResults(BaseModel):
     # Interviews whose details (title, description, interviewee, interviewer, location) match
     # the query's words, best first, at most DETAIL_MATCHES. Only on the first page.
     interviews: list[InterviewSummary]
+    # More visible interviews match by their details than `interviews` lists. Only ever true
+    # on the first page.
+    more_metadata_matches: bool = False
     has_more: bool
     # keyword_only: semantic search was unavailable (provider down, slow or not configured),
     # so the results may miss moments that don't use the query's words.
@@ -177,8 +179,28 @@ def _keyword_hits(
         func.ts_rank_cd(SegmentRow.original_tsv, simple_q),
         case((no_english, func.ts_rank_cd(untranslated, english_q))),
     )
-    rows = session.execute(
-        select(SegmentRow.interview_id, SearchChunkRow.id, SegmentRow.seq)
+    # Each moment counts once, at its best line, before the cap, so many matching lines in
+    # one interview can't crowd every other interview out of the candidates.
+    best_in_moment = (
+        func.row_number()
+        .over(
+            partition_by=(
+                SegmentRow.interview_id,
+                SearchChunkRow.id,
+                case((SearchChunkRow.id.is_(None), SegmentRow.seq)),
+            ),
+            order_by=(rank.desc(), SegmentRow.seq),
+        )
+        .label("best_in_moment")
+    )
+    lines = (
+        select(
+            SegmentRow.interview_id,
+            SearchChunkRow.id.label("chunk_id"),
+            SegmentRow.seq,
+            rank.label("rank"),
+            best_in_moment,
+        )
         .join(InterviewRow, InterviewRow.id == SegmentRow.interview_id)
         .outerjoin(
             SearchChunkRow,
@@ -197,7 +219,12 @@ def _keyword_hits(
                 and_(no_english, untranslated.op("@@")(english_q)),
             ),
         )
-        .order_by(rank.desc(), SegmentRow.interview_id, SegmentRow.seq)
+        .subquery()
+    )
+    rows = session.execute(
+        select(lines.c.interview_id, lines.c.chunk_id, lines.c.seq)
+        .where(lines.c.best_in_moment == 1)
+        .order_by(lines.c.rank.desc(), lines.c.interview_id, lines.c.seq)
         .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
@@ -205,9 +232,10 @@ def _keyword_hits(
 
 def _detail_matches(
     session: DbSession, viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]]
-) -> list[InterviewSummary]:
-    """Interviews whose details contain the query's words (F5). The details are a few short
-    fields per interview, so they are matched on the fly rather than indexed."""
+) -> tuple[list[InterviewSummary], bool]:
+    """The best DETAIL_MATCHES interviews whose details contain the query's words, and
+    whether more match. The details are a few short fields per interview, so they are
+    matched on the fly rather than indexed."""
     details = func.concat_ws(
         " ",
         InterviewRow.title,
@@ -227,9 +255,10 @@ def _detail_matches(
         summary_query(viewer)
         .where(*where, or_(english_tsv.op("@@")(english_q), simple_tsv.op("@@")(simple_q)))
         .order_by(rank.desc(), InterviewRow.created_at.desc(), InterviewRow.id)
-        .limit(DETAIL_MATCHES)
+        .limit(DETAIL_MATCHES + 1)
     ).all()
-    return [InterviewSummary.model_validate(to_summary(i, p, lang)) for i, p, lang in rows]
+    found = [InterviewSummary.model_validate(to_summary(i, p, lang)) for i, p, lang in rows]
+    return found[:DETAIL_MATCHES], len(found) > DETAIL_MATCHES
 
 
 def _semantic_hits(
@@ -316,7 +345,8 @@ def search(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SearchResults:
     """Transcript moments most relevant to `q`, best first. Paging goes as deep as
-    SEARCH_CANDIDATES hits from each search."""
+    SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
+    them again."""
     n = settings.search_candidates
     semantic = _semantic_hits(session, viewer, embedder, q, where, n)
     mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
@@ -325,9 +355,17 @@ def search(
         settings.search_rrf_k,
     )
     page = ranked[offset : offset + limit]
-    interviews = _detail_matches(session, viewer, q, where) if offset == 0 else []
+    interviews, more_interviews = (
+        _detail_matches(session, viewer, q, where) if offset == 0 else ([], False)
+    )
     if not page:
-        return SearchResults(items=[], interviews=interviews, has_more=False, search_mode=mode)
+        return SearchResults(
+            items=[],
+            interviews=interviews,
+            more_metadata_matches=more_interviews,
+            has_more=False,
+            search_mode=mode,
+        )
 
     summaries = {
         row.id: InterviewSummary.model_validate(to_summary(row, person, lang))
@@ -352,6 +390,7 @@ def search(
     return SearchResults(
         items=items,
         interviews=interviews,
+        more_metadata_matches=more_interviews,
         has_more=len(ranked) > offset + limit,
         search_mode=mode,
     )

@@ -1,4 +1,4 @@
-"""Metadata filters shared by search and the interview list (Proposal: parameter names).
+"""Metadata filters shared by search and the interview list.
 
 Each filter only narrows a query that already applies `visible_to`, so no filter can widen
 what a viewer may see.
@@ -7,7 +7,7 @@ what a viewer may see.
 from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import Depends, Query
+from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy import TIMESTAMP, ColumnElement, Date, and_, cast, exists, func, literal, or_
 from swayambhu_core.models import InterviewLanguageRow, InterviewRow, MediaFileRow
 
@@ -28,6 +28,11 @@ def interview_filters(
         MediaType | None, Query(description="audio or video, from the uploaded file's type")
     ] = None,
 ) -> list[ColumnElement[bool]]:
+    # Dates are years 1 to 9999, so year 0 is refused like any other invalid date.
+    if recorded_from and recorded_to and recorded_from > recorded_to:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "recorded_from is after recorded_to"
+        )
     where: list[ColumnElement[bool]] = []
     if language:
         # Any language heard, so a mixed-language recording matches each of its languages.

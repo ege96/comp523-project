@@ -7,19 +7,16 @@ import DialogContentText from "@mui/material/DialogContentText";
 import DialogTitle from "@mui/material/DialogTitle";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import type { InterviewDetail, Job } from "../api/schemas";
+import { useAuth } from "../auth/useAuth";
 import { CheckIcon } from "../components/icons";
-import { useSetVisibility } from "./api";
+import { adminQueries, useSetVisibility } from "./api";
 import { visitorGets } from "./workflow";
 
-/**
- * Publish (Private -> Public) or Unpublish. Publishing is allowed at any time, even while
- * processing (D-008); the dialog says what visitors get right now, from the interview's state.
- * Publishing asks first, because it can expose a sensitive recording (handoff §6).
- * Unpublishing happens at once: it only hides.
- */
+// Confirm before making a recording public. Publishing can happen during processing.
 export function PublishButton({
   interview,
   jobs,
@@ -34,7 +31,13 @@ export function PublishButton({
   /** Outlined Publish, for a page whose main action is something else (e.g. Retry processing). */
   quiet?: boolean;
 }) {
+  const { viewer } = useAuth();
   const setVisibility = useSetVisibility();
+  // The editor on the same page loads these lines already; they say whether there's a transcript.
+  const transcript = useQuery({
+    ...adminQueries.transcript(viewer, interview.id),
+    enabled: viewer.ready,
+  });
   const [confirming, setConfirming] = useState(false);
   // Show the requested state while the request is in flight, then whatever the API says.
   const visibility = setVisibility.isPending
@@ -73,7 +76,6 @@ export function PublishButton({
           Try again.
         </Typography>
       ) : null}
-      {/* Proposal: dialog wording (not yet in the decisions log). */}
       <Dialog
         open={confirming}
         onClose={() => {
@@ -88,7 +90,7 @@ export function PublishButton({
             What visitors will get
           </DialogContentText>
           <Box component="ul" sx={{ listStyle: "none", m: 0, mt: 1, p: 0 }}>
-            {visitorGets(interview, jobs).map((item) => (
+            {visitorGets(interview, jobs, transcript.data?.items.length).map((item) => (
               <Box
                 component="li"
                 key={item.text}

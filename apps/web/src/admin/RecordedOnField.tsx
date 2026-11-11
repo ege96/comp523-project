@@ -22,7 +22,7 @@ export function RecordedOnField({
   disabled?: boolean;
 }) {
   const id = useId();
-  // Offer 29 February in any year (2000 was a leap year); the check above catches the rest.
+  // Use a leap year for day options. Validate the actual year on save.
   const days = value.month ? daysIn(2000, Number(value.month)) : 31;
   return (
     <Box role="group" aria-labelledby={`${id}-label`} aria-describedby={`${id}-help`}>

@@ -136,6 +136,9 @@ def test_transcribing_again_asks_before_replacing_corrections(
     stored = db_session.get_one(InterviewRow, interview.id)
     assert (stored.status, stored.status_detail) == ("processing", "Waiting to transcribe")
     assert admin_client.post(path, json={"step": "transcribe"}).status_code == 409  # waiting
+    # A correction saved now would be replaced, so it is refused until transcription ends.
+    line = f"/api/interviews/{interview.id}/segments/0"
+    assert admin_client.patch(line, json={"original_text": "नयाँ"}).status_code == 409
 
 
 def test_other_steps_and_refusals(

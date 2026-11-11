@@ -6,7 +6,7 @@ import PaginationItem from "@mui/material/PaginationItem";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { getRouteApi, Link, useNavigate } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 
@@ -20,6 +20,10 @@ import { TextLink } from "../components/links";
 const route = getRouteApi("/interviews");
 const PAGE_SIZE = 20;
 
+// The filters inside a list query's key.
+const filterKey = (queryKey: readonly unknown[]) =>
+  JSON.stringify((queryKey[3] as { filters: InterviewFilters }).filters);
+
 /**
  * Every interview the viewer may see, most recently added first (the API sorts by created_at),
  * narrowed by the same filters as search. The API decides what the viewer may see.
@@ -31,14 +35,19 @@ export function InterviewsPage() {
   const filtered = isFiltered(filters);
   const navigate = useNavigate();
   const { viewer } = useAuth();
-  const { data, isPending, isError } = useQuery({
+  const { data, isPending, isError, isFetching } = useQuery({
     ...interviewQueries.list(viewer, {
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
       filters,
     }),
     enabled: viewer.ready,
-    placeholderData: keepPreviousData,
+    // Paging within the same filters keeps the old rows while the next page loads; new
+    // filters never show rows that answer a different request.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery && filterKey(previousQuery.queryKey) === JSON.stringify(filters)
+        ? previous
+        : undefined,
   });
   const pages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1;
   // New filters start again at page 1.
@@ -72,21 +81,25 @@ export function InterviewsPage() {
           />
           <Stack spacing={2}>
             <FilterSummary filters={filters} onClear={clearFilters} />
-            {isError ? (
-              <Alert severity="error">Interviews couldn&apos;t be loaded. Please try again.</Alert>
-            ) : isPending ? (
-              <Skeleton variant="rectangular" height={480} />
-            ) : data.items.length === 0 ? (
-              <Typography color="text.secondary">
-                {page > 1
-                  ? "There are no more interviews."
-                  : filtered
-                    ? "No interviews match these filters. Try fewer filters."
-                    : "No interviews have been published yet."}
-              </Typography>
-            ) : (
-              <InterviewList interviews={data.items} />
-            )}
+            <Box aria-busy={isFetching}>
+              {isError ? (
+                <Alert severity="error">
+                  Interviews couldn&apos;t be loaded. Please try again.
+                </Alert>
+              ) : isPending ? (
+                <Skeleton variant="rectangular" height={480} />
+              ) : data.items.length === 0 ? (
+                <Typography color="text.secondary">
+                  {page > 1
+                    ? "There are no more interviews."
+                    : filtered
+                      ? "No interviews match these filters. Try fewer filters."
+                      : "No interviews have been published yet."}
+                </Typography>
+              ) : (
+                <InterviewList interviews={data.items} />
+              )}
+            </Box>
             {pages > 1 ? (
               <Pagination
                 page={page}
@@ -97,6 +110,8 @@ export function InterviewsPage() {
                   <PaginationItem
                     {...item}
                     component={PageAnchor}
+                    nativeButton={false}
+                    role="link"
                     toPage={item.page}
                     filters={filters}
                   />

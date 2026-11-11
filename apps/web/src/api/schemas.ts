@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { components } from "./schema.gen";
 
-// Runtime checks for API responses (D-009). Each schema `satisfies` the type generated from the
+// Runtime checks for API responses. Each schema `satisfies` the type generated from the
 // API's OpenAPI document, so `npm run gen:api` after an API change makes tsc flag any drift.
 type Schemas = components["schemas"];
 
@@ -36,7 +36,7 @@ export const InterviewDetailSchema = InterviewSummary.extend({
   languages: z.array(Language),
   media: z.object({ url: z.string(), content_type: z.string(), expires_at: z.string() }).nullable(),
   status_detail: z.string().nullable(),
-  // Admins only (null for visitors): what primary_language is made of (D-004).
+  // Admins only (null for visitors): what primary_language is made of.
   language_detected: z.string().nullable(),
   language_detected_confidence: z.number().nullable(),
   language_confirmed: z.string().nullable(),
@@ -68,6 +68,8 @@ export const SearchResultsSchema = z.object({
     }),
   ),
   interviews: z.array(InterviewSummary),
+  // True when more interviews match than the few listed (first page only).
+  more_metadata_matches: z.boolean().default(false),
   has_more: z.boolean(),
   search_mode: z.enum(["hybrid", "keyword_only"]),
 }) satisfies z.ZodType<Schemas["SearchResults"]>;
@@ -138,7 +140,7 @@ export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
 export type Segment = z.infer<typeof Segment>;
 export type RerunStep = Schemas["Rerun"]["step"];
 
-// The 409 a re-transcription gets when admins have corrected lines (P-013).
+// The 409 a re-transcription gets when admins have corrected lines.
 export const RerunConflictSchema = z.object({
   detail: z.object({ message: z.string(), corrected_lines: z.number().int() }),
 });

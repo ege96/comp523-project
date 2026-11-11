@@ -25,10 +25,6 @@ function shownError(meta: { isTouched: boolean; errors: (string | undefined)[] }
   return meta.isTouched ? meta.errors[0] : undefined;
 }
 
-/**
- * Correct an interview's details after upload: title, interviewee, recording date, and the
- * original language (D-004: detected from the audio, confirmed or overridden by an admin).
- */
 export function DetailsDialog({
   interview,
   open,

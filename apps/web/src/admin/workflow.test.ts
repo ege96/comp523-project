@@ -69,13 +69,16 @@ describe("admin workflow", () => {
       "+ Play the recording",
       "+ Read the transcript, marked as made by machine",
       "+ Read the English translation",
-      "+ Find it in search",
+      "+ Find it in search by its title and details",
+      "+ Find moments in search by the words said",
+      "+ Find moments in search by meaning",
     ]);
     expect(texts({ status: "processing", translation_status: "pending", media: null })).toEqual([
       "- The recording isn't ready to play yet",
       "- Transcript still being made, marked “Transcript in progress”",
       "- The English translation is still being made",
-      "- Search finds it once processing finishes",
+      "+ Find it in search by its title and details",
+      "- Search finds what is said once the transcript is made",
     ]);
     // English recordings need no translation line.
     expect(
@@ -85,11 +88,37 @@ describe("admin workflow", () => {
     ).toEqual([
       "- No recording to play: it couldn't be prepared",
       "- No transcript (marked “Transcript unavailable”)",
-      "+ Find it in search",
+      "+ Find it in search by its title and details",
+      "- Search can't find what is said without a transcript",
     ]);
     expect(texts({ status: "done", translation_status: "failed", media })[2]).toBe(
       "- Original words only; the English didn't work",
     );
+  });
+
+  it("tells a transcript found by its words apart from search indexing that failed", () => {
+    const media = { url: "/m", content_type: "audio/mp4", expires_at: "2026-10-14T06:00:00Z" };
+    const failedIndex = [job("transcribe", "done"), job("index", "failed")];
+    const items = visitorGets(
+      { status: "failed", translation_status: "not_needed", media },
+      failedIndex,
+      12,
+    ).map((i) => (i.available ? "+ " : "- ") + i.text);
+    expect(items).toEqual([
+      "+ Play the recording",
+      "+ Read the transcript, marked as made by machine",
+      "+ Find it in search by its title and details",
+      "+ Find moments in search by the words said",
+      "- Search by meaning works once search indexing does",
+    ]);
+    // Without the line count, a finished transcription stands for the lines.
+    expect(
+      visitorGets({ status: "failed", translation_status: "not_needed", media }, failedIndex)[1],
+    ).toEqual({ text: "Read the transcript, marked as made by machine", available: true });
+    // No lines at all: nothing to find by its words.
+    expect(
+      visitorGets({ status: "done", translation_status: "not_needed", media }, [], 0)[1]?.available,
+    ).toBe(false);
   });
 });
 
@@ -104,6 +133,10 @@ describe("recording date parts", () => {
 
   it("explains a date that can't be right", () => {
     expect(datePartsError({ year: "", month: "", day: "" })).toBeUndefined();
+    // As much of the date as is known: a year, or a year and month.
+    expect(datePartsError(partsFromText("2019"))).toBeUndefined();
+    expect(datePartsError(partsFromText("2019-05"))).toBeUndefined();
+    expect(datePartsError({ year: "19", month: "", day: "" })).toMatch(/four digits/);
     expect(datePartsError({ year: "", month: "3", day: "" })).toMatch(/Add the year/);
     expect(datePartsError({ year: "98", month: "", day: "" })).toMatch(/four digits/);
     expect(datePartsError({ year: "3000", month: "", day: "" })).toMatch(/hasn't happened/);

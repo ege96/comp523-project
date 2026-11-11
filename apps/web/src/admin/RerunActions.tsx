@@ -17,11 +17,6 @@ function languageOf(interview: InterviewDetail): string {
   return interview.primary_language?.name ?? "the detected language";
 }
 
-/**
- * "Transcribe again" and "Translate again", for after the language was corrected (D-004) or
- * when the machine output is poor. Transcribing again asks first, and warns when it would
- * replace corrections (P-013).
- */
 export function RerunActions({ interview }: { interview: InterviewDetail }) {
   const rerun = useRerun(interview.id);
   const [confirming, setConfirming] = useState<"transcribe" | "replace" | null>(null);

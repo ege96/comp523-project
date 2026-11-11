@@ -1,4 +1,4 @@
-"""Logs as one JSON object per line on stdout (Proposal P-014), and a request ID on each line.
+"""Logs as one JSON object per line on stdout, and a request ID on each line.
 
 OpenShift collects stdout. Every request gets an ID (the caller's `X-Request-ID` if it looks
 safe, else a new one); it is sent back in the response and added to every log line written

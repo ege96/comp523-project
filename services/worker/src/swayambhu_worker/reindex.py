@@ -8,15 +8,17 @@ worker does the embedding, so this needs no model or API key and returns at once
     python -m swayambhu_worker.reindex             # queue them
     python -m swayambhu_worker.reindex --all       # every transcribed interview
 
-Interviews with a step already queued or running are skipped: the pipeline indexes them
-when it gets there. Until an interview is re-indexed, semantic search can't find it
-(keyword search still does), because search only compares vectors from the same model.
+Interviews already bound to be indexed are skipped: those with an `index` job queued, or a
+`translate` job queued or running (it queues `index` when it ends, even if it fails). Other
+jobs, such as `playback`, don't hold an interview back. Until an interview is re-indexed,
+semantic search can't find it (keyword search still does), because search only compares
+vectors from the same model.
 """
 
 import argparse
 import uuid
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs
 from swayambhu_core.models import (
@@ -37,7 +39,11 @@ def needs_index(session: Session, model: str, *, everything: bool = False) -> li
     """Transcribed interviews with no current chunks, or a chunk with no vector from `model`."""
     transcribed = exists().where(SegmentRow.interview_id == InterviewRow.id)
     busy = exists().where(
-        JobRow.interview_id == InterviewRow.id, JobRow.state.in_(("queued", "running"))
+        JobRow.interview_id == InterviewRow.id,
+        or_(
+            (JobRow.kind == "index") & (JobRow.state == "queued"),
+            (JobRow.kind == "translate") & JobRow.state.in_(("queued", "running")),
+        ),
     )
     query = select(InterviewRow.id).where(transcribed, ~busy)
     if not everything:

@@ -1,4 +1,4 @@
-"""Database connections through SQLAlchemy (Proposal P-010).
+"""Database connections through SQLAlchemy.
 
 One engine (and connection pool) per process. Routes get a short-lived `Session` per request
 through the `DbSession` dependency; nothing opens a connection until a query runs.

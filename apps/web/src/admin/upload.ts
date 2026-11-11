@@ -4,7 +4,7 @@ import { API_BASE_URL } from "../config";
 
 /**
  * What the upload API accepts as tus `Upload-Metadata` besides the file's name and type
- * (D-004: only the title is required). Undefined fields are left out.
+ * Undefined fields are left out.
  */
 export type RecordingMetadata = {
   title: string;
@@ -24,7 +24,7 @@ export type UploadHandle = {
 };
 
 // The API holds one PATCH body in memory and refuses chunks over 64 MiB. Smaller chunks
-// also lose less on a dropped connection, which matters for slow links (NF3).
+// also lose less on a dropped connection, which matters for slow links.
 const CHUNK_BYTES = 16 * 1024 * 1024;
 // A flaky link gets about a minute and a half of retries before the upload reports an error.
 const RETRY_DELAYS_MS = [0, 1_000, 3_000, 5_000, 10_000, 20_000, 30_000];
@@ -132,19 +132,4 @@ export function startUpload(
       void upload?.abort();
     },
   };
-}
-
-const DATE_PATTERN = /^\d{4}(-\d{2}(-\d{2})?)?$/;
-
-/** YYYY, YYYY-MM or YYYY-MM-DD, and a date that exists (no 2024-02-30). */
-export function recordedOnError(value: string): string | undefined {
-  const text = value.trim();
-  if (!text) return undefined;
-  const message = "Use YYYY, YYYY-MM or YYYY-MM-DD, with as much of the date as is known";
-  if (!DATE_PATTERN.test(text)) return message;
-  const [y = 0, m = 1, d = 1] = text.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
-    ? undefined
-    : message;
 }

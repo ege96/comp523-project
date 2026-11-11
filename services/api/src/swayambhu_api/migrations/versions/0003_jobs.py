@@ -1,4 +1,4 @@
-"""Worker job queue (Proposal for Q-18): one `jobs` table, claimed with SKIP LOCKED.
+"""Worker job queue: one `jobs` table, claimed with SKIP LOCKED.
 
 A new table only, so the previous release keeps working while this runs.
 

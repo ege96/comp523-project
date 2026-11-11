@@ -29,8 +29,7 @@ vi.mock("tus-js-client", async (importOriginal) => {
   return { ...actual, Upload };
 });
 
-const { recordedOnError, startUpload, toTusMetadata, uploadErrorMessage } =
-  await import("./upload");
+const { startUpload, toTusMetadata, uploadErrorMessage } = await import("./upload");
 
 afterEach(() => {
   fake.options = undefined;
@@ -89,7 +88,7 @@ it("sends only the metadata it has, resumes the same upload, and resolves with t
   await expect(handle.done).resolves.toBe("abc");
 });
 
-it("explains refusals and checks partial recording dates", () => {
+it("explains refusals", () => {
   const refused = (status: number, body: string) =>
     uploadErrorMessage(
       Object.assign(new DetailedError("x"), { originalResponse: response(status, body) }),
@@ -102,12 +101,4 @@ it("explains refusals and checks partial recording dates", () => {
   );
   expect(refused(401, "")).toMatch(/sign-in has expired/);
   expect(uploadErrorMessage(new Error("offline"))).toMatch(/connection/);
-
-  expect(["", "2019", "2019-05", "2024-02-29"].map(recordedOnError)).toEqual([
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-  ]);
-  expect(["19", "2019-5", "2023-02-29"].every((v) => recordedOnError(v))).toBe(true);
 });

@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  screen,
+  waitForElementToBeRemoved,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
@@ -162,16 +168,21 @@ describe("admin page", () => {
       "Play the recording",
       "Read the transcript, marked as made by machine",
       "No English translation yet",
-      "Find it in search",
+      "Find it in search by its title and details",
+      "Find moments in search by the words said",
+      "Find moments in search by meaning",
     ]);
     expect(within(dialog).getByText(/agreed to share it publicly/)).toBeTruthy();
+    // The closing dialog stays in the document for its exit transition: wait until it's gone,
+    // so the next Publish found is the page's button and not the one in that dialog.
+    const closed = waitForElementToBeRemoved(dialog);
     await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await closed;
     expect(requests().some((r) => r.method === "PATCH")).toBe(false);
 
     await userEvent.click(screen.getByRole("button", { name: "Publish" }));
-    await userEvent.click(
-      within(await screen.findByRole("dialog")).getByRole("button", { name: "Publish" }),
-    );
+    const again = await screen.findByRole("dialog", { name: "Publish “Test interview A”?" });
+    await userEvent.click(within(again).getByRole("button", { name: "Publish" }));
     expect(requests()).toContainEqual({
       url: `/api/interviews/${id}`,
       method: "PATCH",
@@ -208,7 +219,7 @@ describe("admin page", () => {
     };
     stubApi(routes);
     renderApp(`/admin/interviews/${privateOne.id}`, fakeAuthClient({ signedIn: true }));
-    // While processing, publishing is under "Who can see it" (D-008 allows it).
+    // While processing, publishing is under "Who can see it".
     expect(await screen.findByRole("heading", { name: "Being processed" }, SLOW)).toBeTruthy();
     expect(await screen.findByText("The processing steps couldn't be loaded.")).toBeTruthy();
     stubApi({ ...routes, [`/api/interviews/${privateOne.id}`]: { status: 500, body: {} } });
@@ -217,17 +228,27 @@ describe("admin page", () => {
     // Still processing: it doesn't promise a transcript or search yet.
     expect(within(dialog).getByText(/Transcript still being made/)).toBeTruthy();
     expect(within(dialog).getByText("The English translation is still being made")).toBeTruthy();
-    expect(within(dialog).getByText("Search finds it once processing finishes")).toBeTruthy();
+    expect(
+      within(dialog).getByText("Search finds what is said once the transcript is made"),
+    ).toBeTruthy();
     await userEvent.click(within(dialog).getByRole("button", { name: "Publish" }));
     expect(await screen.findByText("Couldn't publish it. Try again.")).toBeTruthy();
   });
 
-  it("checks the form, then uploads with only the details given", async () => {
+  // Opens the admin page and returns its Upload button.
+  async function openUploadForm() {
     stubApi(adminApi);
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
+    return screen.findByRole("button", { name: "Upload" }, SLOW);
+  }
+  const recording = () => new File(["x"], "village-talk.mp3", { type: "audio/mpeg" });
+  const pick = async (field: string, option: string) => {
+    await userEvent.click(screen.getByRole("combobox", { name: field }));
+    await userEvent.click(await screen.findByRole("option", { name: option }));
+  };
 
-    const submit = await screen.findByRole("button", { name: "Upload" }, SLOW);
-    await userEvent.click(submit);
+  it("points to the missing file first when the form is empty", async () => {
+    await userEvent.click(await openUploadForm());
     const fileError = await screen.findByText("Choose a recording to upload");
     expect(fileError.getAttribute("role")).toBe("alert");
     expect(screen.getByText("Enter a title")).toBeTruthy();
@@ -240,15 +261,20 @@ describe("admin page", () => {
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(choose);
     });
+  });
 
+  it("refuses a dropped file that isn't audio or video", async () => {
+    await openUploadForm();
     const notes = new File(["x"], "notes.txt", { type: "text/plain" });
     fireEvent.drop(screen.getByText("Drop a video or audio file here"), {
       dataTransfer: { files: [notes] },
     });
     expect(await screen.findByText("Choose an audio or video file")).toBeTruthy();
+  });
 
-    const file = new File(["x"], "village-talk.mp3", { type: "audio/mpeg" });
-    await userEvent.upload(screen.getByLabelText("Recording file"), file);
+  it("titles the upload after its file and tells new interviewees from existing ones", async () => {
+    await openUploadForm();
+    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
     expect(screen.getByRole("textbox", { name: /Interview title/ })).toHaveProperty(
       "value",
       "village-talk",
@@ -260,25 +286,29 @@ describe("admin page", () => {
     await userEvent.type(person, "Pers");
     await userEvent.click(await screen.findByRole("option", { name: "Person F" }));
     expect(screen.getByText("An existing interviewee")).toBeTruthy();
-    await userEvent.click(screen.getByRole("combobox", { name: "Original language" }));
-    await userEvent.click(await screen.findByRole("option", { name: "Nepal Bhasa" }));
-    const pick = async (field: string, option: string) => {
-      await userEvent.click(screen.getByRole("combobox", { name: field }));
-      await userEvent.click(await screen.findByRole("option", { name: option }));
-    };
-    const year = screen.getByRole("textbox", { name: "Year" });
+  });
+
+  it("refuses a recording date that can't be right", async () => {
+    const submit = await openUploadForm();
+    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
     await pick("Month", "February");
     await userEvent.click(submit);
     expect(await screen.findByText("Add the year too, or leave the month empty")).toBeTruthy();
-    await userEvent.type(year, "2023");
+    await userEvent.type(screen.getByRole("textbox", { name: "Year" }), "2023");
     await pick("Day", "29");
     await userEvent.click(submit);
     expect(await screen.findByText("February 2023 has no day 29")).toBeTruthy();
     expect(upload.start).not.toHaveBeenCalled();
+  });
 
-    await pick("Day", "Not known");
-    await userEvent.clear(year);
-    await userEvent.type(year, "2019");
+  it("uploads with only the details given, and cancels", async () => {
+    const submit = await openUploadForm();
+    const file = recording();
+    await userEvent.upload(screen.getByLabelText("Recording file"), file);
+    await userEvent.type(screen.getByRole("combobox", { name: "Interviewee" }), "Pers");
+    await userEvent.click(await screen.findByRole("option", { name: "Person F" }));
+    await pick("Original language", "Nepal Bhasa");
+    await userEvent.type(screen.getByRole("textbox", { name: "Year" }), "2019");
     await pick("Month", "May");
     await userEvent.click(submit);
     expect(upload.start).toHaveBeenCalledWith(
@@ -295,12 +325,16 @@ describe("admin page", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
     expect(upload.abort).toHaveBeenCalled();
     expect(screen.queryByText(/Keep this page open/)).toBeNull();
+  });
 
-    // A failed attempt keeps the form filled in, so Upload retries (and resumes).
+  it("keeps the form filled in after a failed attempt, so Upload retries", async () => {
+    const submit = await openUploadForm();
+    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
     await userEvent.click(submit);
     upload.fail(new Error("offline"));
     expect(await screen.findByText(/connection to the archive was lost/)).toBeTruthy();
     await userEvent.click(submit);
+    expect(upload.start).toHaveBeenCalledTimes(2);
     upload.finish(id);
     await userEvent.click(await screen.findByRole("link", { name: "Follow its progress" }));
     expect(await screen.findByText("Nothing has started yet.")).toBeTruthy();
@@ -397,7 +431,8 @@ describe("admin page", () => {
       "Play the recording",
       "No transcript (marked “Transcript unavailable”)",
       "No English translation yet",
-      "Search won't find it until processing works",
+      "Find it in search by its title and details",
+      "Search can't find what is said without a transcript",
     ]);
 
     // A re-index (e.g. after a search model change) runs while the interview stays published.

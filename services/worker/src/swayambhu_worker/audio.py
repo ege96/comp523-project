@@ -1,4 +1,4 @@
-"""Cutting a recording into short pieces at its quietest moments, with FFmpeg (P-014, D-013).
+"""Cutting a recording into short pieces at its quietest moments, with FFmpeg.
 
 Each piece is transcribed on its own, so segment timestamps come from the cut points and
 don't depend on whether a provider returns timestamps. Thresholds are first guesses, to be
@@ -8,7 +8,10 @@ tuned on the sample Nepali audio.
 import json
 import re
 import subprocess
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,10 +21,18 @@ MAX_PIECE_MS = 20_000
 FRAME_MS = 100
 QUIET_FRAMES = 3
 SILENT_DB = -120.0  # stands in for -inf (digital silence)
+# How often a running FFmpeg or FFprobe renews the job's lease.
+HEARTBEAT_SECONDS = 60.0
+# The longest one FFmpeg or FFprobe run may take, unless `supervised` sets another limit.
+DEFAULT_TIMEOUT_SECONDS = 4 * 3600.0
 
 
 class AudioError(Exception):
     """FFmpeg couldn't read the file: not audio, or corrupt. Retrying won't help."""
+
+
+class MediaTimeoutError(Exception):
+    """FFmpeg or FFprobe ran past its time limit and was stopped."""
 
 
 @dataclass(frozen=True)
@@ -30,19 +41,51 @@ class Span:
     end_ms: int
 
 
+@dataclass(frozen=True)
+class _Liveness:
+    heartbeat: Callable[[], None]
+    timeout_seconds: float
+
+
+_liveness: ContextVar[_Liveness | None] = ContextVar("audio_liveness", default=None)
+
+
+@contextmanager
+def supervised(heartbeat: Callable[[], None], timeout_seconds: float) -> Iterator[None]:
+    """Within this block every FFmpeg and FFprobe run calls `heartbeat` periodically and is
+    stopped after `timeout_seconds`. The runner wraps each job in it."""
+    token = _liveness.set(_Liveness(heartbeat, timeout_seconds))
+    try:
+        yield
+    finally:
+        _liveness.reset(token)
+
+
 def _run(args: list[str], heartbeat: Callable[[], None] | None = None) -> str:
-    """Run FFmpeg or FFprobe. Long runs call `heartbeat` every minute so the job keeps its
-    lease."""
+    """Run FFmpeg or FFprobe. Long runs call `heartbeat` (or the one from `supervised`) every
+    HEARTBEAT_SECONDS so the job keeps its lease, and are killed at the time limit. The
+    process is also killed if the heartbeat raises, say because the job was taken over."""
+    live = _liveness.get()
+    beat = heartbeat or (live.heartbeat if live else None)
+    limit = live.timeout_seconds if live else DEFAULT_TIMEOUT_SECONDS
+    deadline = time.monotonic() + limit
     with subprocess.Popen(  # noqa: S603
         args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
     ) as proc:
-        while True:
-            try:
-                stdout, stderr = proc.communicate(timeout=60)
-                break
-            except subprocess.TimeoutExpired:
-                if heartbeat:
-                    heartbeat()
+        try:
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise MediaTimeoutError(f"{args[0]} ran longer than {limit:.0f} s")
+                try:
+                    stdout, stderr = proc.communicate(timeout=min(HEARTBEAT_SECONDS, left))
+                    break
+                except subprocess.TimeoutExpired:
+                    if beat:
+                        beat()
+        except BaseException:
+            proc.kill()
+            raise
     if proc.returncode != 0:
         raise AudioError(f"{args[0]} failed: {stderr.strip()[-500:]}")
     return stdout + stderr
@@ -136,30 +179,39 @@ def cut(source: Path, piece: Span, target: Path) -> None:
     )  # fmt: skip
 
 
-def has_video(path: Path) -> bool:
+def _motion_video_stream(path: Path) -> int | None:
+    """The index of the first motion video stream, if any. Cover art in an MP3 or M4A is a
+    one-frame video stream marked as an attached picture, and doesn't count."""
     out = _run(
         [
             "ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
-            "stream=codec_type,disposition", "-of", "json", str(path),
+            "stream=index,codec_type:stream_disposition=attached_pic", "-of", "json", str(path),
         ]
     )  # fmt: skip
-    # Cover art in an MP3 or M4A shows up as a one-frame "attached picture" video stream.
-    streams = json.loads(out).get("streams", [])
-    return any(not s.get("disposition", {}).get("attached_pic") for s in streams)
+    for stream in json.loads(out).get("streams", []):
+        if not stream.get("disposition", {}).get("attached_pic"):
+            return int(stream["index"])
+    return None
+
+
+def has_video(path: Path) -> bool:
+    return _motion_video_stream(path) is not None
 
 
 def make_playback(
     source: Path, target_stem: Path, heartbeat: Callable[[], None] | None = None
 ) -> tuple[Path, str]:
-    """A copy every browser plays and can seek in while streaming (NF5): H.264/AAC MP4 at
+    """A copy every browser plays and can seek in while streaming: H.264/AAC MP4 at
     up to 720p for video, AAC M4A for audio. `+faststart` puts the index first, so playback
     starts before the whole file arrives. Returns the file and its content type."""
     common = ["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-map_metadata", "-1"]
-    if has_video(source):
+    video_stream = _motion_video_stream(source)
+    if video_stream is not None:
         target = target_stem.with_suffix(".mp4")
         video = [
-            "-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast",
-            "-crf", "26", "-vf", "scale=-2:'min(720,ih)'", "-pix_fmt", "yuv420p",
+            "-map", f"0:{video_stream}", "-map", "0:a:0?", "-c:v", "libx264",
+            "-preset", "veryfast", "-crf", "26",
+            "-vf", "scale=-2:'min(720,ih)'", "-pix_fmt", "yuv420p",
         ]  # fmt: skip
         content_type = "video/mp4"
     else:

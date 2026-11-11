@@ -24,6 +24,10 @@ services:
       FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-comp523}
       # Offline stand-ins so local dev needs no API keys. Must match the worker's.
       EMBEDDING_PROVIDER: fake
+      # Uploads land here and playback is served from here: the worker's volume and path.
+      MEDIA_ROOT: /data/media
+    volumes:
+      - media:/data/media
     ports: ["8000:8080"]
     depends_on:
       db: { condition: service_healthy }
@@ -35,6 +39,7 @@ services:
       TRANSCRIPTION_PROVIDER: fake
       TRANSLATION_PROVIDER: fake
       EMBEDDING_PROVIDER: fake
+      MEDIA_ROOT: /data/media
     volumes:
       - media:/data/media
     depends_on:
@@ -42,6 +47,6 @@ services:
 
 volumes:
   pgdata:
-  # Uploaded recordings (LocalMediaStore). Try it: docker compose cp talk.mp3 worker:/tmp/ &&
-  # docker compose exec worker python -m swayambhu_worker.ingest /tmp/talk.mp3 --title Test
+  # Recordings (LocalMediaStore), shared by the API and the worker. Try it:
+  # docker compose cp talk.mp3 worker:/tmp/ && docker compose exec worker python -m swayambhu_worker.ingest /tmp/talk.mp3 --title Test
   media:

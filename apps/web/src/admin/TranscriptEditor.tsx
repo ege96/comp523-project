@@ -1,6 +1,7 @@
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
 import Collapse from "@mui/material/Collapse";
 import FormControlLabel from "@mui/material/FormControlLabel";
 import IconButton from "@mui/material/IconButton";
@@ -33,13 +34,12 @@ import {
   splitMatches,
   type EditorInterview as Interview,
 } from "./findReplace";
-import { buildEdit } from "./segmentEdit";
+import { buildEdit, rebase, storedText, type LineDraft, type LineText } from "./segmentEdit";
 import { useSegmentPlayer } from "./useSegmentPlayer";
 
 type Player = ReturnType<typeof useSegmentPlayer>;
 /** Where to go after a line closes: stay put, or open the next or previous line. */
 type Move = "next" | null;
-type Draft = { original: string; english: string };
 
 const LEAVE_WITH_DRAFTS = "Leave this page? Lines you changed but didn't save will be lost.";
 
@@ -91,7 +91,7 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
   const [editing, setEditing] = useState<number | null>(null);
   // Unsaved text per line, so opening another line, changing the filter or replacing text
   // never throws away what was typed. Cancel discards it on purpose.
-  const [drafts, setDrafts] = useState<ReadonlyMap<number, Draft>>(new Map());
+  const [drafts, setDrafts] = useState<ReadonlyMap<number, LineDraft>>(new Map());
   // Typed but unsaved text would be lost by leaving the page, so ask first.
   useBlocker({
     shouldBlockFn: ({ current, next }) =>
@@ -151,7 +151,7 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
     setSaved(false);
   };
 
-  const setDraft = (seq: number, draft: Draft | null) => {
+  const setDraft = (seq: number, draft: LineDraft | null) => {
     setDrafts((all) => {
       const next = new Map(all);
       if (draft) next.set(seq, draft);
@@ -609,7 +609,7 @@ function LineView({
         )}
         {line.english_edit_stale ? (
           <Typography variant="caption" color="warning.main">
-            The original changed after this English was edited. Check the English and save it.
+            The original changed after this English was edited. Open the line to check the English.
           </Typography>
         ) : line.english_stale ? (
           <Typography variant="caption" color="text.secondary">
@@ -665,24 +665,31 @@ function LineForm({
   interview: Interview;
   line: AdminSegment;
   player: Player;
-  draft: Draft | undefined;
-  onDraft: (draft: Draft | null) => void;
+  draft: LineDraft | undefined;
+  onDraft: (draft: LineDraft | null) => void;
   onDone: (saved: boolean, move: Move) => void;
 }) {
   const save = useEditSegment(interview.id);
   const englishSpeech = isEnglishSpeech(line, interview);
   // Set by the key that submitted the form, so a save can go on to the next line.
   const move = useRef<Move>(null);
-  const stored = {
-    original: line.original_edited ?? line.original_machine,
-    english: line.english_edited ?? line.english_machine ?? "",
-  };
+  const stored = storedText(line);
+  const { original: storedOriginal, english: storedEnglish } = stored;
+  // The text each box started from. A box still equal to it was left alone: it is never sent,
+  // and it follows the stored text if that changes while the form is open.
+  const [opened] = useState(() => rebase(draft, stored));
+  const base = useRef<LineText>(opened.base);
+  // A flagged English edit is confirmed only when the admin says it was checked.
+  const [englishChecked, setEnglishChecked] = useState(false);
+  const askToCheck = !englishSpeech && line.english_edit_stale;
   const form = useForm({
-    defaultValues: draft ?? stored,
+    defaultValues: opened.value,
     onSubmit: async ({ value }) => {
-      const edit = englishSpeech
-        ? buildEdit(line, { ...value, english: "" })
-        : buildEdit(line, value, { confirmEnglish: line.english_edit_stale });
+      const edit = buildEdit(
+        line,
+        { value, base: base.current },
+        { confirmEnglish: askToCheck && englishChecked },
+      );
       if (edit === null) {
         onDone(false, move.current);
         return;
@@ -704,10 +711,26 @@ function LineForm({
     void form.handleSubmit();
   };
   // Keeps typed text in the parent, so it survives this form closing without a save.
-  const change = (name: keyof Draft, value: string) => {
+  const change = (name: keyof LineText, value: string) => {
     const next = { ...form.state.values, [name]: value };
-    onDraft(next.original === stored.original && next.english === stored.english ? null : next);
+    const from = base.current;
+    onDraft(
+      next.original === from.original && next.english === from.english
+        ? null
+        : { value: next, base: from },
+    );
   };
+  // The stored line changed while open (a replacement, a refresh): boxes left alone show it.
+  useEffect(() => {
+    const now: LineText = { original: storedOriginal, english: storedEnglish };
+    for (const name of ["original", "english"] as const) {
+      const from = base.current[name];
+      if (from !== now[name] && form.getFieldValue(name) === from) {
+        base.current = { ...base.current, [name]: now[name] };
+        form.setFieldValue(name, now[name]);
+      }
+    }
+  }, [form, storedOriginal, storedEnglish]);
 
   // Enter saves (Shift+Enter starts a new line in the text), Alt+Enter saves and opens the
   // next line, Escape cancels, and Alt+P plays or stops the line's audio. Tab moves between
@@ -805,6 +828,19 @@ function LineForm({
             )}
           </form.Field>
         )}
+        {askToCheck ? (
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={englishChecked}
+                onChange={(e) => {
+                  setEnglishChecked(e.target.checked);
+                }}
+              />
+            }
+            label="The English still matches the changed original"
+          />
+        ) : null}
         {save.isError ? (
           <Typography variant="body2" color="error" role="alert">
             {saveErrorMessage(save.error)}
@@ -812,7 +848,16 @@ function LineForm({
         ) : null}
         <form.Subscribe selector={(s) => s.canSubmit}>
           {(canSubmit) => (
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              useFlexGap
+              sx={{
+                alignItems: "center",
+                flexWrap: "wrap",
+                "& .MuiButton-root": { flexShrink: 0, whiteSpace: "nowrap" },
+              }}
+            >
               <Button type="submit" variant="contained" disabled={!canSubmit || save.isPending}>
                 {save.isPending ? "Saving…" : "Save"}
               </Button>
@@ -836,7 +881,7 @@ function LineForm({
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ display: { xs: "none", md: "block" } }}
+                sx={{ display: { xs: "none", md: "block" }, flex: "1 1 16rem" }}
               >
                 Enter saves · Alt+Enter saves and goes on · Esc cancels
                 {interview.media ? " · Alt+P plays the line" : ""}

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderSettings(BaseSettings):
-    """AI provider settings shared by the API and the worker (D-011..D-013).
+    """AI provider settings shared by the API and the worker.
 
     Each service's settings class inherits these, so both read the same environment
     variables. That matters for embeddings: the API embeds search queries with the model the
@@ -24,6 +24,9 @@ class ProviderSettings(BaseSettings):
     embedding_provider: Literal["openai", "local", "fake"] = "openai"
     embedding_model: str | None = None
     embedding_dimensions: int | None = None
+    # `local` provider: the model's revision (e.g. a Hugging Face commit hash). It is part of
+    # the stored embedding identity, so changing it re-embeds on the next reindex.
+    embedding_model_revision: str | None = None
     # Prepended to every query or passage. multilingual-E5 needs "query: " and "passage: ".
     embedding_query_prefix: str = ""
     embedding_passage_prefix: str = ""

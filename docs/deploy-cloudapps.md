@@ -26,7 +26,7 @@ Recordings live on a shared volume mounted at `/data/media` in both `api` and `w
 
 - **A CloudApps project.** The default UNC quota we built for is 4 CPU and 2,560 MiB of memory for all long-running pods together, at most 2 CPU and 2 GiB per container, and 5 GiB of volume storage. The four pods above use 2,176 MiB. Containers with no limit get 300Mi by default, which is too small for `api` and `worker`, so every Deployment sets its own limits. Check yours with `oc describe quota` and `oc describe limitrange`.
 - **Storage for recordings.** Each hour of video takes roughly 1–2 GB (the original plus a 720p streaming copy); audio about 0.1 GB. Ask ITS for more volume storage if you need more than about 4 GB.
-- **GitHub access** to the repository, with a fine-grained token that can read its contents (the repository is private).
+- **GitHub access** to the repository, with a fine-grained token that can read its contents.
 - **A Firebase project** with the Email/Password and Google sign-in methods turned on.
 - **API keys:** OpenAI (transcription) and Google Cloud Translation. Set a monthly spending limit on both accounts.
 
@@ -92,7 +92,9 @@ Then give `api` and `worker` their settings, volume and limits:
 
 ```sh
 for app in api worker; do
-  oc set env deploy/$app --from=secret/db-credentials --from=secret/ai-providers
+  # One command per Secret: repeating --from in one command keeps only the last Secret.
+  oc set env deploy/$app --from=secret/db-credentials
+  oc set env deploy/$app --from=secret/ai-providers
   oc set env deploy/$app \
     TRANSCRIPTION_PROVIDER=openai TRANSCRIPTION_MODEL=<openai transcription model> \
     TRANSLATION_PROVIDER=google_nmt \
@@ -108,6 +110,12 @@ oc set volume deploy/api --add --name=media --type=pvc --claim-name=media \
 oc set volume deploy/worker --add --name=media --type=pvc --claim-name=media \
   --mount-path=/data/media
 oc set resources deploy/web --limits=cpu=300m,memory=128Mi
+```
+
+Check that both Secrets are attached, without printing their values (each line should show `DATABASE_URL` and `OPENAI_API_KEY`, and so on):
+
+```sh
+for app in api worker; do oc set env deploy/$app --list | cut -d= -f1; done
 ```
 
 Check the current OpenAI transcription model name before setting it (verify before use). Search compares only vectors made by the same model, so `api` and `worker` must always have the same `EMBEDDING_*` settings.
@@ -128,7 +136,7 @@ oc create route edge api --service=api --port=8080 --hostname=<web hostname> \
 
 ### 3.5 Firebase
 
-The website's Firebase settings are public and live in `apps/web/.env.production`. For a different Firebase project, change the values there (they are build settings, not secrets). In the Firebase console:
+The website's Firebase settings are public and live in `apps/web/.env.production`. For a different Firebase project, change the values there (they are build settings, not secrets) and set `FIREBASE_PROJECT_ID` on `api` to match. Also update the Content-Security-Policy in `apps/web/security-headers.inc`: the `frame-src` host (the project's auth domain, `<project>.firebaseapp.com`) and, if they change, the Firebase hosts in `connect-src`. The build config and the CSP must name the same project, or the browser blocks the sign-in frame. Rebuild `web`, then test sign-in in a private window. In the Firebase console:
 
 1. **Authentication**, then **Sign-in method**: turn on Email/Password and Google.
 2. **Authentication**, then **Settings**, then **Authorized domains**: add the web hostname.
@@ -161,7 +169,14 @@ oc exec deploy/api -- python -m swayambhu_api.manage_admins list
 oc exec deploy/api -- python -m swayambhu_api.manage_admins remove <email>
 ```
 
-**Change an API key.** `oc set env deploy/api deploy/worker OPENAI_API_KEY=<new key>` (or edit the `ai-providers` Secret and restart both). Changing `MEDIA_URL_SECRET` only makes open media links stop working until the page is reloaded.
+**Change an API key.** Edit the Secret, then restart everything that reads it. Don't set the key directly on a Deployment: that overrides the Secret and leaves it stale.
+
+```sh
+oc edit secret/ai-providers    # values under stringData, or base64 under data
+oc rollout restart deployment/api deployment/worker
+```
+
+Changing `MEDIA_URL_SECRET` only makes open media links stop working until the page is reloaded.
 
 **Restart.** `oc rollout restart deploy/<name>`. Processing that was interrupted is picked up again by the worker.
 
@@ -169,7 +184,7 @@ oc exec deploy/api -- python -m swayambhu_api.manage_admins remove <email>
 
 **Disk space.** `oc exec deploy/api -- df -h /data/media`. Uploads fail when the media volume is full, so keep `MAX_UPLOAD_BYTES` (default 10 GiB) below its free space.
 
-**Roll back a bad deploy.** `oc rollout undo deploy/<name>`. The API runs database migrations on start; if one fails, the new pod never becomes ready and the old one keeps serving.
+**Roll back a bad deploy.** `oc rollout undo deploy/<name>` redeploys the previous image. `api` uses the `Recreate` strategy (§3.3), so the old pod is stopped before the new one starts. The API runs database migrations on start; if one fails, the new pod exits and never becomes ready, and the site's API is down until you roll back or fix it. Migrations only go forward: rolling back the image does not undo a migration that already succeeded, and the previous release may not run against the new schema unless the change was written to allow it. If it can't, restore the database from the paired backup taken before the deploy (§5). Take a backup pair before any deploy that includes a migration.
 
 **Change the search model.** Set the same new `EMBEDDING_*` values on both `api` and `worker`, then run `oc exec deploy/worker -- python -m swayambhu_worker.reindex` (add `--dry-run` first to see what it would do). Keyword search keeps working while it runs.
 
@@ -177,29 +192,65 @@ oc exec deploy/api -- python -m swayambhu_api.manage_admins remove <email>
 
 Back up two things: the database (details, transcripts, corrections, admins) and the media volume (recordings). The search index is rebuilt from the transcripts, so a database backup covers it.
 
-**Database**, daily or before any big change. The dump is a single file you keep off CloudApps (for example on department storage):
+A restorable backup is a **pair**: one database dump and one copy of the media volume, taken together and labeled with the same date, e.g. `2026-11-11`. Keep the two together. A database dump that references recordings missing from the media copy restores into an archive with broken interviews.
 
-```sh
-oc exec deploy/db -- pg_dump -U swayambhu -d swayambhu -Fc > swayambhu-$(date +%F).dump
-```
+Take a pair like this, so the media copy includes everything the dump references:
 
-**Recordings**, after each batch of uploads. This copies each interview's folder: the original and its streaming copy. *(verify: `oc rsync` needs `tar` or `rsync` in the container)*
+1. Stop processing and uploads: tell admins not to upload, then `oc scale deploy/worker --replicas=0` and wait for its pod to disappear (`oc get pods`).
+2. Dump the database first. The file is kept off CloudApps (for example on department storage):
 
-```sh
-oc rsync $(oc get pods -o name | grep '^pod/api-' | head -1):/data/media/interviews ./media-backup/
-```
+   ```sh
+   oc exec deploy/db -- pg_dump -U swayambhu -d swayambhu -Fc > swayambhu-$(date +%F).dump
+   ```
 
-**Restore** into a working deployment (§3), with the worker stopped so nothing processes halfway:
+3. Then copy the recordings: each interview's folder, the original and its streaming copy. Because the dump came first, the copy holds at least everything the dump references. *(verify: `oc rsync` needs `tar` or `rsync` in the container)*
 
-```sh
-oc scale deploy/worker --replicas=0
-oc exec -i deploy/db -- pg_restore -U swayambhu -d swayambhu --clean --if-exists < <file>.dump
-oc rsync ./media-backup/interviews $(oc get pods -o name | grep '^pod/api-' | head -1):/data/media/
-oc scale deploy/worker --replicas=1
-oc rollout restart deploy/api
-```
+   ```sh
+   oc rsync $(oc get pods -o name | grep '^pod/api-' | head -1):/data/media/interviews ./media-backup-$(date +%F)/
+   ```
 
-Try a restore into a spare project once, so you know the backups work before you need them.
+4. Scale the worker back up: `oc scale deploy/worker --replicas=1`.
+
+Do this daily or before any big change, and always before a deploy that includes a migration. Label both with the same date and keep them together.
+
+**Restore** replaces live data, so rehearse it in a spare environment (a spare project, or a scratch database) before you need it. Use one matching pair.
+
+1. Copy the recordings from the pair's media copy back first. This only adds files, so it is safe while the site is running:
+
+   ```sh
+   oc rsync ./media-backup-<date>/interviews $(oc get pods -o name | grep '^pod/api-' | head -1):/data/media/
+   ```
+
+2. Stop everything that writes, and wait until the pods are gone. Scaling is asynchronous, and the worker only stops between jobs.
+
+   ```sh
+   oc scale deploy/api --replicas=0
+   oc scale deploy/worker --replicas=0
+   oc wait --for=delete pod -l deployment=api --timeout=300s
+   oc wait --for=delete pod -l deployment=worker --timeout=300s
+   ```
+
+   (Check the labels with `oc get pods --show-labels` and use the ones your pods carry. Don't continue until no `api-` or `worker-` pod is listed.)
+
+3. Restore the database. Prefer restoring into a fresh, empty database first (for example `swayambhu_restore`, with `CREATE EXTENSION vector`), checking it there, and only then restoring into the live one. `--single-transaction` makes the restore all-or-nothing and `--exit-on-error` stops at the first error, so a failed restore leaves the database as it was:
+
+   ```sh
+   oc exec -i deploy/db -- pg_restore -U swayambhu -d swayambhu --clean --if-exists \
+     --single-transaction --exit-on-error < <file>.dump
+   ```
+
+   If it prints any error, stop. Don't scale anything back up until you know why.
+
+4. Verify before reopening: every recording the database references must exist on the volume. Start `api` (`oc scale deploy/api --replicas=1`) with its route not yet announced to users, then:
+
+   ```sh
+   oc exec deploy/db -- psql -U swayambhu -d swayambhu -Atc "SELECT storage_key FROM media_files" > keys.txt
+   oc exec -i deploy/api -- sh -c 'cd /data/media && while read -r k; do [ -e "$k" ] || echo "MISSING $k"; done' < keys.txt
+   ```
+
+   No `MISSING` lines should appear. Also open one restored interview and play it. If any file is missing, the pair doesn't match: stop and use a different pair.
+
+5. Only after that, scale the worker back up (`oc scale deploy/worker --replicas=1`) and check `https://<web hostname>/api/health/ready`.
 
 ## 6. Troubleshooting
 

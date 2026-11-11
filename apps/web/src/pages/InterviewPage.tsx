@@ -17,7 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, interviewQueries } from "../api/client";
 import type { InterviewDetail, Segment } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
-import { toVtt } from "../captions";
+import { englishText, toVtt } from "../captions";
 import { ArrowBackIcon, EditIcon, SearchIcon } from "../components/icons";
 import { InterviewChips } from "../components/InterviewChips";
 import { LinePair } from "../components/LinePair";
@@ -50,8 +50,9 @@ export function InterviewPage() {
     enabled: viewer.ready,
   });
   const player = useRef<HTMLMediaElement>(null);
-  // Where playback is, in ms; null until the recording has played or been moved.
-  const [playingMs, setPlayingMs] = useState<number | null>(null);
+  // The line playback is in; null until the recording has played or been moved. Clock ticks
+  // inside the same line leave it unchanged, so they cost no re-render.
+  const [playing, setPlaying] = useState<{ seq: number | undefined; ms: number } | null>(null);
   // The player starts where the page was opened; a later ?t= (a line's time clicked) must
   // not reload the recording.
   const [startMs] = useState(t);
@@ -69,9 +70,11 @@ export function InterviewPage() {
     };
   }, []);
 
-  if (interview.isError) {
-    // A Private interview is a 404 for visitors, the same as one that doesn't exist.
-    const missing = interview.error instanceof ApiError && interview.error.status === 404;
+  // A Private interview is a 404 for visitors, the same as one that doesn't exist, even when
+  // it was loaded before. Any other failure of a refresh leaves what was loaded in place.
+  const missing =
+    interview.isError && interview.error instanceof ApiError && interview.error.status === 404;
+  if (interview.isError && (missing || interview.data === undefined)) {
     return (
       <Container sx={{ py: 6 }}>
         <Alert severity={missing ? "info" : "error"}>
@@ -112,11 +115,14 @@ export function InterviewPage() {
   // Only an audio player pins on phones: a pinned video, or a notice, would cover the text.
   const pinned = media !== null && !video;
   const lines = segments.data?.items ?? NO_SEGMENTS;
+  const lineAt = (ms: number) => lines.find((s) => ms >= s.start_ms && ms < s.end_ms);
   // The line a shared link opens at: the one playing, else the one the page opened at.
-  const hereMs = playingMs ?? t;
-  const hereLine =
-    hereMs === undefined ? undefined : lines.find((s) => hereMs >= s.start_ms && hereMs < s.end_ms);
-  const linkMs = hereLine?.start_ms ?? hereMs ?? 0;
+  const hereLine = playing
+    ? lines.find((s) => s.seq === playing.seq)
+    : t === undefined
+      ? undefined
+      : lineAt(t);
+  const linkMs = hereLine?.start_ms ?? playing?.ms ?? t ?? 0;
 
   return (
     <Container sx={{ pt: { xs: 2, md: 4 } }}>
@@ -199,7 +205,10 @@ export function InterviewPage() {
               startMs={startMs}
               ref={player}
               onTime={(ms) => {
-                setPlayingMs(ms);
+                const seq = lineAt(ms)?.seq;
+                setPlaying((prev) =>
+                  prev && seq !== undefined && prev.seq === seq ? prev : { seq, ms },
+                );
               }}
               failed={mediaFailed}
               onFailed={() => {
@@ -226,11 +235,30 @@ export function InterviewPage() {
           >
             Transcript
           </Typography>
-          {segments.isError ? (
+          {interview.isError ? (
+            <Alert
+              severity="warning"
+              sx={{ mt: 2 }}
+              action={
+                <Button
+                  color="inherit"
+                  size="small"
+                  onClick={() => {
+                    void interview.refetch();
+                  }}
+                >
+                  Try again
+                </Button>
+              }
+            >
+              The recording link couldn&apos;t be refreshed. The transcript below is still here.
+            </Alert>
+          ) : null}
+          {segments.isError && segments.data === undefined ? (
             <Alert severity="error" sx={{ mt: 2 }}>
               The transcript couldn&apos;t be loaded.
             </Alert>
-          ) : segments.isPending ? (
+          ) : segments.data === undefined ? (
             <Skeleton variant="rectangular" height={240} sx={{ mt: 2 }} />
           ) : (
             <Transcript
@@ -239,7 +267,7 @@ export function InterviewPage() {
               onSeek={goToLine}
               canPlay={media !== null}
               highlightMs={t}
-              playingMs={playingMs}
+              playing={playing === null ? null : { seq: playing.seq }}
               stickyTop={pinned ? pinHeight : 0}
             />
           )}
@@ -309,7 +337,7 @@ function Player({
     lastMs.current = ms;
     onTime(ms);
   };
-  // Media links are signed and expire (P-024); the API issues a fresh one on each load.
+  // Media links are signed and expire; the API issues a fresh one on each load.
   const props = {
     ref,
     src,
@@ -404,10 +432,11 @@ function captionTracks(segments: Segment[], language: string | undefined): Capti
     vtt: toVtt(segments.map((s) => ({ ...s, text: s.original_text }))),
     isDefault: true,
   };
-  const english = segments.flatMap((s) =>
-    s.english_text === null ? [] : [{ ...s, text: s.english_text }],
-  );
-  if (english.length === 0) return [original];
+  if (segments.every((s) => s.english_text === null)) return [original];
+  const english = segments.flatMap((s) => {
+    const text = englishText(s);
+    return text === null ? [] : [{ ...s, text }];
+  });
   return [
     original,
     {
@@ -526,7 +555,7 @@ const translationMissing = {
 
 type View = "both" | "original" | "english";
 
-// Full names where there is room; at 320px all three must still fit (Proposal).
+// Full names where there is room; at 320px all three must still fit.
 const TAB_LABELS = {
   wide: { both: "Original + English", original: "Original", english: "English translation" },
   narrow: { both: "Both", original: "Original", english: "English" },
@@ -540,9 +569,24 @@ const FIND_SCOPE = {
 
 // Which halves of a line a view shows (as LinePair does).
 const shows = (s: Segment, view: View) => ({
-  original: view !== "english" || s.english_text === null,
-  english: view !== "original" && s.english_text !== null,
+  original: view !== "english" || englishText(s) === null,
+  english:
+    view === "english" ? englishText(s) !== null : view === "both" && s.english_text !== null,
 });
+
+// The text a view shows for a line (the original where an English view has none).
+const texts = (s: Segment, view: View): string[] =>
+  view === "english"
+    ? [englishText(s) ?? s.original_text]
+    : view === "original" || s.english_text === null
+      ? [s.original_text]
+      : [s.original_text, s.english_text];
+
+// The lines whose shown text contains the query.
+const matchingSeqs = (segments: Segment[], query: string, view: View): number[] => {
+  const re = finder(query);
+  return segments.filter((s) => texts(s, view).some((x) => hasMatch(x, re))).map((s) => s.seq);
+};
 
 function Transcript({
   segments,
@@ -550,7 +594,7 @@ function Transcript({
   onSeek,
   canPlay,
   highlightMs,
-  playingMs,
+  playing,
   stickyTop,
 }: {
   segments: Segment[];
@@ -559,7 +603,8 @@ function Transcript({
   /** False when there's no recording: a line's time then only points at the line. */
   canPlay: boolean;
   highlightMs: number | undefined;
-  playingMs: number | null;
+  /** The line playing, once the recording has played. */
+  playing: { seq: number | undefined } | null;
   /** On phones, how far below the top of the screen the find bar pins (the audio player). */
   stickyTop: number;
 }) {
@@ -574,6 +619,7 @@ function Transcript({
   const scrolled = useRef(false);
   const lineRefs = useRef(new Map<number, HTMLElement>());
   const lastPlaying = useRef<number | null>(null);
+  const matches = useMemo(() => matchingSeqs(segments, query, tab), [segments, query, tab]);
   // Brings the highlighted line into view once, when it first renders.
   const scrollToHighlight = (el: HTMLElement | null) => {
     if (!el || scrolled.current) return;
@@ -589,16 +635,13 @@ function Transcript({
   }
   const someEnglish = segments.some((s) => s.english_text !== null);
   // With no English at all, the English view explains why rather than repeating the original.
-  const englishNote = tab === "english" && !someEnglish ? translationMissing[translation] : null;
+  const englishNote =
+    tab === "english" && !segments.some((s) => englishText(s) !== null)
+      ? translationMissing[translation]
+      : null;
   // English for some lines while the rest is still coming, or failed.
   const partialEnglish =
     tab !== "original" && someEnglish && (translation === "pending" || translation === "failed");
-  const texts = (s: Segment, t: View): string[] =>
-    t === "english"
-      ? [s.english_text ?? s.original_text]
-      : t === "original" || s.english_text === null
-        ? [s.original_text]
-        : [s.original_text, s.english_text];
   const corrected = (s: Segment) => {
     const shown = shows(s, tab);
     return (shown.original && s.original_edited) || (shown.english && s.english_edited);
@@ -606,11 +649,6 @@ function Transcript({
   const anyCorrected = segments.some(corrected);
 
   const re = finder(query);
-  const matchesFor = (q: string, t: View) => {
-    const r = finder(q);
-    return segments.filter((s) => texts(s, t).some((x) => hasMatch(x, r))).map((s) => s.seq);
-  };
-  const matches = matchesFor(query, tab);
   const currentSeq = matches[Math.min(current, matches.length - 1)];
   // Scrolling happens in the handlers, since every line is already on the page. The find bar
   // is pinned, so bringing a line to the middle never moves the field out of view.
@@ -622,15 +660,15 @@ function Transcript({
   };
 
   // "You are here": the playing line once the recording plays, else the line opened at.
-  const hereMs = playingMs ?? highlightMs;
-  const hereSeq =
-    hereMs === undefined
+  const hereSeq = playing
+    ? playing.seq
+    : highlightMs === undefined
       ? undefined
-      : segments.find((s) => hereMs >= s.start_ms && hereMs < s.end_ms)?.seq;
+      : segments.find((s) => highlightMs >= s.start_ms && highlightMs < s.end_ms)?.seq;
   // Follow playback only while the reader is following it: if the line that was playing is
   // on screen, keep the new one in view; if they scrolled away to read, leave them there.
   const followPlayback = (seq: number, el: HTMLElement) => {
-    if (playingMs === null || lastPlaying.current === seq) return;
+    if (playing === null || lastPlaying.current === seq) return;
     const previous =
       lastPlaying.current === null ? null : lineRefs.current.get(lastPlaying.current);
     lastPlaying.current = seq;
@@ -654,7 +692,7 @@ function Transcript({
         value={tab}
         onChange={(_, value: View) => {
           setTab(value);
-          goTo(matchesFor(query, value), 0);
+          goTo(matchingSeqs(segments, query, value), 0);
         }}
         aria-label="Transcript language"
         variant="scrollable"
@@ -717,7 +755,7 @@ function Transcript({
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
-                  goTo(matchesFor(e.target.value, tab), 0);
+                  goTo(matchingSeqs(segments, e.target.value, tab), 0);
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
@@ -779,7 +817,7 @@ function Transcript({
                     ref={(el: HTMLElement | null) => {
                       if (el) lineRefs.current.set(s.seq, el);
                       else lineRefs.current.delete(s.seq);
-                      if (here && hereMs === highlightMs) scrollToHighlight(el);
+                      if (here && playing === null) scrollToHighlight(el);
                       if (here && el) followPlayback(s.seq, el);
                     }}
                     aria-current={here ? "true" : undefined}

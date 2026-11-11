@@ -1,4 +1,4 @@
-"""Correcting an interview's details after upload (D-004): PATCH /api/interviews/{id}."""
+"""Correcting an interview's details after upload: PATCH /api/interviews/{id}."""
 
 import uuid
 from collections.abc import Iterator

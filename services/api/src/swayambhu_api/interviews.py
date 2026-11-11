@@ -1,9 +1,9 @@
-"""Reading interviews, their transcripts and their media (Proposal: paths and shapes).
+"""Reading interviews, their transcripts and their media.
 
 Anonymous visitors and admins use the same routes. What each may see is decided only by
 `visibility.visible_to`: a Private interview is a 404 for visitors, exactly like one that
 doesn't exist, so its existence isn't revealed. Visitors see Public interviews whatever their
-status (D-008), with the status and translation state to label them.
+status, with the status and translation state to label them.
 """
 
 import uuid
@@ -28,7 +28,7 @@ from swayambhu_core.storage import LocalMediaStore
 from swayambhu_api import media_urls
 from swayambhu_api.auth import CurrentViewer
 from swayambhu_api.config import Settings, get_settings
-from swayambhu_api.db import DbSession
+from swayambhu_api.db import DbSession, new_session
 from swayambhu_api.filters import InterviewFilters
 from swayambhu_api.visibility import visible_to
 
@@ -81,7 +81,7 @@ class InterviewDetail(InterviewSummary):
     media: Media | None
     # Which step is running or why it failed. Admins only; always None for visitors.
     status_detail: str | None
-    # What primary_language is made of (D-004), for the admin's language correction.
+    # What primary_language is made of, for the admin's language correction.
     # Admins only; always None for visitors.
     language_detected: str | None
     # The detected language's share of the speech whose language is known, 0 to 1.
@@ -169,7 +169,7 @@ def list_interviews(
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
     one status and/or visibility (for the admin's work queue: "not published" is done and
-    private) and matching the same metadata filters as search (F7). The filters only narrow
+    private) and matching the same metadata filters as search. The filters only narrow
     what `summary_query` already allows, so a visitor asking for private interviews gets
     none."""
     query = summary_query(viewer).where(*where)
@@ -266,16 +266,16 @@ def list_segments(
 )
 def get_media(
     media_id: int,
-    session: DbSession,
     settings: SettingsDep,
     expires: Annotated[int, Query()],
     sig: Annotated[str, Query()],
     scope: Annotated[media_urls.Scope, Query()] = "public",
 ) -> FileResponse:
     """Stream a media file from a link made by the interview detail route. Supports HTTP
-    Range requests, so players can seek without downloading the whole file (NF5).
+    Range requests, so players can seek without downloading the whole file.
 
-    A visitor's link stops working as soon as its interview is made Private."""
+    A visitor's link stops working as soon as its interview is made Private. The database
+    session is closed before the file is sent, so a long download holds no connection."""
     if not media_urls.is_valid(settings, media_id, expires, scope, sig):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This media link is invalid or expired")
     query = select(MediaFileRow).where(MediaFileRow.id == media_id)
@@ -283,7 +283,8 @@ def get_media(
         query = query.join(InterviewRow, InterviewRow.id == MediaFileRow.interview_id).where(
             visible_to(None)
         )
-    media = session.scalar(query)
+    with new_session(settings) as session:
+        media = session.scalar(query)
     if media is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
     try:

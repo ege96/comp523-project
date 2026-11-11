@@ -40,12 +40,20 @@ Admin sign-in needs the Firebase web config. It is public by design and committe
 
 The web app is a TanStack Router single-page app (`src/router.tsx` lists the routes). It fetches with TanStack Query and checks every API response with zod schemas (`src/api/schemas.ts`) that are type-checked against `src/api/schema.gen.ts`, which is generated from the API. After changing an API route or response model, run `npm run gen:api` (needs uv) and commit the result.
 
-Without Docker, run each service directly:
+Without Docker, you need a local Postgres 16 with pgvector (`db/init` enables the extension) and these steps:
 
 ```sh
-cd services/api && uv sync && uv run uvicorn swayambhu_api.main:app --reload
-cd services/worker && uv sync && uv run python -m swayambhu_worker
+mkdir -p /absolute/path/to/media     # one writable folder, used by BOTH the API and the worker
+cp .env.example services/api/.env && cp .env.example services/worker/.env
+# In both .env files set the same absolute MEDIA_ROOT, e.g. MEDIA_ROOT=/absolute/path/to/media
+cd services/api && uv sync && uv run python -m swayambhu_api.migrate upgrade head
+uv run uvicorn swayambhu_api.main:app --reload          # listens on 8000
+cd ../worker && uv sync && uv run python -m swayambhu_worker   # no HTTP listener
 ```
+
+`MEDIA_ROOT` must be an absolute path and the same folder for both services: the API stores uploads there and the worker reads them. The relative `./media` in `.env.example` would point at a different folder for each service.
+
+The web theme (colors and typography) lives in `apps/web/src/theme.ts`.
 
 ## Checks
 
@@ -84,7 +92,7 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 
 `GET /api/search?q=...` returns transcript moments, best first: each has its interview, a start and end time, and an excerpt of about 30 s of transcript lines to seek to. Keyword search (Postgres full-text) and semantic search (the query's embedding against stored chunk embeddings) are merged by reciprocal rank fusion. There is no match count, only `has_more`. The first page also has `interviews`: up to five interviews whose title, description, interviewee, interviewer or location contain the query's words, since such a match has no timestamp. Optional filters: `language` (any language heard), `interviewee` (an id, or `unknown`), `recorded_from`/`recorded_to` (`undated=true` also keeps interviews with no date), and `media` (`audio` or `video`, from the uploaded file's type). `GET /api/interviews` takes the same filters, so the interview list can be browsed without a query. `GET /api/search/filters` lists the languages and interviewees a viewer can filter by. Both filter by visibility like every other route. The API embeds queries with the same `EMBEDDING_*` settings the worker uses; if the provider fails or takes longer than `SEARCH_EMBEDDING_TIMEOUT_SECONDS` (default 5; remote providers only), results are keyword-only and the response says `"search_mode": "keyword_only"`. Each moment's `matched_by` says which searches found it. `SEARCH_CANDIDATES`, `SEARCH_RRF_K` and `SEARCH_EXCERPT_MS` tune the ranking and excerpts.
 
-`EMBEDDING_PROVIDER=local` (Proposal) embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
+`EMBEDDING_PROVIDER=local` embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
 
 ## Sign-in and admins
 
@@ -107,7 +115,7 @@ In the web app, the footer links to `/signin` (Google in a popup, or email and p
 
 ## Uploading recordings
 
-Admins upload recordings with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (Proposal; served by `tuspyserver`). If the connection drops, the upload resumes from the last byte the server has rather than starting again. The web app uses `tus-js-client`. Every route needs an admin token.
+Admins upload recordings with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (served by `tuspyserver`). If the connection drops, the upload resumes from the last byte the server has rather than starting again. The web app uses `tus-js-client`. Every route needs an admin token.
 
 In the web app, admins do all of this from **Upload & review** (`/admin`): pick or drop a file, fill in what is known, and watch the progress bar. A dropped connection retries on its own, and pressing Upload again with the same file and details resumes rather than restarting. The same page lists the interviews in tabs by what to do next (needs attention, processing, not published, published). Each interview's page (`/admin/interviews/{id}`) shows its next step, processing steps and plain-language errors with a Retry button, its details, the transcript editor, and Publish or Unpublish.
 
@@ -162,7 +170,7 @@ uv run python -m swayambhu_api.migrate revision --autogenerate -m "add x"  # aft
 uv run python -m swayambhu_api.migrate check                              # models and migrations agree
 ```
 
-Review every autogenerated migration before committing it. The API container runs `upgrade head` itself on every start (`services/api/start.sh`), locally and on CloudApps, so a deploy never needs a manual migration step. Pods starting together take turns through a Postgres advisory lock. If a migration fails, the container exits and OpenShift keeps the previous pod serving. Set `RUN_MIGRATIONS=0` to skip it. Write migrations that the previous release can still run against (add columns before using them, drop them a release later), because the old pod keeps serving while the new one starts. A database created earlier from `db/init/002_admins.sql` is adopted by the first migration without changes.
+Review every autogenerated migration before committing it. The API container runs `upgrade head` itself on every start (`services/api/start.sh`), locally and on CloudApps, so a deploy never needs a manual migration step. Pods starting together take turns through a Postgres advisory lock. On CloudApps the API Deployment uses the `Recreate` strategy, so the old pod is stopped before the new one starts: if a migration fails, the container exits and the API is down until you redeploy the previous image (`oc rollout undo deploy/api`) or fix the migration. Migrations are forward-only unless a downgrade is written, so rolling back the image does not undo one that already ran; take a database backup first (see the deploy guide). Set `RUN_MIGRATIONS=0` to skip it. Prefer migrations the previous release can still run against (add columns before using them, drop them a release later), so a rollback of the image stays possible. A database created earlier from `db/init/002_admins.sql` is adopted by the first migration without changes.
 
 Integration tests wipe tables and roll migrations back and forth, so they refuse to run unless the database name ends in `_test`:
 
@@ -173,7 +181,7 @@ DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_test uv run pytest 
 
 ## Deployment
 
-The target is UNC Carolina CloudApps (OpenShift). **[docs/deploy-cloudapps.md](docs/deploy-cloudapps.md)** has every step: secrets, the database, the three apps and their memory limits, the shared hostname, Firebase, automatic rebuilds, the first admin, day-to-day jobs, backups and restore, and troubleshooting. Every image runs as a non-root, arbitrary UID and listens on 8080, and the web app and API share one hostname, with `/api` routed to the API. Keys and passwords live in OpenShift Secrets, never in this repository; only the Firebase web config is public.
+The target is UNC Carolina CloudApps (OpenShift). **[docs/deploy-cloudapps.md](docs/deploy-cloudapps.md)** has every step: secrets, the database, the three apps and their memory limits, the shared hostname, Firebase, automatic rebuilds, the first admin, day-to-day jobs, backups and restore, and troubleshooting. Every image runs as a non-root, arbitrary UID. The web and API images listen on 8080; the worker has no HTTP listener. The web app and API share one hostname, with `/api` routed to the API. Keys and passwords live in OpenShift Secrets, never in this repository; only the Firebase web config is public.
 
 - **Web:** nginx sends a Content-Security-Policy, `nosniff`, Referrer-Policy, HSTS and Permissions-Policy on every response (`apps/web/security-headers.inc`). Hashed files under `/assets/` are cached for a year, and `index.html` is revalidated on every load. A new external host (Firebase sign-in, the media store) has to be added to the CSP, or the browser blocks it.
 - **API behind the router:** uvicorn takes the client IP from `X-Forwarded-For` only when the request comes from an address in `FORWARDED_ALLOW_IPS`. The API image sets it to `*`, because only the OpenShift router can reach the pod. Override it on the Deployment if the API is ever exposed another way.

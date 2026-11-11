@@ -1,6 +1,7 @@
 import Box from "@mui/material/Box";
 import type { ReactNode } from "react";
 
+import { englishText } from "../captions";
 import { tokens } from "../theme";
 
 /**
@@ -26,14 +27,16 @@ export function LinePair({
   originalNotes?: string[];
   englishNotes?: string[];
 }) {
-  const showOriginal = show !== "english" || english === null;
-  const showEnglish = show !== "original" && english !== null;
+  // The English view also takes an original that is itself English, so it is never shown twice.
+  const asEnglish = englishText({ original_text: original, english_text: english, language: lang });
+  const showOriginal = show !== "english" || asEnglish === null;
+  const showEnglish = show === "english" ? asEnglish !== null : show === "both" && english !== null;
   // The English becomes the lead when it is the only half shown.
   const englishLeads = !showOriginal;
   // Asked for English, a line without any shows its original, saying so rather than passing
   // it off as the translation.
   const notesOnOriginal =
-    show === "english" && english === null
+    show === "english" && asEnglish === null
       ? ["No English for this line", ...originalNotes]
       : originalNotes;
   return (
@@ -47,7 +50,7 @@ export function LinePair({
           <WithNotes notes={notesOnOriginal}>{renderText(original)}</WithNotes>
         </Box>
       ) : null}
-      {showEnglish ? (
+      {showEnglish && asEnglish !== null ? (
         <Box
           component="p"
           lang="en"
@@ -58,7 +61,9 @@ export function LinePair({
             color: englishLeads ? tokens.ink : tokens.inkMuted,
           }}
         >
-          <WithNotes notes={englishNotes}>{renderText(english)}</WithNotes>
+          <WithNotes notes={english === null ? originalNotes : englishNotes}>
+            {renderText(asEnglish)}
+          </WithNotes>
         </Box>
       ) : null}
     </Box>

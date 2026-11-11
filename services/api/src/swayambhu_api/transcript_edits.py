@@ -1,4 +1,4 @@
-"""Admins correcting transcripts (Proposal: paths and shapes).
+"""Admins correcting transcripts.
 
 An edit goes into `segments.original_edited` / `english_edited`; the machine output stays
 untouched beside it, so an edit can always be undone by sending `null`. Saving queues the
@@ -22,8 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
-from swayambhu_core.models import AdminRow, InterviewRow, JobRow, SegmentRow
+from swayambhu_core import jobs, transcripts
+from swayambhu_core.models import AdminRow, InterviewRow, SegmentRow
 from swayambhu_core.text import english_edit_is_stale, english_is_stale, translation_fingerprint
 
 from swayambhu_api.auth import CurrentAdmin
@@ -127,14 +127,11 @@ def _merged(machine: str | None, edit: str | None) -> str | None:
 
 
 def _refuse_while_transcribing(session: Session, interview_id: uuid.UUID) -> None:
-    transcribing = session.scalar(
-        select(JobRow.id).where(
-            JobRow.interview_id == interview_id,
-            JobRow.kind == "transcribe",
-            JobRow.state.in_(("queued", "running")),
-        )
-    )
-    if transcribing is not None:
+    """Refuse a change to the lines while a transcription that replaces them all is waiting
+    or running. Locks the interview row first, so the change and an approved transcription
+    are decided one after the other (`swayambhu_core.transcripts`)."""
+    transcripts.lock_interview(session, interview_id)
+    if transcripts.transcription_waiting(session, interview_id):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This interview is being transcribed, which replaces every line. "

@@ -146,7 +146,6 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
   );
 }
 
-/** A titled panel, as in the admin mockup. */
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Paper component="section" sx={{ p: { xs: 2, sm: 3 } }}>
@@ -361,8 +360,7 @@ function Processing({
   const [fixing, setFixing] = useState(mismatch !== null);
   const steps = processingSteps(jobs.data?.items ?? []);
   const retryable = retryableJobs(jobs.data?.items ?? []);
-  // Proposal: once everything has finished, the steps fold into one line; anything waiting,
-  // running or failed keeps them open.
+
   const allDone =
     interview.status === "done" && steps.length > 0 && steps.every((s) => s.job.state === "done");
   const [showSteps, setShowSteps] = useState(false);
@@ -641,10 +639,7 @@ function Details({ interview }: { interview: InterviewDetail }) {
   );
 }
 
-/**
- * D-004: the language is detected from the audio and an admin confirms or corrects it. Asked
- * as a yes/no question, because Nepal Bhasa is often detected as Nepali.
- */
+/** Ask admins to verify detections because Nepal Bhasa can be classified as Nepali. */
 function LanguageCheck({
   interview,
   onChange,

@@ -15,7 +15,7 @@ export interface paths {
          * List Interviews
          * @description Interviews the viewer may see, most recently added first, optionally only those with
          *     one status and/or visibility (for the admin's work queue: "not published" is done and
-         *     private) and matching the same metadata filters as search (F7). The filters only narrow
+         *     private) and matching the same metadata filters as search. The filters only narrow
          *     what `summary_query` already allows, so a visitor asking for private interviews gets
          *     none.
          */
@@ -84,9 +84,10 @@ export interface paths {
         /**
          * Get Media
          * @description Stream a media file from a link made by the interview detail route. Supports HTTP
-         *     Range requests, so players can seek without downloading the whole file (NF5).
+         *     Range requests, so players can seek without downloading the whole file.
          *
-         *     A visitor's link stops working as soon as its interview is made Private.
+         *     A visitor's link stops working as soon as its interview is made Private. The database
+         *     session is closed before the file is sent, so a long download holds no connection.
          */
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
@@ -107,7 +108,8 @@ export interface paths {
         /**
          * Search
          * @description Transcript moments most relevant to `q`, best first. Paging goes as deep as
-         *     SEARCH_CANDIDATES hits from each search.
+         *     SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
+         *     them again.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -554,7 +556,7 @@ export interface components {
         };
         /**
          * InterviewUpdate
-         * @description Only the fields sent change. For the optional details (D-004), null means unknown.
+         * @description Only the fields sent change. For the optional details, null means unknown.
          */
         InterviewUpdate: {
             /** Visibility */
@@ -698,6 +700,11 @@ export interface components {
             items: components["schemas"]["Moment"][];
             /** Interviews */
             interviews: components["schemas"]["InterviewSummary"][];
+            /**
+             * More Metadata Matches
+             * @default false
+             */
+            more_metadata_matches: boolean;
             /** Has More */
             has_more: boolean;
             /**

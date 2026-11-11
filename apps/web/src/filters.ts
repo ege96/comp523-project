@@ -38,8 +38,9 @@ export function useFilterSummary(filters: InterviewFilters): string[] {
     const id = filters.interviewee;
     parts.push(data?.interviewees.find((p) => p.id === id)?.name ?? `Interviewee ${String(id)}`);
   }
-  const from = filters.from?.slice(0, 4);
-  const to = filters.to?.slice(0, 4);
+  // Whole-year bounds read as years; any other date is shown exactly.
+  const from = filters.from?.endsWith("-01-01") ? filters.from.slice(0, 4) : filters.from;
+  const to = filters.to?.endsWith("-12-31") ? filters.to.slice(0, 4) : filters.to;
   if (from && to) parts.push(from === to ? from : `${from}–${to}`);
   else if (from) parts.push(`From ${from}`);
   else if (to) parts.push(`Up to ${to}`);

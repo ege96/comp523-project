@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -134,6 +135,47 @@ def test_match_case_and_literal_replacement(
     body = {"find": "Swayambu", "replace": r"S\1 (.*)", "field": "english"}
     res = client.post(path(interview_id), json=body)
     assert res.json()["items"][0]["english_edited"] == r"S\1 (.*) at dawn"
+
+
+def test_replacement_text_is_literal(
+    client: TestClient, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    body = {"find": "dawn", "replace": r"$& \g<0> \\", "field": "english"}
+    res = signed_in(client, admin).post(path(interviews["public"]), json=body)
+    assert res.json()["items"][0]["english_edited"] == r"Swayambu at $& \g<0> \\"
+
+
+def test_case_insensitive_matching_follows_unicode_case(
+    client: TestClient, db_session: Session, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    interview_id = interviews["public"]
+    [line, *_] = lines(db_session, interview_id)
+    line.english_machine = "Ünder the ÉGLISE"
+    db_session.commit()
+    body = {"find": "église", "replace": "stupa", "field": "english"}
+    res = signed_in(client, admin).post(path(interview_id), json=body)
+    assert [i["english_edited"] for i in res.json()["items"]] == ["Ünder the stupa"]
+
+
+def test_same_text_replacement_changes_nothing(
+    client: TestClient, db_session: Session, admin: Admin, interviews: dict[str, uuid.UUID]
+) -> None:
+    interview_id = interviews["public"]
+    other = AdminRow(email="other@example.org")
+    db_session.add(other)
+    db_session.flush()
+    [line, *_] = lines(db_session, interview_id)
+    line.english_edited = "Swayambu at sunrise"
+    line.edited_by = other.id
+    line.edited_at = edited_at = datetime(2024, 1, 1, tzinfo=UTC)
+    db_session.commit()
+
+    body = {"find": "Swayambu", "replace": "Swayambu", "field": "english"}
+    res = signed_in(client, admin).post(path(interview_id), json=body)
+    assert res.json() == {"items": [], "skipped": 0}
+    [line, *_] = lines(db_session, interview_id)
+    assert (line.edited_by, line.edited_at) == (other.id, edited_at)
+    assert queued_jobs(db_session) == []
 
 
 def test_lines_that_would_be_blank_are_skipped_and_undo_restores_machine_text(

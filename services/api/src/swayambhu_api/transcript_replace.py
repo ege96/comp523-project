@@ -1,4 +1,4 @@
-"""Find and replace across one interview's transcript (Proposal: path and shapes).
+"""Find and replace across one interview's transcript.
 
 Speech recognition tends to get the same name or place wrong every time it comes up, so an
 admin can fix every occurrence at once instead of line by line. Each changed line is stored
@@ -87,6 +87,7 @@ def replace_in_transcript(
     interview = _interview(session, interview_id)
     _refuse_while_transcribing(session, interview_id)
 
+    # Plain text on str, so case-insensitive matching follows Unicode case rules.
     pattern = re.compile(re.escape(body.find), 0 if body.match_case else re.IGNORECASE)
     # Locked, so a line saved by hand at the same moment is applied before or after, not lost.
     segments = session.scalars(
@@ -104,6 +105,8 @@ def replace_in_transcript(
             continue
         # A function, so backslashes in the replacement are taken literally.
         new = pattern.sub(lambda _: body.replace, current).strip()
+        if new == current.strip():
+            continue  # Replaced with the same text: nothing to store or re-attribute.
         if not new or len(new) > MAX_LINE_LENGTH:
             skipped += 1
             continue
@@ -134,8 +137,15 @@ def replace_in_transcript(
             "admin %s replaced text in %d lines of interview %s",
             admin.id, len(changed), interview_id,
         )  # fmt: skip
-        for segment in changed:
-            session.refresh(segment)
+        # edited_at was set by the database: read every changed line back in one query.
+        changed = list(
+            session.scalars(
+                select(SegmentRow)
+                .where(SegmentRow.id.in_([s.id for s in changed]))
+                .order_by(SegmentRow.seq)
+                .execution_options(populate_existing=True)
+            )
+        )
 
     # Every changed line is now either this admin's edit or back to the machine text.
     return ReplaceResult(

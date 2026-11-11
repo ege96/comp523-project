@@ -6,6 +6,7 @@ from swayambhu_providers import Embedder, Transcriber, Translator
 from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber, elevenlabs_client
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber, FakeTranslator
 from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.identity import local_embedding_name
 from swayambhu_providers.openai_provider import (
     OpenAIEmbedder,
     OpenAITranscriber,
@@ -65,7 +66,13 @@ def embedder_name(settings: ProviderSettings) -> str:
         return f"fake:hash@{settings.embedding_dimensions or 8}"
     model = _required(settings.embedding_model, "EMBEDDING_MODEL", provider)
     if provider == "local":
-        return f"local:{model}"
+        return local_embedding_name(
+            model,
+            settings.embedding_model_revision,
+            query_prefix=settings.embedding_query_prefix,
+            passage_prefix=settings.embedding_passage_prefix,
+            max_tokens=settings.local_embedding_max_tokens,
+        )
     dimensions = settings.embedding_dimensions
     return f"openai:{model}" + (f"@{dimensions}" if dimensions else "")
 
@@ -86,6 +93,7 @@ def _build_local_embedder(settings: ProviderSettings, model: str) -> Embedder:
     return LocalOnnxEmbedder(
         model,
         model_dir,
+        revision=settings.embedding_model_revision,
         query_prefix=settings.embedding_query_prefix,
         passage_prefix=settings.embedding_passage_prefix,
         max_tokens=settings.local_embedding_max_tokens,

@@ -1,6 +1,6 @@
-import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 
-import { ApiError, getJson, type Viewer } from "../api/client";
+import { ApiError, getJson, interviewQueries, type Viewer } from "../api/client";
 import {
   AdminSegmentListSchema,
   AdminSegmentSchema,
@@ -89,7 +89,7 @@ async function patchInterview(token: string | null, id: string, update: Intervie
   if (!res.ok) throw new ApiError(res.status, url);
 }
 
-/** Publish (Public) or hide (Private) an interview. Allowed at any time (D-008). */
+/** Publish (Public) or hide (Private) an interview. Allowed at any time. */
 export function useSetVisibility() {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
@@ -107,7 +107,7 @@ export function useSetVisibility() {
 }
 
 /**
- * Correct an interview's details after upload (D-004). Only the fields given change; null
+ * Correct an interview's details after upload. Only the fields given change; null
  * clears an optional one, and `language: null` goes back to the detected language.
  */
 export function useUpdateInterview(interviewId: string) {
@@ -124,6 +124,21 @@ export function useUpdateInterview(interviewId: string) {
         ),
       ),
   });
+}
+
+/**
+ * What saved transcript text changes besides the admin transcript (which the caller updates
+ * from the response): the public transcript, the jobs (search indexing and maybe an English
+ * update are queued) and search results. The interview itself is unchanged.
+ */
+function refreshAfterTextEdit(queryClient: QueryClient, viewer: Viewer, interviewId: string) {
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: interviewQueries.segments(viewer, interviewId).queryKey,
+    }),
+    queryClient.invalidateQueries({ queryKey: adminQueries.jobs(viewer, interviewId).queryKey }),
+    queryClient.invalidateQueries({ queryKey: ["search", viewer.key] }),
+  ]);
 }
 
 async function patchSegment(
@@ -162,14 +177,13 @@ export function useEditSegment(interviewId: string) {
         adminQueries.transcript(viewer, interviewId).queryKey,
         (old) => old && { items: old.items.map((line) => (line.seq === saved.seq ? saved : line)) },
       );
+      return refreshAfterTextEdit(queryClient, viewer, interviewId);
     },
-    // The public transcript, the job list and search results change too.
-    onSettled: () =>
-      Promise.all(
-        ["interviews", "search"].map((prefix) =>
-          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
-        ),
-      ),
+    // The line may have changed on the server anyway (a refused save after someone else's).
+    onError: () =>
+      queryClient.invalidateQueries({
+        queryKey: adminQueries.transcript(viewer, interviewId).queryKey,
+      }),
   });
 }
 
@@ -209,13 +223,12 @@ export function useReplaceText(interviewId: string) {
         adminQueries.transcript(viewer, interviewId).queryKey,
         (old) => old && { items: old.items.map((line) => changed.get(line.seq) ?? line) },
       );
+      return items.length > 0 ? refreshAfterTextEdit(queryClient, viewer, interviewId) : undefined;
     },
-    onSettled: () =>
-      Promise.all(
-        ["interviews", "search"].map((prefix) =>
-          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
-        ),
-      ),
+    onError: () =>
+      queryClient.invalidateQueries({
+        queryKey: adminQueries.transcript(viewer, interviewId).queryKey,
+      }),
   });
 }
 
@@ -241,7 +254,7 @@ export function useRetranslate(interviewId: string) {
   });
 }
 
-/** Transcribing again was refused because this many lines have corrections (P-013). */
+/** Transcribing again was refused because this many lines have corrections. */
 export class CorrectionsWouldBeLost extends Error {
   constructor(readonly correctedLines: number) {
     super(`${String(correctedLines)} corrected lines would be replaced`);

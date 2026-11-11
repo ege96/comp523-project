@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatVttTime, toVtt } from "./captions";
+import { englishText, formatVttTime, toVtt } from "./captions";
 
 describe("captions", () => {
   it("formats WebVTT times as HH:MM:SS.mmm", () => {
@@ -8,6 +8,15 @@ describe("captions", () => {
     expect(formatVttTime(754_005)).toBe("00:12:34.005");
     expect(formatVttTime(3_723_450)).toBe("01:02:03.450");
     expect(formatVttTime(-5)).toBe("00:00:00.000");
+  });
+
+  it("takes the translation, else an original that is itself English", () => {
+    const line = { original_text: "Namaste", english_text: null, language: "ne" };
+    expect(englishText(line)).toBeNull();
+    expect(englishText({ ...line, english_text: "Hello" })).toBe("Hello");
+    expect(englishText({ ...line, original_text: "Hello", language: "en" })).toBe("Hello");
+    expect(englishText({ ...line, original_text: "Hello", language: "en-GB" })).toBe("Hello");
+    expect(englishText({ ...line, language: null })).toBeNull();
   });
 
   it("builds a caption file, escaping what would break a cue", () => {

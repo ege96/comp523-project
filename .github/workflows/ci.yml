@@ -37,6 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          cache-suffix: api
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -75,6 +77,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          cache-suffix: worker
       - name: Install FFmpeg (the static build the worker image uses; bump both together)
         run: |
           id=$(docker create mwader/static-ffmpeg:9.0.2-1)
@@ -101,6 +105,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          cache-suffix: core
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -120,6 +126,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+        with:
+          cache-suffix: providers
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -143,7 +151,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       # No install scripts: blocks the usual npm supply-chain attack. The build doesn't need them.
-      - run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
       - run: npm run lint
@@ -157,6 +165,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
       # Lint and format hooks are skipped here: the api, worker and web jobs already run them.
       - run: uvx pre-commit run --all-files --show-diff-on-failure
         env:

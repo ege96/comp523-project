@@ -98,6 +98,9 @@ function Results({
 
   const moments = data?.pages.flatMap((page) => page.items) ?? [];
   const pageCount = data?.pages.length ?? 0;
+  // Interviews whose title, description, people or place match come with the first page.
+  const interviews = data?.pages[0]?.interviews ?? [];
+  const moreInterviews = data?.pages[0]?.more_metadata_matches ?? false;
 
   // Never a count (product rule): just what changed.
   const message =
@@ -105,11 +108,13 @@ function Results({
       ? isError
         ? "" // The error Alert speaks for itself.
         : "Searching transcripts…"
-      : moments.length === 0
-        ? "No moments matched"
-        : pageCount > 1
-          ? "More moments loaded"
-          : "Results updated";
+      : moments.length === 0 && interviews.length === 0
+        ? "No interviews or moments matched"
+        : moments.length === 0
+          ? "Interviews matched, no transcript moments"
+          : pageCount > 1
+            ? "More moments loaded"
+            : "Results updated";
   useEffect(() => {
     onStatus(message);
   }, [message, onStatus]);
@@ -147,29 +152,41 @@ function Results({
   }
 
   const keywordOnly = data.pages.some((page) => page.search_mode === "keyword_only");
-  // Interviews whose title, description, people or place match come with the first page.
-  const interviews = data.pages[0]?.interviews ?? [];
   return (
     <Stack spacing={2} component="section" aria-labelledby="results-heading">
+      <Typography
+        variant="h2"
+        sx={{ fontSize: "1.5rem" }}
+        id="results-heading"
+        ref={heading}
+        tabIndex={-1}
+      >
+        Search results
+      </Typography>
+      {/* With no results the button sits by that message instead, so there's only one. */}
+      <FilterSummary
+        filters={pickFilters(params)}
+        onClear={clearFilters}
+        showClear={moments.length > 0}
+      />
       {interviews.length > 0 ? (
         <Stack spacing={1} component="section" aria-labelledby="interview-matches-heading">
-          <Typography variant="subtitle1" component="h2" id="interview-matches-heading">
-            Interviews matching your words
+          <Typography variant="subtitle1" component="h3" id="interview-matches-heading">
+            Top interviews matching your words
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Found in the title, description, interviewee, interviewer or place.
           </Typography>
           <InterviewList interviews={interviews} />
+          {moreInterviews ? (
+            <Typography variant="body2" color="text.secondary">
+              More interviews match than are shown here. Add words or filters to narrow them down.
+            </Typography>
+          ) : null}
         </Stack>
       ) : null}
-      <Box>
-        <Typography
-          variant="subtitle1"
-          component="h2"
-          id="results-heading"
-          ref={heading}
-          tabIndex={-1}
-        >
+      <Box component="section" aria-labelledby="moments-heading">
+        <Typography variant="subtitle1" component="h3" id="moments-heading">
           Relevant transcript moments
         </Typography>
         <Typography variant="body2" color="text.secondary">
@@ -177,12 +194,6 @@ function Results({
           translation. Transcribed and translated by machine; lines may contain errors.
         </Typography>
       </Box>
-      {/* With no results the button sits by that message instead, so there's only one. */}
-      <FilterSummary
-        filters={pickFilters(params)}
-        onClear={clearFilters}
-        showClear={moments.length > 0}
-      />
       {keywordOnly ? (
         <Alert severity="info">
           Searching by meaning isn&apos;t available right now, so these results only match your
@@ -192,7 +203,7 @@ function Results({
       {moments.length === 0 ? (
         <Stack spacing={1} sx={{ alignItems: "flex-start" }}>
           <Typography color="text.secondary">
-            No moments matched. Try different words, a question, or fewer filters.
+            No transcript moments matched. Try different words, a question, or fewer filters.
           </Typography>
           {filtered ? (
             <Button variant="outlined" onClick={clearFilters}>

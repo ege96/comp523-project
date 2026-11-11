@@ -1,6 +1,6 @@
 """Allow `retranscribe` jobs: transcribe again even though admins have corrected lines.
 
-An admin queues one only after confirming that the corrections will be replaced (P-013).
+An admin queues one only after confirming that the corrections will be replaced.
 Only widens a CHECK, so the previous release keeps working while this runs.
 
 Revision ID: 0008

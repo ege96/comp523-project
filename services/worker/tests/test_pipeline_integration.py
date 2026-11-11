@@ -157,9 +157,9 @@ def test_a_recording_becomes_segments_translations_embeddings_and_playback(
         playback = session.scalars(
             select(MediaFileRow).where(MediaFileRow.kind == "playback")
         ).one()
-        assert (playback.content_type, playback.storage_key) == (
-            "audio/mp4", f"interviews/{interview_id}/playback.m4a",
-        )  # fmt: skip
+        assert playback.content_type == "audio/mp4"
+        assert playback.storage_key.startswith(f"interviews/{interview_id}/playback-")
+        assert playback.storage_key.endswith(".m4a")
         with store.local_copy(playback.storage_key) as copy:
             assert copy.stat().st_size == playback.size_bytes
 
@@ -261,7 +261,7 @@ def test_edited_transcripts_are_not_replaced(
         first = select(SegmentRow.original_text).where(SegmentRow.seq == 0)
         assert session.scalar(first) == "सच्याइएको"
 
-    # After the admin confirms losing the corrections (P-013), it transcribes again.
+    # After the admin confirms losing the corrections, it transcribes again.
     with new_session() as session:
         jobs.enqueue(session, "retranscribe", interview_id)
         session.commit()
