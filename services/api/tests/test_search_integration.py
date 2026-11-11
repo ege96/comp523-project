@@ -19,6 +19,7 @@ from swayambhu_core.models import (
 from swayambhu_providers import EmbeddingKind, ProviderError
 from swayambhu_providers.fake_provider import FakeEmbedder
 
+from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.main import app
 from swayambhu_api.search import get_embedder
 from tests.fakes import ADMIN, as_viewer
@@ -117,7 +118,10 @@ Found = tuple[str, int, tuple[int, ...], tuple[str, ...]]  # title, start, seqs,
 
 def moments(client: TestClient, query: str, mode: str = "hybrid") -> list[Found]:
     body = client.get(f"/api/search?q={query}").json()
-    assert set(body) == {"items", "interviews", "has_more", "search_mode"}  # never a count
+    # never a count
+    assert set(body) == {
+        "items", "interviews", "more_metadata_matches", "has_more", "search_mode",
+    }  # fmt: skip
     assert body["search_mode"] == mode
     return [
         (
@@ -195,6 +199,17 @@ def test_the_interview_list_takes_the_same_filters(
     assert body["total"] == len(expected)
 
 
+@pytest.mark.parametrize("path", ["/api/search?q=lamp&", "/api/interviews?"])
+@pytest.mark.parametrize(
+    "dates",
+    ["recorded_from=2024-02-01&recorded_to=2024-01-31", "recorded_from=0000-01-01"],
+)
+def test_reversed_date_ranges_and_year_zero_are_refused(
+    client: TestClient, archive: dict[str, uuid.UUID], path: str, dates: str
+) -> None:
+    assert as_viewer(client).get(f"{path}{dates}").status_code == 422
+
+
 def test_search_finds_interviews_by_their_details(
     client: TestClient, archive: dict[str, uuid.UUID], db_session: Session
 ) -> None:
@@ -215,6 +230,63 @@ def test_search_finds_interviews_by_their_details(
     assert titles(as_viewer(client, ADMIN), "Hidden") == ["private"]
     assert titles(visitor, "Maya", "&media=audio") == []  # filters apply too
     assert titles(visitor, "Maya", "&offset=20") == []  # first page only
+
+
+def test_search_says_when_more_interviews_match_by_details(
+    client: TestClient, archive: dict[str, uuid.UUID], db_session: Session
+) -> None:
+    def add(visibility: str) -> None:
+        db_session.add(InterviewRow(title="Chorten story", visibility=visibility))
+        db_session.commit()
+
+    def overflow(viewer: TestClient, page: str = "") -> tuple[int, bool]:
+        body = viewer.get(f"/api/search?q=chorten{page}").json()
+        return len(body["interviews"]), body["more_metadata_matches"]
+
+    for _ in range(5):
+        add("public")
+    add("private")
+    assert overflow(as_viewer(client, ADMIN)) == (5, True)
+    visitor = as_viewer(client)
+    assert overflow(visitor) == (5, False)  # the Private sixth match doesn't count
+    add("public")
+    assert overflow(visitor) == (5, True)
+    assert overflow(visitor, "&offset=20") == (0, False)
+
+
+def test_many_matching_lines_in_one_moment_leave_room_for_other_interviews(
+    client: TestClient, archive: dict[str, uuid.UUID], db_session: Session, settings: Settings
+) -> None:
+    crowded = InterviewRow(title="crowded", visibility="public")
+    other = InterviewRow(title="other", visibility="public")
+    db_session.add_all([crowded, other])
+    db_session.flush()
+    db_session.add_all(
+        SegmentRow(
+            interview_id=crowded.id, seq=seq, start_ms=seq * 1000, end_ms=seq * 1000 + 1000,
+            language="en", original_machine="mandala mandala mandala",
+        )
+        for seq in range(5)
+    )  # fmt: skip
+    db_session.add(
+        SearchChunkRow(
+            interview_id=crowded.id, chunker=CHUNKER, first_seq=0, last_seq=4,
+            start_ms=0, end_ms=5000,
+        )
+    )  # fmt: skip
+    db_session.add(
+        SegmentRow(
+            interview_id=other.id, seq=0, start_ms=0, end_ms=1000, language="en",
+            original_machine="a sand mandala",
+        )
+    )  # fmt: skip
+    db_session.commit()
+    few = settings.model_copy(update={"search_candidates": 2})
+    app.dependency_overrides[get_settings] = lambda: few
+    app.dependency_overrides[get_embedder] = BrokenEmbedder
+
+    found = moments(as_viewer(client), "mandala", "keyword_only")
+    assert [f[:2] for f in found] == [("crowded", 0), ("other", 0)]
 
 
 def test_filter_choices_only_come_from_visible_interviews(
