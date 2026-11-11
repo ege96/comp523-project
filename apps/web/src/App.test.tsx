@@ -143,6 +143,44 @@ describe("all interviews", () => {
     expect(urls).toContain("/api/interviews?limit=20&offset=40");
     expect(screen.getByRole("link", { name: "page 3" }).getAttribute("aria-current")).toBe("page");
   });
+
+  it("filters the list, keeping the filters while paging", async () => {
+    stubApi({
+      "/api/interviews": { body: { items: [interviewSummary], total: 45 } },
+      "/api/search/filters": {
+        body: { languages: [{ code: "ne", name: "Nepali" }], interviewees: [] },
+      },
+    });
+    const router = renderApp("/interviews?page=2");
+    const urls = () => vi.mocked(fetch).mock.calls.map(([url]) => url);
+    await screen.findByRole("heading", { name: "All interviews" });
+
+    await userEvent.click(screen.getByRole("combobox", { name: "Recording" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Video only" }));
+    await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Nepali" }));
+    await userEvent.click(screen.getByRole("button", { name: "Apply filters" }));
+    // New filters go back to page 1.
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ language: "ne", media: "video" });
+    });
+    await waitFor(() => {
+      expect(urls()).toContain("/api/interviews?limit=20&offset=0&language=ne&media=video");
+    });
+    expect(screen.getByText(/Filtered by/).parentElement?.textContent).toMatch(
+      /^Filtered by: Nepali · Video/,
+    );
+
+    await userEvent.click(await screen.findByRole("link", { name: "Go to page 2" }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ language: "ne", media: "video", page: 2 });
+    });
+
+    await userEvent.click(screen.getAllByRole("button", { name: /^Clear/ })[0] as HTMLElement);
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+  });
 });
 
 describe("search", () => {
@@ -166,6 +204,7 @@ describe("search", () => {
         body: {
           // The second is a plain word match with no translation and no recording date.
           items: [moment, { ...moment, ...keywordMoment }],
+          interviews: [{ ...interviewSummary, title: "Matched by its details" }],
           has_more: true,
           search_mode: "keyword_only",
         },
@@ -186,6 +225,9 @@ describe("search", () => {
     expect(screen.getAllByText("Related by meaning")).toHaveLength(1);
     expect(screen.getByText(/only match your words/)).toBeTruthy();
     expect(screen.getByText(/Transcribed and translated by machine/)).toBeTruthy();
+    // Interviews whose details match come before the moments.
+    const matches = screen.getByRole("region", { name: "Interviews matching your words" });
+    expect(within(matches).getByRole("link", { name: /Matched by its details/ })).toBeTruthy();
     expect(screen.queryByText(/Filtered by/)).toBeNull();
     const status = screen.getByRole("status");
     expect(status.textContent).toBe("Results updated");
@@ -240,7 +282,9 @@ describe("search", () => {
 
   it("keeps filters from a shared link, says when nothing matched, and clears them", async () => {
     stubApi({
-      "/api/search": { body: { items: [], has_more: false, search_mode: "hybrid" } },
+      "/api/search": {
+        body: { items: [], interviews: [], has_more: false, search_mode: "hybrid" },
+      },
       "/api/search/filters": { body: { languages: [], interviewees: [] } },
     });
     const router = renderApp("/search?q=x&interviewee=7&from=2001-01-01&undated=true");
@@ -287,7 +331,9 @@ describe("search", () => {
       interview: { ...interviewSummary, id: `i${String(n)}`, title: `Interview ${String(n)}` },
     });
     stubApi({
-      "/api/search": { body: { items: [page(1)], has_more: true, search_mode: "hybrid" } },
+      "/api/search": {
+        body: { items: [page(1)], interviews: [], has_more: true, search_mode: "hybrid" },
+      },
       "/api/search/filters": {
         body: { languages: [], interviewees: [{ id: 7, name: "Interviewee G" }] },
       },
@@ -326,7 +372,9 @@ describe("search", () => {
 
     // The last page loads: the button goes, and focus moves to the first new moment.
     stubApi({
-      "/api/search": { body: { items: [page(2)], has_more: false, search_mode: "hybrid" } },
+      "/api/search": {
+        body: { items: [page(2)], interviews: [], has_more: false, search_mode: "hybrid" },
+      },
     });
     await userEvent.click(more);
     await screen.findByRole("article", { name: "Interview 2" });

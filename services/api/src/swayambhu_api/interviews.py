@@ -29,6 +29,7 @@ from swayambhu_api import media_urls
 from swayambhu_api.auth import CurrentViewer
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DbSession
+from swayambhu_api.filters import InterviewFilters
 from swayambhu_api.visibility import visible_to
 
 router = APIRouter()
@@ -158,6 +159,7 @@ def to_summary(
 def list_interviews(
     session: DbSession,
     viewer: CurrentViewer,
+    where: InterviewFilters,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     status_filter: Annotated[Status | None, Query(alias="status")] = None,
@@ -167,9 +169,10 @@ def list_interviews(
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
     one status and/or visibility (for the admin's work queue: "not published" is done and
-    private). The filters only narrow what `summary_query` already allows, so a visitor asking
-    for private interviews gets none."""
-    query = summary_query(viewer)
+    private) and matching the same metadata filters as search (F7). The filters only narrow
+    what `summary_query` already allows, so a visitor asking for private interviews gets
+    none."""
+    query = summary_query(viewer).where(*where)
     if status_filter is not None:
         query = query.where(InterviewRow.status == status_filter)
     if visibility_filter is not None:

@@ -12,28 +12,26 @@ matching line; a semantic-only hit starts at the chunk's first line. A keyword h
 interview that hasn't been indexed yet is its own moment, so visitors find what is ready
 (D-008). Results are ranked, never counted: there is no total, only whether more exist.
 
+Interviews whose details (title, description, people, place) match the query's words come
+back beside the moments (F5), since such a match has no timestamp of its own.
+
 Every query joins `interviews` and filters with `visible_to`, like the rest of the API.
 """
 
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import date
 from functools import lru_cache
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import (
-    TIMESTAMP,
     ColumnElement,
-    Date,
     and_,
     case,
-    cast,
     exists,
     func,
-    literal,
     literal_column,
     or_,
     select,
@@ -54,6 +52,7 @@ from swayambhu_providers.factory import ProviderConfigError, build_embedder
 from swayambhu_api.auth import CurrentViewer
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DbSession
+from swayambhu_api.filters import InterviewFilters
 from swayambhu_api.interviews import (
     InterviewSummary,
     Language,
@@ -68,6 +67,7 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 EXCERPT_MAX_SEGMENTS = 10
+DETAIL_MATCHES = 5
 
 _ENGLISH: ColumnElement[str] = literal_column("'english'::regconfig")
 _SIMPLE: ColumnElement[str] = literal_column("'simple'::regconfig")
@@ -111,6 +111,9 @@ class Moment(BaseModel):
 
 class SearchResults(BaseModel):
     items: list[Moment]
+    # Interviews whose details (title, description, interviewee, interviewer, location) match
+    # the query's words, best first, at most DETAIL_MATCHES. Only on the first page.
+    interviews: list[InterviewSummary]
     has_more: bool
     # keyword_only: semantic search was unavailable (provider down, slow or not configured),
     # so the results may miss moments that don't use the query's words.
@@ -157,42 +160,6 @@ def fuse(ranked: dict[Source, list[Hit]], k: int) -> list[tuple[Hit, list[Source
     return [(anchors[key], sources[key]) for key in sorted(scores, key=lambda key: -scores[key])]
 
 
-def _filters(
-    language: str | None,
-    interviewee: int | Literal["unknown"] | None,
-    recorded_from: date | None,
-    recorded_to: date | None,
-    undated: bool,
-) -> list[ColumnElement[bool]]:
-    where: list[ColumnElement[bool]] = []
-    if language:
-        # Any language heard, so a mixed-language recording matches each of its languages.
-        where.append(
-            exists().where(
-                InterviewLanguageRow.interview_id == InterviewRow.id,
-                InterviewLanguageRow.language_code == language,
-            )
-        )
-    if interviewee == "unknown":
-        where.append(InterviewRow.interviewee_id.is_(None))
-    elif interviewee is not None:
-        where.append(InterviewRow.interviewee_id == interviewee)
-    if recorded_from or recorded_to:
-        # recorded_on is the first day of a year, month or day; match if that period overlaps.
-        dated: list[ColumnElement[bool]] = [InterviewRow.recorded_on.is_not(None)]
-        if recorded_to:
-            dated.append(InterviewRow.recorded_on <= recorded_to)
-        if recorded_from:
-            start = func.date_trunc(
-                InterviewRow.recorded_on_precision, cast(literal(recorded_from), TIMESTAMP)
-            )
-            dated.append(InterviewRow.recorded_on >= cast(start, Date))
-        where.append(
-            or_(and_(*dated), InterviewRow.recorded_on.is_(None)) if undated else and_(*dated)
-        )
-    return where
-
-
 def _keyword_hits(
     session: DbSession,
     viewer: CurrentViewer,
@@ -234,6 +201,35 @@ def _keyword_hits(
         .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
+
+
+def _detail_matches(
+    session: DbSession, viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]]
+) -> list[InterviewSummary]:
+    """Interviews whose details contain the query's words (F5). The details are a few short
+    fields per interview, so they are matched on the fly rather than indexed."""
+    details = func.concat_ws(
+        " ",
+        InterviewRow.title,
+        InterviewRow.description,
+        InterviewRow.interviewer,
+        InterviewRow.location,
+        IntervieweeRow.display_name,
+    )
+    english_q = func.websearch_to_tsquery(_ENGLISH, q)
+    simple_q = func.websearch_to_tsquery(_SIMPLE, q)
+    english_tsv = func.to_tsvector(_ENGLISH, details)
+    simple_tsv = func.to_tsvector(_SIMPLE, details)
+    rank = func.greatest(
+        func.ts_rank_cd(english_tsv, english_q), func.ts_rank_cd(simple_tsv, simple_q)
+    )
+    rows = session.execute(
+        summary_query(viewer)
+        .where(*where, or_(english_tsv.op("@@")(english_q), simple_tsv.op("@@")(simple_q)))
+        .order_by(rank.desc(), InterviewRow.created_at.desc(), InterviewRow.id)
+        .limit(DETAIL_MATCHES)
+    ).all()
+    return [InterviewSummary.model_validate(to_summary(i, p, lang)) for i, p, lang in rows]
 
 
 def _semantic_hits(
@@ -315,21 +311,12 @@ def search(
     embedder: EmbedderDep,
     settings: Annotated[Settings, Depends(get_settings)],
     q: Annotated[str, Query(min_length=1, max_length=500, pattern=r"\S")],
-    language: Annotated[str | None, Query(description="Any language heard, e.g. ne")] = None,
-    interviewee: Annotated[
-        int | Literal["unknown"] | None, Query(description="An interviewee id, or unknown")
-    ] = None,
-    recorded_from: date | None = None,
-    recorded_to: date | None = None,
-    undated: Annotated[
-        bool, Query(description="With a date range, also include undated interviews")
-    ] = False,
+    where: InterviewFilters,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> SearchResults:
     """Transcript moments most relevant to `q`, best first. Paging goes as deep as
     SEARCH_CANDIDATES hits from each search."""
-    where = _filters(language, interviewee, recorded_from, recorded_to, undated)
     n = settings.search_candidates
     semantic = _semantic_hits(session, viewer, embedder, q, where, n)
     mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
@@ -338,8 +325,9 @@ def search(
         settings.search_rrf_k,
     )
     page = ranked[offset : offset + limit]
+    interviews = _detail_matches(session, viewer, q, where) if offset == 0 else []
     if not page:
-        return SearchResults(items=[], has_more=False, search_mode=mode)
+        return SearchResults(items=[], interviews=interviews, has_more=False, search_mode=mode)
 
     summaries = {
         row.id: InterviewSummary.model_validate(to_summary(row, person, lang))
@@ -361,7 +349,12 @@ def search(
                     matched_by=matched_by,
                 )
             )
-    return SearchResults(items=items, has_more=len(ranked) > offset + limit, search_mode=mode)
+    return SearchResults(
+        items=items,
+        interviews=interviews,
+        has_more=len(ranked) > offset + limit,
+        search_mode=mode,
+    )
 
 
 @router.get("/api/search/filters", response_model=SearchFilters)

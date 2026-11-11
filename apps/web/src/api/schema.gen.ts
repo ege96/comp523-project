@@ -15,8 +15,9 @@ export interface paths {
          * List Interviews
          * @description Interviews the viewer may see, most recently added first, optionally only those with
          *     one status and/or visibility (for the admin's work queue: "not published" is done and
-         *     private). The filters only narrow what `summary_query` already allows, so a visitor asking
-         *     for private interviews gets none.
+         *     private) and matching the same metadata filters as search (F7). The filters only narrow
+         *     what `summary_query` already allows, so a visitor asking for private interviews gets
+         *     none.
          */
         get: operations["list_interviews_api_interviews_get"];
         put?: never;
@@ -695,6 +696,8 @@ export interface components {
         SearchResults: {
             /** Items */
             items: components["schemas"]["Moment"][];
+            /** Interviews */
+            interviews: components["schemas"]["InterviewSummary"][];
             /** Has More */
             has_more: boolean;
             /**
@@ -767,6 +770,16 @@ export interface operations {
                 offset?: number;
                 status?: ("processing" | "done" | "failed") | null;
                 visibility?: ("public" | "private") | null;
+                /** @description Any language heard, e.g. ne */
+                language?: string | null;
+                /** @description An interviewee id, or unknown */
+                interviewee?: number | "unknown" | null;
+                recorded_from?: string | null;
+                recorded_to?: string | null;
+                /** @description With a date range, also include undated interviews */
+                undated?: boolean;
+                /** @description audio or video, from the uploaded file's type */
+                media?: ("audio" | "video") | null;
             };
             header?: never;
             path?: never;
@@ -933,6 +946,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
+                limit?: number;
+                offset?: number;
                 /** @description Any language heard, e.g. ne */
                 language?: string | null;
                 /** @description An interviewee id, or unknown */
@@ -941,8 +956,8 @@ export interface operations {
                 recorded_to?: string | null;
                 /** @description With a date range, also include undated interviews */
                 undated?: boolean;
-                limit?: number;
-                offset?: number;
+                /** @description audio or video, from the uploaded file's type */
+                media?: ("audio" | "video") | null;
             };
             header?: never;
             path?: never;

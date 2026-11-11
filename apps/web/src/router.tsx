@@ -16,9 +16,11 @@ import { trackSearchOrigins } from "./searchOrigin";
 
 // Proposal: URL paths. The handoff names screens (§5), not URLs.
 //   /                          home: search box and recently added interviews
-//   /search?q=&language=&interviewee=&from=&to=&undated=
-//                              search results (transcript moments)
-//   /interviews?page=          all interviews, most recently added first
+//   /search?q=&language=&interviewee=&from=&to=&undated=&media=
+//                              search results (transcript moments, and interviews whose
+//                              details match)
+//   /interviews?page=&language=&interviewee=&from=&to=&undated=&media=
+//                              all interviews, most recently added first, with the same filters
 //   /interviews/$interviewId?t=   interview viewer, optionally opened at t ms
 //   /about                     About & Help: what the archive is, and an FAQ for visitors
 //   /signin                    admin sign-in
@@ -34,22 +36,24 @@ const rootRoute = createRootRoute({ component: AppShell, notFoundComponent: NotF
 
 const homeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: HomePage });
 
+// Filters live in the URL, so a filtered page can be shared and survives a reload.
+// A malformed value is dropped rather than failing the page.
+const filterSearch = z.object({
+  language: z.string().min(1).optional().catch(undefined),
+  interviewee: z
+    .union([z.number().int(), z.literal("unknown")])
+    .optional()
+    .catch(undefined),
+  from: z.iso.date().optional().catch(undefined),
+  to: z.iso.date().optional().catch(undefined),
+  undated: z.literal(true).optional().catch(undefined),
+  media: z.enum(["audio", "video"]).optional().catch(undefined),
+});
+
 const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "search",
-  // Filters live in the URL, so a filtered search can be shared and survives a reload.
-  // A malformed value is dropped rather than failing the page.
-  validateSearch: z.object({
-    q: z.string().trim().catch(""),
-    language: z.string().min(1).optional().catch(undefined),
-    interviewee: z
-      .union([z.number().int(), z.literal("unknown")])
-      .optional()
-      .catch(undefined),
-    from: z.iso.date().optional().catch(undefined),
-    to: z.iso.date().optional().catch(undefined),
-    undated: z.literal(true).optional().catch(undefined),
-  }),
+  validateSearch: filterSearch.extend({ q: z.string().trim().catch("") }),
   component: lazyRouteComponent(() => import("./pages/SearchPage"), "SearchPage"),
 });
 
@@ -57,7 +61,9 @@ const interviewsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "interviews",
   // Page 1 stays out of the URL; anything that isn't a page number falls back to it.
-  validateSearch: z.object({ page: z.number().int().min(2).optional().catch(undefined) }),
+  validateSearch: filterSearch.extend({
+    page: z.number().int().min(2).optional().catch(undefined),
+  }),
   component: lazyRouteComponent(() => import("./pages/InterviewsPage"), "InterviewsPage"),
 });
 
