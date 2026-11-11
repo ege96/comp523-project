@@ -68,6 +68,8 @@ export const SearchResultsSchema = z.object({
     }),
   ),
   interviews: z.array(InterviewSummary),
+  // True when more interviews match than the few listed (first page only).
+  more_metadata_matches: z.boolean().default(false),
   has_more: z.boolean(),
   search_mode: z.enum(["hybrid", "keyword_only"]),
 }) satisfies z.ZodType<Schemas["SearchResults"]>;

@@ -30,3 +30,19 @@ export function toVtt(cues: Cue[]): string {
     .map((c) => `${formatVttTime(c.start_ms)} --> ${formatVttTime(c.end_ms)}\n${c.text}`);
   return ["WEBVTT", ...blocks].join("\n\n") + "\n";
 }
+
+/** The text of a transcript line that carries what it says in English. */
+export type EnglishSource = {
+  original_text: string;
+  english_text: string | null;
+  language: string | null;
+};
+
+/**
+ * A line in English: its translation when there is one, else the original when the line is
+ * itself in English, else null.
+ */
+export function englishText(line: EnglishSource): string | null {
+  if (line.english_text !== null) return line.english_text;
+  return line.language?.toLowerCase().split("-")[0] === "en" ? line.original_text : null;
+}

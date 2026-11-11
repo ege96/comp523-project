@@ -95,6 +95,21 @@ describe("interview viewer: transcript views", () => {
   });
 });
 
+describe("interview viewer: English", () => {
+  it("shows a line spoken in English as the English view, without a translation", async () => {
+    stubApi({
+      [detailPath]: { body: { ...interviewDetail, translation_status: "not_needed" } },
+      [segmentsPath]: { body: { items: [line(0, "Spoken in English", null, { language: "en" })] } },
+    });
+    renderApp(`/interviews/${id}`);
+    await userEvent.click(await screen.findByRole("tab", { name: "English" }));
+    const text = screen.getByText("Spoken in English");
+    expect(text.closest("p")?.getAttribute("lang")).toBe("en");
+    expect(screen.queryByText("This interview is in English.")).toBeNull();
+    expect(screen.queryByText("No English for this line")).toBeNull();
+  });
+});
+
 describe("interview viewer: playback", () => {
   it("says a recording is still being prepared only while processing", async () => {
     stubApi({
@@ -160,6 +175,25 @@ describe("interview viewer: playback", () => {
     expect(await screen.findByText("The recording couldn't be played.")).toBeTruthy();
   });
 
+  it("keeps a loaded transcript when renewing the recording link fails, unless access was revoked", async () => {
+    const routes: Record<string, { status?: number; body?: unknown }> = {
+      [detailPath]: { body: interviewDetail },
+      [segmentsPath]: { body: segments },
+    };
+    stubApi(routes);
+    renderApp(`/interviews/${id}`);
+    await screen.findByText("Original text A");
+    fireEvent.error(audio());
+    routes[detailPath] = { status: 503, body: {} };
+    await userEvent.click(await screen.findByRole("button", { name: "Retry playback" }));
+    expect(await screen.findByText(/recording link couldn't be refreshed/)).toBeTruthy();
+    expect(screen.getByText("Original text A")).toBeTruthy();
+
+    routes[detailPath] = { status: 404, body: {} };
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("This interview doesn't exist, or isn't public.")).toBeTruthy();
+  });
+
   it("moves the current line when the paused recording is moved", async () => {
     stubApi({
       [detailPath]: { body: interviewDetail },
@@ -188,7 +222,13 @@ describe("interview viewer: playback", () => {
         },
       },
       [segmentsPath]: {
-        body: { items: [line(0, "Line zero", "English zero"), line(1, "Line one", null)] },
+        body: {
+          items: [
+            line(0, "Line zero", "English zero"),
+            line(1, "Line one", null),
+            line(2, "Spoken in English", null, { language: "en" }),
+          ],
+        },
       },
     });
     renderApp(`/interviews/${id}`);
@@ -206,6 +246,11 @@ describe("interview viewer: playback", () => {
     const blob = create.mock.calls[0]?.[0];
     expect(blob?.type).toBe("text/vtt");
     expect(await blob?.text()).toContain("00:00:10.000 --> 00:00:20.000\nLine one");
+    // The English captions take a native-English line as it is, and leave out untranslated ones.
+    const english = await create.mock.calls[1]?.[0].text();
+    expect(english).toContain("English zero");
+    expect(english).toContain("00:00:20.000 --> 00:00:30.000\nSpoken in English");
+    expect(english).not.toContain("Line one");
     cleanup();
     expect(revoke).toHaveBeenCalledWith("blob:captions");
   });

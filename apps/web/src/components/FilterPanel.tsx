@@ -66,11 +66,19 @@ export function FilterPanel({
     };
     const interviewee = text("interviewee");
     const media = text("media");
+    // Whole-year bounds from the year fields; an exact date from a shared link stays as it
+    // is until its year field is edited.
+    const fromYear = text("fromYear");
+    const toYear = text("toYear");
+    let from =
+      fromYear === filters.from?.slice(0, 4) ? filters.from : fromYear && `${fromYear}-01-01`;
+    let to = toYear === filters.to?.slice(0, 4) ? filters.to : toYear && `${toYear}-12-31`;
     // Years typed the wrong way round still mean the span between them.
-    const span = [text("fromYear"), text("toYear")];
-    if (span[0] && span[1] && span[0] > span[1]) span.reverse();
-    const from = span[0] && `${span[0]}-01-01`;
-    const to = span[1] && `${span[1]}-12-31`;
+    if (from && to && from > to) {
+      const span = [fromYear, toYear].reverse();
+      from = span[0] && `${span[0]}-01-01`;
+      to = span[1] && `${span[1]}-12-31`;
+    }
     onApply({
       language: text("language"),
       interviewee:
@@ -172,7 +180,7 @@ export function FilterPanel({
           <Typography variant="body2" component="p" sx={{ fontWeight: 600 }}>
             Recording date
           </Typography>
-          {/* The form edits whole-year bounds. */}
+          {/* The fields hold years; an exact date from a link is kept until its year is edited. */}
           <Stack direction="row" spacing={1.5}>
             <TextField
               name="fromYear"
