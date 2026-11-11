@@ -243,6 +243,7 @@ describe("interview viewer: links", () => {
               matched_by: ["keyword"],
             },
           ],
+          interviews: [],
           has_more: false,
           search_mode: "hybrid",
         },

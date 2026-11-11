@@ -45,16 +45,24 @@ export async function getJson<T>(
 export type Viewer = { key: string; getToken: () => Promise<string | null> };
 
 export const interviewQueries = {
-  // Newest first. The API caps `limit` at 100.
-  list: (viewer: Viewer, { limit, offset = 0 }: { limit: number; offset?: number }) =>
+  // Newest first. The API caps `limit` at 100. `filters` are the same as search's.
+  list: (
+    viewer: Viewer,
+    {
+      limit,
+      offset = 0,
+      filters = {},
+    }: { limit: number; offset?: number; filters?: InterviewFilters },
+  ) =>
     queryOptions({
-      queryKey: ["interviews", viewer.key, "list", { limit, offset }],
-      queryFn: async ({ signal }) =>
-        getJson(
-          `/api/interviews?limit=${String(limit)}&offset=${String(offset)}`,
-          InterviewListSchema,
-          { token: await viewer.getToken(), signal },
-        ),
+      queryKey: ["interviews", viewer.key, "list", { limit, offset, filters }],
+      queryFn: async ({ signal }) => {
+        const query = filterQuery({ limit: String(limit), offset: String(offset) }, filters);
+        return getJson(`/api/interviews?${query.toString()}`, InterviewListSchema, {
+          token: await viewer.getToken(),
+          signal,
+        });
+      },
     }),
   detail: (viewer: Viewer, id: string) =>
     queryOptions({
@@ -76,15 +84,30 @@ export const interviewQueries = {
     }),
 };
 
-/** What `GET /api/search` filters on; undefined means "any". Dates are YYYY-MM-DD. */
-export type SearchParams = {
-  q: string;
+/** The filters `GET /api/search` and `GET /api/interviews` share; undefined means "any".
+ * Dates are YYYY-MM-DD. */
+export type InterviewFilters = {
   language?: string;
   interviewee?: number | "unknown";
   from?: string;
   to?: string;
-  undated?: boolean;
+  undated?: true;
+  media?: "audio" | "video";
 };
+
+export type SearchParams = InterviewFilters & { q: string };
+
+/** `base` first, then the filters that are set. */
+function filterQuery(base: Record<string, string>, filters: InterviewFilters): URLSearchParams {
+  const query = new URLSearchParams(base);
+  if (filters.language) query.set("language", filters.language);
+  if (filters.interviewee !== undefined) query.set("interviewee", String(filters.interviewee));
+  if (filters.from) query.set("recorded_from", filters.from);
+  if (filters.to) query.set("recorded_to", filters.to);
+  if (filters.undated) query.set("undated", "true");
+  if (filters.media) query.set("media", filters.media);
+  return query;
+}
 
 const SEARCH_PAGE_SIZE = 20;
 
@@ -95,16 +118,9 @@ export const searchQueries = {
       queryKey: ["search", viewer.key, params],
       initialPageParam: 0,
       queryFn: async ({ pageParam, signal }) => {
-        const query = new URLSearchParams({
-          q: params.q,
-          limit: String(SEARCH_PAGE_SIZE),
-          offset: String(pageParam),
-        });
-        if (params.language) query.set("language", params.language);
-        if (params.interviewee !== undefined) query.set("interviewee", String(params.interviewee));
-        if (params.from) query.set("recorded_from", params.from);
-        if (params.to) query.set("recorded_to", params.to);
-        if (params.undated) query.set("undated", "true");
+        const { q, ...filters } = params;
+        const base = { q, limit: String(SEARCH_PAGE_SIZE), offset: String(pageParam) };
+        const query = filterQuery(base, filters);
         return getJson(`/api/search?${query.toString()}`, SearchResultsSchema, {
           token: await viewer.getToken(),
           signal,

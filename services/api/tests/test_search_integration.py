@@ -12,6 +12,7 @@ from swayambhu_core.models import (
     IntervieweeRow,
     InterviewLanguageRow,
     InterviewRow,
+    MediaFileRow,
     SearchChunkRow,
     SegmentRow,
 )
@@ -41,11 +42,18 @@ class BrokenEmbedder:
         raise ProviderError("down", retryable=True)
 
 
+def original(interview_id: uuid.UUID, content_type: str) -> MediaFileRow:
+    return MediaFileRow(
+        interview_id=interview_id, kind="original", storage_key=f"{interview_id}/original",
+        content_type=content_type,
+    )  # fmt: skip
+
+
 @pytest.fixture
 def archive(db_session: Session) -> Iterator[dict[str, uuid.UUID]]:
-    """Public and Private Nepali interviews with the same transcript, indexed; a second chunk
-    is embedded as "prayer wheels", which no line says. Plus a Public English interview with
-    no interviewee or date that hasn't been indexed yet."""
+    """Public and Private Nepali video interviews with the same transcript, indexed; a second
+    chunk is embedded as "prayer wheels", which no line says. Plus a Public English audio
+    interview with no interviewee or date that hasn't been indexed yet."""
     db_session.execute(delete(InterviewRow))
     db_session.execute(delete(IntervieweeRow))
     maya, hidden = IntervieweeRow(display_name="Maya"), IntervieweeRow(display_name="Hidden")
@@ -60,6 +68,7 @@ def archive(db_session: Session) -> Iterator[dict[str, uuid.UUID]]:
         db_session.add(interview)
         db_session.flush()
         db_session.add(InterviewLanguageRow(interview_id=interview.id, language_code="ne"))
+        db_session.add(original(interview.id, "video/mp4"))
         db_session.add_all(
             SegmentRow(
                 interview_id=interview.id, seq=seq, start_ms=start * 1000, end_ms=end * 1000,
@@ -86,6 +95,7 @@ def archive(db_session: Session) -> Iterator[dict[str, uuid.UUID]]:
     db_session.add(english)
     db_session.flush()
     db_session.add(InterviewLanguageRow(interview_id=english.id, language_code="en"))
+    db_session.add(original(english.id, "audio/mpeg"))
     db_session.add(
         SegmentRow(
             interview_id=english.id, seq=0, start_ms=5000, end_ms=9000, language="en",
@@ -107,7 +117,7 @@ Found = tuple[str, int, tuple[int, ...], tuple[str, ...]]  # title, start, seqs,
 
 def moments(client: TestClient, query: str, mode: str = "hybrid") -> list[Found]:
     body = client.get(f"/api/search?q={query}").json()
-    assert set(body) == {"items", "has_more", "search_mode"}  # never a match count
+    assert set(body) == {"items", "interviews", "has_more", "search_mode"}  # never a count
     assert body["search_mode"] == mode
     return [
         (
@@ -156,6 +166,8 @@ def test_moments_start_at_the_matching_line_or_the_chunk(
         ("recorded_from=2024-05-01&recorded_to=2024-05-31", {"public"}),  # year overlaps
         ("recorded_from=2025-01-01", set()),
         ("recorded_from=2025-01-01&undated=true", {"english"}),
+        ("media=video", {"public"}),
+        ("media=audio", {"english"}),
     ],
 )
 def test_filters(
@@ -163,6 +175,46 @@ def test_filters(
 ) -> None:
     body = as_viewer(client).get(f"/api/search?q=butter lamp&{filters}").json()
     assert {m["interview"]["title"] for m in body["items"]} == expected
+
+
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        ("", {"public", "english"}),
+        ("language=ne", {"public"}),
+        ("interviewee=unknown", {"english"}),
+        ("recorded_from=2024-01-01&recorded_to=2024-12-31", {"public"}),
+        ("media=audio", {"english"}),
+    ],
+)
+def test_the_interview_list_takes_the_same_filters(
+    client: TestClient, archive: dict[str, uuid.UUID], filters: str, expected: set[str]
+) -> None:
+    body = as_viewer(client).get(f"/api/interviews?{filters}").json()
+    assert {i["title"] for i in body["items"]} == expected
+    assert body["total"] == len(expected)
+
+
+def test_search_finds_interviews_by_their_details(
+    client: TestClient, archive: dict[str, uuid.UUID], db_session: Session
+) -> None:
+    public = db_session.get(InterviewRow, archive["public"])
+    assert public is not None
+    public.description = "Recorded at the eastern stairway"
+    db_session.commit()
+
+    def titles(viewer: TestClient, query: str, page: str = "") -> list[str]:
+        body = viewer.get(f"/api/search?q={query}{page}").json()
+        return [i["title"] for i in body["interviews"]]
+
+    visitor = as_viewer(client)
+    assert titles(visitor, "Maya") == ["public"]  # the interviewee's name
+    assert titles(visitor, "stairways") == ["public"]  # description, stemmed
+    assert titles(visitor, "english") == ["english"]  # title, though no line says it
+    assert titles(visitor, "Hidden") == []  # a Private interview's interviewee
+    assert titles(as_viewer(client, ADMIN), "Hidden") == ["private"]
+    assert titles(visitor, "Maya", "&media=audio") == []  # filters apply too
+    assert titles(visitor, "Maya", "&offset=20") == []  # first page only
 
 
 def test_filter_choices_only_come_from_visible_interviews(

@@ -2,7 +2,10 @@
 
 A search-first web archive of multilingual oral-history interviews about the Swayambhu stupa in Kathmandu. UNC COMP 523, with Dr. Lauren Leve (UNC Religious Studies) and Baakhan Nyane Waa.
 
-This is a skeleton: each service starts and reports health, and nothing else exists yet.
+Visitors search the interviews by meaning or by exact words, in English, Nepali or Nepal Bhasa, and open the recording at the moment where it is said. Admins upload recordings, which the worker turns into a streaming copy, a timestamped transcript, an English translation and a search index. Admins then correct transcripts and publish interviews. Private interviews are filtered out by the API on every route, never only in the browser.
+
+- **Run it on your machine:** [Run locally](#run-locally) below.
+- **Deploy it, add admins, back it up:** [docs/deploy-cloudapps.md](docs/deploy-cloudapps.md).
 
 ## Layout
 
@@ -11,7 +14,10 @@ This is a skeleton: each service starts and reports health, and nothing else exi
 | `apps/web` | Public archive and admin UI | React + TypeScript + Vite, MUI |
 | `services/api` | Archive API, authorization, search | FastAPI (Python 3.12) |
 | `services/worker` | Background media processing (FFmpeg, transcription, translation, embeddings) | Python 3.12 |
+| `packages/core` | Database models, job queue and media storage, shared by the API and worker | Python 3.12, SQLAlchemy 2 |
+| `packages/providers` | Swappable transcription, translation and embedding providers | Python 3.12 |
 | `db/init` | SQL run when a fresh local database starts (enables pgvector only; tables come from migrations) | PostgreSQL 16 + pgvector |
+| `docs` | Deployment and operations guide for CloudApps | Markdown |
 
 Python projects use [uv](https://docs.astral.sh/uv/). Web tests use Vitest.
 
@@ -76,7 +82,7 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 
 ## Search
 
-`GET /api/search?q=...` returns transcript moments, best first: each has its interview, a start and end time, and an excerpt of about 30 s of transcript lines to seek to. Keyword search (Postgres full-text) and semantic search (the query's embedding against stored chunk embeddings) are merged by reciprocal rank fusion. There is no match count, only `has_more`. Optional filters: `language` (any language heard), `interviewee` (an id, or `unknown`), `recorded_from`/`recorded_to` (`undated=true` also keeps interviews with no date). `GET /api/search/filters` lists the languages and interviewees a viewer can filter by. Both filter by visibility like every other route. The API embeds queries with the same `EMBEDDING_*` settings the worker uses; if the provider fails or takes longer than `SEARCH_EMBEDDING_TIMEOUT_SECONDS` (default 5; remote providers only), results are keyword-only and the response says `"search_mode": "keyword_only"`. Each moment's `matched_by` says which searches found it. `SEARCH_CANDIDATES`, `SEARCH_RRF_K` and `SEARCH_EXCERPT_MS` tune the ranking and excerpts.
+`GET /api/search?q=...` returns transcript moments, best first: each has its interview, a start and end time, and an excerpt of about 30 s of transcript lines to seek to. Keyword search (Postgres full-text) and semantic search (the query's embedding against stored chunk embeddings) are merged by reciprocal rank fusion. There is no match count, only `has_more`. The first page also has `interviews`: up to five interviews whose title, description, interviewee, interviewer or location contain the query's words, since such a match has no timestamp. Optional filters: `language` (any language heard), `interviewee` (an id, or `unknown`), `recorded_from`/`recorded_to` (`undated=true` also keeps interviews with no date), and `media` (`audio` or `video`, from the uploaded file's type). `GET /api/interviews` takes the same filters, so the interview list can be browsed without a query. `GET /api/search/filters` lists the languages and interviewees a viewer can filter by. Both filter by visibility like every other route. The API embeds queries with the same `EMBEDDING_*` settings the worker uses; if the provider fails or takes longer than `SEARCH_EMBEDDING_TIMEOUT_SECONDS` (default 5; remote providers only), results are keyword-only and the response says `"search_mode": "keyword_only"`. Each moment's `matched_by` says which searches found it. `SEARCH_CANDIDATES`, `SEARCH_RRF_K` and `SEARCH_EXCERPT_MS` tune the ranking and excerpts.
 
 `EMBEDDING_PROVIDER=local` (Proposal) embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
 
@@ -97,13 +103,13 @@ docker compose run --rm api python -m swayambhu_api.manage_admins remove you@exa
 
 On CloudApps, run the same command with `oc exec deploy/<api deployment> -- python -m swayambhu_api.manage_admins ...`.
 
-In the web app, the footer links to `/signin` (Sign in with Google, in a popup). Firebase is only downloaded by browsers that open the sign-in page or were signed in before, so public visitors never load it. The web app asks `GET /api/auth/me` whether the account is an admin, and shows the admin pages only then. That is only for the UI: the API checks the token on every admin request.
+In the web app, the footer links to `/signin` (Google in a popup, or email and password). Firebase is only downloaded by browsers that open the sign-in page or were signed in before, so public visitors never load it. The web app asks `GET /api/auth/me` whether the account is an admin, and shows the admin pages only then. That is only for the UI: the API checks the token on every admin request.
 
 ## Uploading recordings
 
 Admins upload recordings with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (Proposal; served by `tuspyserver`). If the connection drops, the upload resumes from the last byte the server has rather than starting again. The web app uses `tus-js-client`. Every route needs an admin token.
 
-In the web app, admins do all of this from **Upload & review** (`/admin`): pick or drop a file, fill in what is known, and watch the progress bar. A dropped connection retries on its own, and pressing Upload again with the same file and details resumes rather than restarting. The same page lists every interview with its status and a Public/Private switch; each interview's page (`/admin/interviews/{id}`) shows its processing steps and errors.
+In the web app, admins do all of this from **Upload & review** (`/admin`): pick or drop a file, fill in what is known, and watch the progress bar. A dropped connection retries on its own, and pressing Upload again with the same file and details resumes rather than restarting. The same page lists the interviews in tabs by what to do next (needs attention, processing, not published, published). Each interview's page (`/admin/interviews/{id}`) shows its next step, processing steps and plain-language errors with a Retry button, its details, the transcript editor, and Publish or Unpublish.
 
 1. `POST /api/uploads` with `Upload-Length` and `Upload-Metadata`, and no body. The metadata keys are `title`, `filename` and `filetype` (all required), plus optional `language` (`en`, `ne`, `new`), `interviewee_id` or `interviewee_name`, and `recorded_on` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`). Bad metadata is refused here, before any bytes are sent.
 2. `PATCH` the returned `Location` in chunks of at most `UPLOAD_CHUNK_MAX_BYTES` (64 MiB). `HEAD` on it tells you where to resume.
@@ -147,7 +153,7 @@ The API writes one JSON object per line to stdout (`LOG_FORMAT=json`, the defaul
 
 ## Database and migrations
 
-The API talks to Postgres through SQLAlchemy 2 (ORM models in `services/api/src/swayambhu_api/models.py`), with one connection pool per process and one session per request (`DbSession` in `db.py`). Tables are created and changed only by Alembic migrations in `swayambhu_api/migrations/versions`. `db/init` only enables the `vector` extension, which needs a database superuser.
+The API talks to Postgres through SQLAlchemy 2 (ORM models in `packages/core/src/swayambhu_core/models.py`, shared with the worker), with one connection pool per process and one session per request (`DbSession` in `db.py`). Tables are created and changed only by Alembic migrations in `swayambhu_api/migrations/versions`. `db/init` only enables the `vector` extension, which needs a database superuser.
 
 ```sh
 cd services/api
@@ -167,10 +173,10 @@ DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_test uv run pytest 
 
 ## Deployment
 
-The target is UNC Carolina CloudApps (OpenShift). Every image runs as a non-root, arbitrary UID and listens on 8080. OpenShift manifests aren't written yet. The plan is to serve the web app and API on one host, with `/api` routed to the API.
+The target is UNC Carolina CloudApps (OpenShift). **[docs/deploy-cloudapps.md](docs/deploy-cloudapps.md)** has every step: secrets, the database, the three apps and their memory limits, the shared hostname, Firebase, automatic rebuilds, the first admin, day-to-day jobs, backups and restore, and troubleshooting. Every image runs as a non-root, arbitrary UID and listens on 8080, and the web app and API share one hostname, with `/api` routed to the API. Keys and passwords live in OpenShift Secrets, never in this repository; only the Firebase web config is public.
 
 - **Web:** nginx sends a Content-Security-Policy, `nosniff`, Referrer-Policy, HSTS and Permissions-Policy on every response (`apps/web/security-headers.inc`). Hashed files under `/assets/` are cached for a year, and `index.html` is revalidated on every load. A new external host (Firebase sign-in, the media store) has to be added to the CSP, or the browser blocks it.
-- **API behind the router:** uvicorn takes the client IP from `X-Forwarded-For` only when the request comes from an address in `FORWARDED_ALLOW_IPS` The API image sets it to `*`, because only the OpenShift router can reach the pod. Override it on the Deployment if the API is ever exposed another way.
+- **API behind the router:** uvicorn takes the client IP from `X-Forwarded-For` only when the request comes from an address in `FORWARDED_ALLOW_IPS`. The API image sets it to `*`, because only the OpenShift router can reach the pod. Override it on the Deployment if the API is ever exposed another way.
 - **Base images** are updated by Dependabot. Python and nginx minor versions and Postgres major versions are moved by hand.
 
 Project decisions are recorded in `decisions_log.md` in the team's handoff bundle.

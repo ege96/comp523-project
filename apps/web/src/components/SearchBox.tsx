@@ -21,7 +21,7 @@ export function SearchBox({
 }: {
   defaultValue?: string;
   large?: boolean;
-  filters?: Omit<SearchParams, "q" | "undated"> & { undated?: true };
+  filters?: Omit<SearchParams, "q">;
 }) {
   const navigate = useNavigate();
   const submit = (event: SubmitEvent<HTMLFormElement>) => {

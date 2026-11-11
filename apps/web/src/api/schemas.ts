@@ -67,6 +67,7 @@ export const SearchResultsSchema = z.object({
       matched_by: z.array(z.enum(["keyword", "semantic"])),
     }),
   ),
+  interviews: z.array(InterviewSummary),
   has_more: z.boolean(),
   search_mode: z.enum(["hybrid", "keyword_only"]),
 }) satisfies z.ZodType<Schemas["SearchResults"]>;
