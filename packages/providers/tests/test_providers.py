@@ -84,14 +84,17 @@ def test_openai_embedder_batches_and_keeps_order() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.read())
         requests.append(body)
-        rows = [{"index": i, "embedding": [float(len(t))]} for i, t in enumerate(body["input"])]
+        rows = [
+            {"index": i, "embedding": [float(len(t))] * 256} for i, t in enumerate(body["input"])
+        ]
         return httpx.Response(200, json={"data": list(reversed(rows))})
 
     embedder = OpenAIEmbedder(client(handler), "embed-model", dimensions=256, batch_size=2)
-    assert embedder.embed(["a", "bb", "ccc"], "passage") == [[1.0], [2.0], [3.0]]
+    assert [v[0] for v in embedder.embed(["a", "bb", "ccc"], "passage")] == [1.0, 2.0, 3.0]
     assert [r["input"] for r in requests] == [["a", "bb"], ["ccc"]]
     assert all(r["dimensions"] == 256 for r in requests)
     assert embedder.name == "openai:embed-model@256"
+    assert len(embedder.embed(["a"], "passage")[0]) == 256
     assert OpenAIEmbedder(client(handler), "embed-model", None).name == "openai:embed-model"
 
 
@@ -260,7 +263,8 @@ def test_local_embedder_mean_pools_with_prefixes(tmp_path: Path) -> None:
         local_embedding_batch_size=1,
     )
     embedder = build_embedder(settings)
-    assert embedder.name == embedder_name(settings) == "local:org/tiny"
+    assert embedder.name == embedder_name(settings)
+    assert embedder.name.startswith("local:org/tiny#")
 
     # "query: a" -> mean(x, x) = x. "query: a b b" -> mean(x, x, z, z) -> (1, 0, 1)/sqrt2.
     # Batch size 1 and different lengths also check that padding never enters the mean.
@@ -319,3 +323,96 @@ def test_prepare_model_moves_weights_out_and_keeps_vectors(tmp_path: Path) -> No
     assert path.stat().st_size < wide.nbytes
     [after] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
     assert after == pytest.approx(before)
+
+
+def test_local_embedding_identity_changes_with_revision_and_preprocessing(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "tiny")
+    base = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="tiny",
+        local_model_dir=tmp_path,
+        embedding_passage_prefix="passage: ",
+    )
+    changes: list[dict[str, object]] = [
+        {"embedding_model_revision": "abc123"},
+        {"embedding_passage_prefix": ""},
+        {"embedding_query_prefix": "query: "},
+        {"local_embedding_max_tokens": 128},
+    ]
+    names = {build_embedder(base).name}
+    for change in changes:
+        settings = base.model_copy(update=change)
+        embedder = build_embedder(settings)
+        assert embedder.name == embedder_name(settings)
+        names.add(embedder.name)
+    assert len(names) == len(changes) + 1
+    assert build_embedder(base).name == build_embedder(base.model_copy()).name
+    revised = base.model_copy(update={"embedding_model_revision": "abc123"})
+    assert build_embedder(revised).name.startswith("local:tiny@abc123#")
+
+
+def _embedder_for(rows: object, dimensions: int | None = 2) -> OpenAIEmbedder:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": rows})
+
+    return OpenAIEmbedder(client(handler), "m", dimensions)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"index": 0, "embedding": [1, 2]}, {"index": 0, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 2, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 1, "embedding": [1, 2, 3]}],
+        [{"index": 0, "embedding": [1, 2]}, {"embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 1, "embedding": "xy"}],
+        [{"index": 0, "embedding": [1, 2]}, 5],
+    ],
+)
+def test_openai_embedder_rejects_malformed_responses(rows: object) -> None:
+    with pytest.raises(ProviderError) as info:
+        _embedder_for(rows).embed(["a", "b"], "passage")
+    assert not info.value.retryable
+
+
+@pytest.mark.parametrize("content", [b"not json", b"[1, 2]"])
+def test_openai_parsers_wrap_non_object_json(clip: AudioClip, content: bytes) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content)
+
+    with pytest.raises(ProviderError):
+        OpenAIEmbedder(client(handler), "m", None).embed(["a"], "passage")
+    with pytest.raises(ProviderError):
+        OpenAITranscriber(client(handler), "m").transcribe(clip, [])
+
+
+def test_google_translator_batches_by_encoded_size_and_keeps_order() -> None:
+    sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        batch = json.loads(request.read())["q"]
+        sizes.append(sum(len(t.encode("utf-8")) for t in batch))
+        return httpx.Response(
+            200, json={"data": {"translations": [{"translatedText": t} for t in batch]}}
+        )
+
+    # Each text is 10 characters but 31 UTF-8 bytes, so only two fit in 70 bytes.
+    texts = ["न" * 10 + str(i) for i in range(5)] + ["x" * 200]
+    translator = GoogleNmtTranslator(
+        client(handler), "k", url="https://example.test/t", max_batch_bytes=70
+    )
+    result = translator.translate_to_english(texts, "ne")
+    assert [t.text for t in result] == texts
+    assert len(sizes) == 4
+    assert all(size <= 70 for size in sizes[:-1])
+    assert sizes[-1] == 200
+
+
+def test_google_translator_rejects_malformed_json() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>")
+
+    translator = GoogleNmtTranslator(client(handler), "k", url="https://example.test/t")
+    with pytest.raises(ProviderError):
+        translator.translate_to_english(["a"], "ne")

@@ -24,6 +24,9 @@ class ProviderSettings(BaseSettings):
     embedding_provider: Literal["openai", "local", "fake"] = "openai"
     embedding_model: str | None = None
     embedding_dimensions: int | None = None
+    # `local` provider: the model's revision (e.g. a Hugging Face commit hash). It is part of
+    # the stored embedding identity, so changing it re-embeds on the next reindex.
+    embedding_model_revision: str | None = None
     # Prepended to every query or passage. multilingual-E5 needs "query: " and "passage: ".
     embedding_query_prefix: str = ""
     embedding_passage_prefix: str = ""

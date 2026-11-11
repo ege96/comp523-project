@@ -27,7 +27,12 @@ def _post(client: httpx.Client, path: str, **kwargs: object) -> dict[str, object
     except httpx.TransportError as exc:
         raise ProviderError(f"OpenAI unreachable: {exc}", retryable=True) from exc
     raise_for_status(response.status_code, response.text, "OpenAI")
-    data: dict[str, object] = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ProviderError("OpenAI returned a response that is not JSON", retryable=False) from exc
+    if not isinstance(data, dict):
+        raise ProviderError("OpenAI returned an unexpected response shape", retryable=False)
     return data
 
 
@@ -109,14 +114,35 @@ class OpenAIEmbedder:
             if self._dimensions:
                 body["dimensions"] = self._dimensions
             data = _post(self._client, "/embeddings", json=body)
-            rows = data.get("data")
-            if not isinstance(rows, list):
-                raise ProviderError("OpenAI embeddings response had no data", retryable=False)
-            ordered = sorted(rows, key=lambda row: int(row["index"]))
-            vectors.extend([float(x) for x in row["embedding"]] for row in ordered)
-        if len(vectors) != len(texts):
+            vectors.extend(self._parse_batch(data, len(body["input"])))  # type: ignore[arg-type]
+        return vectors
+
+    def _parse_batch(self, data: dict[str, object], count: int) -> list[list[float]]:
+        """The vectors of one response in input order, checked against the request."""
+        rows = data.get("data")
+        if not isinstance(rows, list):
+            raise ProviderError("OpenAI embeddings response had no data", retryable=False)
+        by_index: dict[int, list[float]] = {}
+        try:
+            for row in rows:
+                index = row["index"]
+                if isinstance(index, bool) or not isinstance(index, int) or index in by_index:
+                    raise ValueError(f"bad or duplicate index {index!r}")
+                by_index[index] = [float(x) for x in row["embedding"]]
+        except (KeyError, TypeError, ValueError) as exc:
             raise ProviderError(
-                f"OpenAI returned {len(vectors)} embeddings for {len(texts)} texts",
+                f"OpenAI returned a malformed embeddings response: {exc}", retryable=False
+            ) from exc
+        if sorted(by_index) != list(range(count)):
+            raise ProviderError(
+                f"OpenAI returned embedding indices {sorted(by_index)} for {count} texts",
+                retryable=False,
+            )
+        vectors = [by_index[i] for i in range(count)]
+        expected = self._dimensions or (len(vectors[0]) if vectors else 0)
+        if any(not v or len(v) != expected for v in vectors):
+            raise ProviderError(
+                f"OpenAI returned embeddings that are not {expected}-dimensional",
                 retryable=False,
             )
         return vectors
