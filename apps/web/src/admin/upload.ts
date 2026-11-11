@@ -133,18 +133,3 @@ export function startUpload(
     },
   };
 }
-
-const DATE_PATTERN = /^\d{4}(-\d{2}(-\d{2})?)?$/;
-
-/** YYYY, YYYY-MM or YYYY-MM-DD, and a date that exists (no 2024-02-30). */
-export function recordedOnError(value: string): string | undefined {
-  const text = value.trim();
-  if (!text) return undefined;
-  const message = "Use YYYY, YYYY-MM or YYYY-MM-DD, with as much of the date as is known";
-  if (!DATE_PATTERN.test(text)) return message;
-  const [y = 0, m = 1, d = 1] = text.split("-").map(Number);
-  const date = new Date(Date.UTC(y, m - 1, d));
-  return date.getUTCFullYear() === y && date.getUTCMonth() === m - 1 && date.getUTCDate() === d
-    ? undefined
-    : message;
-}

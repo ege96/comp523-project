@@ -102,23 +102,35 @@ export function formatAdded(iso: string): string {
 /** One thing visitors get once it's published: there now, or not yet. */
 export type VisitorItem = { text: string; available: boolean };
 
-// Use processing jobs to estimate publication availability.
+/**
+ * What visitors get if it is published now. The recording, the transcript and finding it by
+ * its words are told apart from search by meaning, which needs the indexing step: lines that
+ * exist are public and found by their words even when indexing failed. `lines` is how many
+ * transcript lines there are, when known; otherwise a finished transcription stands for them.
+ */
 export function visitorGets(
   interview: Pick<InterviewDetail, "status" | "translation_status" | "media">,
   jobs?: readonly Job[],
+  lines?: number,
 ): VisitorItem[] {
   const { status, translation_status: english } = interview;
+  const steps = processingSteps(jobs ?? []);
+  const stateOf = (key: string) => steps.find((s) => s.key === key)?.job.state;
+  const hasLines =
+    lines === undefined ? stateOf("transcribe") === "done" || status === "done" : lines > 0;
   const items: VisitorItem[] = [
     interview.media
       ? { text: "Play the recording", available: true }
       : status === "processing"
         ? { text: "The recording isn't ready to play yet", available: false }
         : { text: "No recording to play: it couldn't be prepared", available: false },
-    status === "done"
+    hasLines
       ? { text: "Read the transcript, marked as made by machine", available: true }
       : status === "processing"
         ? { text: "Transcript still being made, marked “Transcript in progress”", available: false }
-        : { text: "No transcript (marked “Transcript unavailable”)", available: false },
+        : status === "failed"
+          ? { text: "No transcript (marked “Transcript unavailable”)", available: false }
+          : { text: "No transcript: no speech was found in the recording", available: false },
   ];
   if (english === "done") items.push({ text: "Read the English translation", available: true });
   else if (english === "failed")
@@ -131,13 +143,24 @@ export function visitorGets(
           : "No English translation yet",
       available: false,
     });
-  const index = processingSteps(jobs ?? []).find((s) => s.key === "index");
+  items.push({ text: "Find it in search by its title and details", available: true });
+  if (!hasLines) {
+    items.push(
+      status === "processing"
+        ? { text: "Search finds what is said once the transcript is made", available: false }
+        : { text: "Search can't find what is said without a transcript", available: false },
+    );
+    return items;
+  }
+  items.push({ text: "Find moments in search by the words said", available: true });
+  const index = stateOf("index");
+  const byMeaning = status === "done" ? index !== "failed" : index === "done";
   items.push(
-    status === "done" || index?.job.state === "done"
-      ? { text: "Find it in search", available: true }
+    byMeaning
+      ? { text: "Find moments in search by meaning", available: true }
       : status === "processing"
-        ? { text: "Search finds it once processing finishes", available: false }
-        : { text: "Search won't find it until processing works", available: false },
+        ? { text: "Search by meaning works once processing finishes", available: false }
+        : { text: "Search by meaning works once search indexing does", available: false },
   );
   return items;
 }
