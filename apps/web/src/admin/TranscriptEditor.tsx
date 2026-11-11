@@ -812,7 +812,16 @@ function LineForm({
         ) : null}
         <form.Subscribe selector={(s) => s.canSubmit}>
           {(canSubmit) => (
-            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              useFlexGap
+              sx={{
+                alignItems: "center",
+                flexWrap: "wrap",
+                "& .MuiButton-root": { flexShrink: 0, whiteSpace: "nowrap" },
+              }}
+            >
               <Button type="submit" variant="contained" disabled={!canSubmit || save.isPending}>
                 {save.isPending ? "Saving…" : "Save"}
               </Button>
@@ -836,7 +845,7 @@ function LineForm({
               <Typography
                 variant="caption"
                 color="text.secondary"
-                sx={{ display: { xs: "none", md: "block" } }}
+                sx={{ display: { xs: "none", md: "block" }, flex: "1 1 16rem" }}
               >
                 Enter saves · Alt+Enter saves and goes on · Esc cancels
                 {interview.media ? " · Alt+P plays the line" : ""}
