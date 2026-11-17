@@ -20,6 +20,9 @@ class ProviderSettings(BaseSettings):
 
     transcription_provider: Literal["openai", "elevenlabs", "fake"] = "openai"
     transcription_model: str | None = None
+    # OpenAI only: languages to expect when no admin confirmed one, comma separated. Verify
+    # codes against OpenAI's supported list; an unsupported code fails every request.
+    transcription_languages: str = "ne,en"
     translation_provider: Literal["google_nmt", "fake"] = "google_nmt"
     embedding_provider: Literal["openai", "local", "fake"] = "openai"
     embedding_model: str | None = None

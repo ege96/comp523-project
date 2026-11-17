@@ -49,25 +49,36 @@ class OpenAITranscriber:
 
     The clip boundaries are the timestamps, so this works whether or not the model returns
     its own timestamps.
+
+    `languages` is the expected-languages list sent when no language was confirmed (e.g.
+    ["ne", "en"]). A confirmed language goes first, with the rest kept for mixed speech.
+    The `languages` field is for gpt-transcribe; older models took a single `language`.
     """
 
-    def __init__(self, client: httpx.Client, model: str) -> None:
+    def __init__(self, client: httpx.Client, model: str, languages: Sequence[str] = ()) -> None:
         self._client = client
         self._model = model
+        self._languages = list(languages)
 
     @property
     def name(self) -> str:
         return f"openai:{self._model}"
 
+    def _expected_languages(self, language_hints: Sequence[str]) -> list[str]:
+        # The API rejects codes it doesn't support, and Nepal Bhasa ("new") has none. Sending
+        # the default list for it would push the model towards Nepali, so send nothing.
+        if any(len(code) != 2 for code in language_hints):
+            return []
+        expected = list(dict.fromkeys(language_hints))
+        return expected + [code for code in self._languages if code not in expected]
+
     def transcribe(
         self, clip: AudioClip, language_hints: Sequence[str]
     ) -> list[TranscribedSegment]:
-        form = {"model": self._model, "response_format": "json"}
-        # The API takes one ISO 639-1 (two-letter) code. Nepal Bhasa ("new") has none, so
-        # the model detects the language itself in that case.
-        two_letter = [code for code in language_hints if len(code) == 2]
-        if len(two_letter) == 1:
-            form["language"] = two_letter[0]
+        form: dict[str, str | list[str]] = {"model": self._model, "response_format": "json"}
+        languages = self._expected_languages(language_hints)
+        if languages:
+            form["languages[]"] = languages
         with clip.path.open("rb") as audio:
             data = _post(
                 self._client,
@@ -78,15 +89,21 @@ class OpenAITranscriber:
         text = str(data.get("text", "")).strip()
         if not text:
             return []
-        language = data.get("language")
         return [
             TranscribedSegment(
-                start_ms=0,
-                end_ms=clip.duration_ms,
-                text=text,
-                language=language if isinstance(language, str) else None,
+                start_ms=0, end_ms=clip.duration_ms, text=text, language=_detected(data)
             )
         ]
+
+
+def _detected(data: dict[str, object]) -> str | None:
+    """The clip's language if the model names exactly one. An empty list means it couldn't
+    tell; several mean mixed speech. Either way the translator's detection decides."""
+    found = data.get("languages")
+    if not isinstance(found, list) or len(found) != 1 or not isinstance(found[0], dict):
+        return None
+    code = found[0].get("code")
+    return code if isinstance(code, str) and code else None
 
 
 class OpenAIEmbedder:
