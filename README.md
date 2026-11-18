@@ -17,6 +17,7 @@ Visitors search the interviews by meaning or by exact words, in English, Nepali 
 | `packages/core` | Database models, job queue and media storage, shared by the API and worker | Python 3.12, SQLAlchemy 2 |
 | `packages/providers` | Swappable transcription, translation and embedding providers | Python 3.12 |
 | `db/init` | SQL run when a fresh local database starts (enables pgvector only; tables come from migrations) | PostgreSQL 16 + pgvector |
+| `deploy/cloudapps` | OpenShift templates that deploy the whole archive to CloudApps | OpenShift Template |
 | `docs` | Deployment and operations guide for CloudApps | Markdown |
 
 Python projects use [uv](https://docs.astral.sh/uv/). Web tests use Vitest.
@@ -51,7 +52,7 @@ uv run uvicorn swayambhu_api.main:app --reload          # listens on 8000
 cd ../worker && uv sync && uv run python -m swayambhu_worker   # no HTTP listener
 ```
 
-`MEDIA_ROOT` must be an absolute path and the same folder for both services: the API stores uploads there and the worker reads them. The relative `./media` in `.env.example` would point at a different folder for each service.
+`MEDIA_ROOT` must be an absolute path and the same folder for both services: the API stores uploads there and the worker reads them. A relative path would point at a different folder for each service.
 
 The web theme (colors and typography) lives in `apps/web/src/theme.ts`.
 
@@ -61,8 +62,8 @@ CI runs on every PR. Treat these as required checks when you set up branch prote
 
 | Job | What it runs |
 |---|---|
-| `api`, `worker` | ruff lint and format, mypy `--strict`, pytest with at least 80% coverage. The API job also runs an integration test against Postgres + pgvector. |
-| `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with at least 80% coverage, Vite build |
+| `api`, `worker`, `core`, `providers` | ruff lint and format, mypy `--strict`, pytest with at least 80% coverage, and `pip-audit` of the runtime dependencies. The API job also runs an integration test against Postgres + pgvector. |
+| `web` | ESLint (strict, type-checked), Prettier, `tsc`, Vitest with at least 80% coverage, Vite build, and `npm audit` of the runtime dependencies |
 | `pre-commit` | Every hook in `.pre-commit-config.yaml`, including private-key and large-file checks |
 | `docker` | Runs hadolint on each Dockerfile, builds the image with a layer cache, runs it as an arbitrary non-root UID (like OpenShift does), and writes the image size to the job summary |
 
@@ -81,7 +82,7 @@ cd services/worker && uv run ruff check . && uv run mypy && uv run pytest --cov
 cd apps/web        && npm run lint && npm run typecheck && npm run test:coverage
 ```
 
-Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
+Dependabot opens one grouped PR a week that updates the uv, npm, GitHub Actions and Docker base image versions together (`.github/dependabot.yml`). Security updates arrive as their own PRs while Dependabot alerts are on in the repository settings. Vulnerable indirect dependencies are caught by the audit steps above.
 
 ## Health endpoints
 
@@ -91,6 +92,8 @@ Dependabot opens weekly grouped update PRs for uv, npm, and GitHub Actions.
 ## Search
 
 `GET /api/search?q=...` returns transcript moments, best first: each has its interview, a start and end time, and an excerpt of about 30 s of transcript lines to seek to. Keyword search (Postgres full-text) and semantic search (the query's embedding against stored chunk embeddings) are merged by reciprocal rank fusion. There is no match count, only `has_more`. The first page also has `interviews`: up to five interviews whose title, description, interviewee, interviewer or location contain the query's words, since such a match has no timestamp. Optional filters: `language` (any language heard), `interviewee` (an id, or `unknown`), `recorded_from`/`recorded_to` (`undated=true` also keeps interviews with no date), and `media` (`audio` or `video`, from the uploaded file's type). `GET /api/interviews` takes the same filters, so the interview list can be browsed without a query. `GET /api/search/filters` lists the languages and interviewees a viewer can filter by. Both filter by visibility like every other route. The API embeds queries with the same `EMBEDDING_*` settings the worker uses; if the provider fails or takes longer than `SEARCH_EMBEDDING_TIMEOUT_SECONDS` (default 5; remote providers only), results are keyword-only and the response says `"search_mode": "keyword_only"`. Each moment's `matched_by` says which searches found it. `SEARCH_CANDIDATES`, `SEARCH_RRF_K` and `SEARCH_EXCERPT_MS` tune the ranking and excerpts.
+
+Transcription uses `TRANSCRIPTION_PROVIDER` and `TRANSCRIPTION_MODEL`. With OpenAI, an upload whose language no admin has confirmed is sent with the languages in `TRANSCRIPTION_LANGUAGES` (default `ne,en`). Admins confirm or change the detected language afterwards.
 
 `EMBEDDING_PROVIDER=local` embeds on CPU inside the API and worker with ONNX Runtime, so search needs no API call. The api and worker images bake in `intfloat/multilingual-e5-small` under `/opt/models` at build time (`--build-arg EMBEDDING_MODEL=` leaves it out). Set `EMBEDDING_MODEL=intfloat/multilingual-e5-small`, `EMBEDDING_QUERY_PREFIX="query: "`, `EMBEDDING_PASSAGE_PREFIX="passage: "` and leave `EMBEDDING_DIMENSIONS` empty (the model fixes it at 384). Text past `LOCAL_EMBEDDING_MAX_TOKENS` (default 512, the model's limit) is cut off before embedding; keyword search still covers it. `LOCAL_EMBEDDING_THREADS` (default 4) should match the pod's CPU limit. Measured on CloudApps (1 CPU, 1 thread): the model takes about 400 MiB, queries about 20 ms, and the worker peaks around 540 MiB at `LOCAL_EMBEDDING_BATCH_SIZE` 4 (the default), so 768Mi limits fit both api and worker. Changing the model means the worker has to re-index, because search only compares vectors from the configured model.
 
@@ -181,7 +184,13 @@ DATABASE_URL=postgresql://swayambhu@localhost:5432/swayambhu_test uv run pytest 
 
 ## Deployment
 
-The target is UNC Carolina CloudApps (OpenShift). **[docs/deploy-cloudapps.md](docs/deploy-cloudapps.md)** has every step: secrets, the database, the three apps and their memory limits, the shared hostname, Firebase, automatic rebuilds, the first admin, day-to-day jobs, backups and restore, and troubleshooting. Every image runs as a non-root, arbitrary UID. The web and API images listen on 8080; the worker has no HTTP listener. The web app and API share one hostname, with `/api` routed to the API. Keys and passwords live in OpenShift Secrets, never in this repository; only the Firebase web config is public.
+The target is UNC Carolina CloudApps (OpenShift). Two templates in `deploy/cloudapps/` describe everything that runs: `setup.yaml` creates the Secrets and volumes once, and `app.yaml` creates or updates the builds, the four Deployments with their memory limits, and the routes, with one command:
+
+```sh
+oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply -f -
+```
+
+**[docs/deploy-cloudapps.md](docs/deploy-cloudapps.md)** has every step: the parameters, Firebase, automatic rebuilds, the first admin, moving a hand-built project onto the templates, day-to-day jobs, backups and restore, and troubleshooting. Every image runs as a non-root, arbitrary UID. The web and API images listen on 8080; the worker has no HTTP listener. The web app and API share one hostname, with `/api` routed to the API. Keys and passwords live in OpenShift Secrets, never in this repository; only the Firebase web config is public.
 
 - **Web:** nginx sends a Content-Security-Policy, `nosniff`, Referrer-Policy, HSTS and Permissions-Policy on every response (`apps/web/security-headers.inc`). Hashed files under `/assets/` are cached for a year, and `index.html` is revalidated on every load. A new external host (Firebase sign-in, the media store) has to be added to the CSP, or the browser blocks it.
 - **API behind the router:** uvicorn takes the client IP from `X-Forwarded-For` only when the request comes from an address in `FORWARDED_ALLOW_IPS`. The API image sets it to `*`, because only the OpenShift router can reach the pod. Override it on the Deployment if the API is ever exposed another way.

@@ -1,0 +1,128 @@
+# One-time setup for a CloudApps (OpenShift) project: Secrets and volumes.
+# Create it once, never re-apply it (that would replace the generated database password,
+# which PostgreSQL keeps in its data volume):
+#
+#   oc process -f deploy/cloudapps/setup.yaml --param-file=deploy/cloudapps/secrets.env | oc create -f -
+#
+# Anything that already exists is reported as AlreadyExists and left untouched.
+# See docs/deploy-cloudapps.md.
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: swayambhu-setup
+  annotations:
+    description: Secrets and volumes for the Swayambhu Stories archive. Create once.
+parameters:
+  - name: OPENAI_API_KEY
+    description: OpenAI key, for transcription.
+    required: true
+  - name: GOOGLE_TRANSLATE_API_KEY
+    description: Google Cloud Translation key.
+    required: true
+  - name: GITHUB_USERNAME
+    description: GitHub user that CloudApps builds the repository as.
+    required: true
+  - name: GITHUB_TOKEN
+    description: Fine-grained GitHub token that can read the repository's contents.
+    required: true
+  - name: DB_PASSWORD
+    description: Database password. Generated; hex, so it is safe inside DATABASE_URL.
+    generate: expression
+    from: "[a-f0-9]{48}"
+  - name: MEDIA_URL_SECRET
+    description: Signs the API's expiring media links. Generated.
+    generate: expression
+    from: "[a-f0-9]{64}"
+  - name: WEBHOOK_SECRET_API
+    generate: expression
+    from: "[a-zA-Z0-9]{40}"
+  - name: WEBHOOK_SECRET_WORKER
+    generate: expression
+    from: "[a-zA-Z0-9]{40}"
+  - name: WEBHOOK_SECRET_WEB
+    generate: expression
+    from: "[a-zA-Z0-9]{40}"
+  - name: DB_VOLUME_SIZE
+    description: Database volume. Counts toward the project's storage quota.
+    value: 1Gi
+  - name: MEDIA_VOLUME_SIZE
+    description: Recordings volume. Counts toward the project's storage quota.
+    value: 4Gi
+objects:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: db-credentials
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: Opaque
+    stringData:
+      POSTGRES_USER: swayambhu
+      POSTGRES_DB: swayambhu
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      DATABASE_URL: postgresql://swayambhu:${DB_PASSWORD}@db:5432/swayambhu
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: ai-providers
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: Opaque
+    stringData:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY}
+      MEDIA_URL_SECRET: ${MEDIA_URL_SECRET}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: github-read
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: kubernetes.io/basic-auth
+    stringData:
+      username: ${GITHUB_USERNAME}
+      password: ${GITHUB_TOKEN}
+  # Generic webhook secrets, named as the console names them, so the URLs in the GitHub
+  # secrets OPENSHIFT_WEBHOOK_* keep working when app.yaml takes over existing BuildConfigs.
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: api-generic-webhook-secret
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: Opaque
+    stringData:
+      WebHookSecretKey: ${WEBHOOK_SECRET_API}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: worker-generic-webhook-secret
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: Opaque
+    stringData:
+      WebHookSecretKey: ${WEBHOOK_SECRET_WORKER}
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: web-generic-webhook-secret
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    type: Opaque
+    stringData:
+      WebHookSecretKey: ${WEBHOOK_SECRET_WEB}
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: db-data
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: ${DB_VOLUME_SIZE}
+  # Shared by api (uploads, playback) and worker (processing).
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: media
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    spec:
+      accessModes: [ReadWriteMany]
+      resources:
+        requests:
+          storage: ${MEDIA_VOLUME_SIZE}

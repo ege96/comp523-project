@@ -13,3 +13,5 @@ coverage/
 media/
 .env.local
 .env.*.local
+# CloudApps parameter files (secrets.env holds API keys)
+deploy/cloudapps/*.env

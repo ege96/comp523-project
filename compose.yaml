@@ -1,4 +1,4 @@
-# Local development stack. Production runs on CloudApps (OpenShift); manifests come later.
+# Local development stack. Production runs on CloudApps (OpenShift): see deploy/cloudapps/.
 services:
   db:
     image: pgvector/pgvector:pg16
