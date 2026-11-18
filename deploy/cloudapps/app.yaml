@@ -31,7 +31,14 @@ parameters:
     description: Baked into the api and worker images; changing it needs a reindex.
     value: intfloat/multilingual-e5-small
   - name: POSTGRES_IMAGE
+    description: Imported into the db ImageStream, so pods pull it from the cluster's registry.
     value: docker.io/pgvector/pgvector:pg16
+  - name: DB_VOLUME_CLAIM
+    description: The database volume (setup.yaml creates db-data). Only for projects set up before the templates.
+    value: db-data
+  - name: GIT_SOURCE_SECRET
+    description: Secret holding the GitHub token builds clone with (setup.yaml creates github-read).
+    value: github-read
 objects:
   # ---------- settings shared by api and worker ----------
   # One ConfigMap for both, so search always compares vectors from the same model.
@@ -55,24 +62,38 @@ objects:
       LOCAL_EMBEDDING_THREADS: "1"
 
   # ---------- database ----------
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: db
+      labels: { app: db, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      lookupPolicy: { local: true }
+      tags:
+        - name: pg16
+          from: { kind: DockerImage, name: "${POSTGRES_IMAGE}" }
+          referencePolicy: { type: Local }
   - apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: db
       labels: { app: db, app.kubernetes.io/part-of: swayambhu }
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"db:pg16"},"fieldPath":"spec.template.spec.containers[?(@.name==\"db\")].image"}]
     spec:
       replicas: 1
       # Recreate: a rolling update would start a second PostgreSQL on the same volume.
       strategy: { type: Recreate }
       selector:
-        matchLabels: { deployment: db }
+        matchLabels: { app: db }
       template:
         metadata:
-          labels: { deployment: db, app: db }
+          labels: { app: db, deployment: db }
         spec:
           containers:
             - name: db
-              image: ${POSTGRES_IMAGE}
+              image: "db:pg16"
               ports: [{ containerPort: 5432, protocol: TCP }]
               env:
                 - name: PGDATA
@@ -90,14 +111,14 @@ objects:
                 - { name: data, mountPath: /var/lib/postgresql/data }
           volumes:
             - name: data
-              persistentVolumeClaim: { claimName: db-data }
+              persistentVolumeClaim: { claimName: "${DB_VOLUME_CLAIM}" }
   - apiVersion: v1
     kind: Service
     metadata:
       name: db
       labels: { app: db, app.kubernetes.io/part-of: swayambhu }
     spec:
-      selector: { deployment: db }
+      selector: { app: db, deployment: db }
       ports:
         - { name: 5432-tcp, port: 5432, targetPort: 5432, protocol: TCP }
 
@@ -138,7 +159,7 @@ objects:
         type: Git
         git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
         contextDir: /
-        sourceSecret: { name: github-read }
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
       strategy:
         type: Docker
         dockerStrategy: { dockerfilePath: services/api/Dockerfile }
@@ -160,7 +181,7 @@ objects:
         type: Git
         git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
         contextDir: /
-        sourceSecret: { name: github-read }
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
       strategy:
         type: Docker
         dockerStrategy: { dockerfilePath: services/worker/Dockerfile }
@@ -182,7 +203,7 @@ objects:
         type: Git
         git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
         contextDir: /apps/web
-        sourceSecret: { name: github-read }
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
       strategy:
         type: Docker
         dockerStrategy: { dockerfilePath: Dockerfile }
@@ -213,7 +234,7 @@ objects:
         matchLabels: { app: api }
       template:
         metadata:
-          labels: { app: api }
+          labels: { app: api, deployment: api }
         spec:
           containers:
             - name: api
@@ -247,7 +268,7 @@ objects:
       name: api
       labels: { app: api, app.kubernetes.io/part-of: swayambhu }
     spec:
-      selector: { app: api }
+      selector: { app: api, deployment: api }
       ports:
         - { name: 8080-tcp, port: 8080, targetPort: 8080, protocol: TCP }
 
@@ -267,7 +288,7 @@ objects:
         matchLabels: { app: worker }
       template:
         metadata:
-          labels: { app: worker }
+          labels: { app: worker, deployment: worker }
         spec:
           containers:
             - name: worker
@@ -300,7 +321,7 @@ objects:
         matchLabels: { app: web }
       template:
         metadata:
-          labels: { app: web }
+          labels: { app: web, deployment: web }
         spec:
           containers:
             - name: web
@@ -308,7 +329,7 @@ objects:
               ports: [{ containerPort: 8080, protocol: TCP }]
               resources:
                 limits: { cpu: 300m, memory: 128Mi }
-                requests: { cpu: 50m, memory: 128Mi }
+                requests: { cpu: 60m, memory: 128Mi }
               readinessProbe:
                 httpGet: { path: /, port: 8080 }
                 periodSeconds: 10
@@ -318,7 +339,7 @@ objects:
       name: web
       labels: { app: web, app.kubernetes.io/part-of: swayambhu }
     spec:
-      selector: { app: web }
+      selector: { app: web, deployment: web }
       ports:
         - { name: 8080-tcp, port: 8080, targetPort: 8080, protocol: TCP }
 

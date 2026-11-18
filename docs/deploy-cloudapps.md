@@ -103,17 +103,19 @@ Then check, in this order:
 
 ### 3.7 Moving a project that was set up by hand
 
-Projects set up before these templates (with `oc new-app` and the console's Import from Git) can switch to them without losing data: the templates reuse the same names (`db-data`, `media`, `db-credentials`, `ai-providers`, `github-read`, and `<app>-generic-webhook-secret` for the build webhooks, so the URLs in the GitHub secrets keep working). Skip §3.2, since the Secrets and volumes already exist. Before applying, look at what would change; neither command changes anything:
+Projects set up before these templates (with the console's Import from Git) can switch to them in place: the templates use the same Deployment, Service, route and Secret names (`media`, `db-credentials`, `ai-providers`, and `<app>-generic-webhook-secret` for the build webhooks, so the URLs in the GitHub secrets keep working). Skip §3.2, since the Secrets and volumes already exist. Before applying, look at what would change; neither command changes anything:
 
 ```sh
 oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc diff -f -
 oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply --dry-run=server -f -
 ```
 
-- If the dry run says a Deployment's `spec.selector` is immutable, that Deployment was created with other labels than the template uses (`app=<name>`, and `deployment=db` for the database). Delete just that Deployment (`oc delete deploy/<name>`) and apply again. Its volume and Secrets stay; the app is down for the minute it takes to start again. For `api` or `worker`, take a backup pair first (§5).
-- If a build webhook secret has another name, put that name in `app.yaml`, or copy the new webhook URLs into the GitHub secrets (§3.5) after applying.
-- Settings set earlier with `oc set env` stay on the Deployments and take precedence over `app-settings`. List them with `oc set env deploy/api --list`, and remove any you now set in `app.env` with `oc set env deploy/api <NAME>-`.
-- If the repository still has OpenShift webhooks under **Settings**, then **Webhooks**, delete them: the templates have no GitHub-type build trigger, and the workflow in §3.5 does that job.
+- **Names that differ from the templates' defaults.** Projects made by hand may have used other names. Set them in `app.env`: `DB_VOLUME_CLAIM` for the database volume and `GIT_SOURCE_SECRET` for the GitHub token Secret. Find them with `oc get pvc` and `oc get bc/api -o jsonpath='{.spec.source.sourceSecret.name}'`.
+- **Check the database is on its volume** before anything else: `oc get deploy/db -o jsonpath='{.spec.template.spec.volumes}'`. If it shows `emptyDir`, the database lives only inside the pod and is wiped whenever the pod restarts. Applying the template moves it onto `DB_VOLUME_CLAIM`, which starts a database from whatever is on that volume. So first take a dump (§5 step 2), apply, then restore the dump into the new database (§5 restore step 3).
+- **Selectors.** The templates select pods by `app=<name>`, as the console's Import from Git does. If the dry run says a Deployment's `spec.selector` is immutable, delete just that Deployment (`oc delete deploy/<name>`) and apply again. Its volume and Secrets stay.
+- **A port listed twice.** Import from Git can list the container port twice, which `oc apply` may refuse to merge. Remove the copy first: `oc patch deploy/web --type=json -p '[{"op":"remove","path":"/spec/template/spec/containers/0/ports/1"}]'`.
+- **Settings set earlier with `oc set env`** stay on the Deployments and take precedence over `app-settings`. List them with `oc set env deploy/api --list`, and remove any you now set in `app.env` with `oc set env deploy/api <NAME>-`.
+- **GitHub-type build webhooks.** The templates keep only the Generic webhook that the workflow in §3.5 calls (same Secret names as the console's, so its URLs don't change). Applying removes the GitHub-type trigger; delete any OpenShift webhooks left under the repository's **Settings**, then **Webhooks**.
 
 ## 4. Day-to-day jobs
 
