@@ -52,7 +52,7 @@ cp deploy/cloudapps/app.env.example deploy/cloudapps/app.env
 ```
 
 - `secrets.env`: the OpenAI and Google Cloud Translation keys, and the GitHub username and token CloudApps builds the repository with. The database password, the media-link key and the webhook secrets are generated for you.
-- `app.env`: the site's hostname (`web-<project>.apps.cloudapps.unc.edu` is free to use in your project) and the OpenAI transcription model id. Check the current model name before setting it (verify before use). The other settings have working defaults, listed in the file.
+- `app.env`: the site's hostname. CloudApps gives every project hostnames of the form `<name>-<project>.apps.cloudapps.unc.edu`, so use `web-<project>.apps.cloudapps.unc.edu`, where `<project>` is what `oc project -q` prints. (A custom domain needs ITS.) and the OpenAI transcription model id. Check the current model name before setting it (verify before use). The other settings have working defaults, listed in the file.
 
 ### 3.2 Create the Secrets and volumes (once)
 
