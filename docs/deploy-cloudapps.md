@@ -17,14 +17,15 @@ Values in `<angle brackets>` are yours to fill in. Steps marked *(verify)* haven
 |---|---|---|---|
 | Website (nginx serving the React app) | `web` | Yes, at `/` | 128Mi |
 | API (FastAPI): search, sign-in checks, uploads, media links | `api` | Yes, at `/api` on the same hostname | 768Mi |
-| Worker: playback copies, transcription, translation, search index | `worker` | No | 768Mi |
+| Worker: playback copies, transcription, translation, search index | `worker` | No | 1Gi (2 CPU) |
 | PostgreSQL 16 with pgvector | `db` | No | 512Mi |
 
 Recordings live on a shared volume mounted at `/data/media` in both `api` and `worker`. The database has its own volume. Sign-in is Firebase Authentication, transcription is OpenAI, and translation is Google Cloud Translation. Search runs inside `api` and `worker` (`EMBEDDING_PROVIDER=local`), so it calls no outside service.
 
 ## 2. What you need first
 
-- **A CloudApps project.** The default UNC quota we built for is 4 CPU and 2,560 MiB of memory for all long-running pods together, at most 2 CPU and 2 GiB per container, and 5 GiB of volume storage. The four pods above use 2,176 MiB. Containers with no limit get 300Mi by default, which is too small for `api` and `worker`, so every Deployment sets its own limits. Check yours with `oc describe quota` and `oc describe limitrange`.
+- **The `oc` tool**, logged in as above, and a copy of this repository.
+- **A CloudApps project.** The default UNC quota we built for is 4 CPU and 2,560 MiB of memory for all long-running pods together, at most 2 CPU and 2 GiB per container, and 5 GiB of volume storage. The four pods above use 2,432 MiB and 3.8 CPU, leaving a little room; the worker gets the most because FFmpeg and indexing are the heaviest work. Containers with no limit get 300Mi by default, which is too small for `api` and `worker`, so every Deployment in the templates sets its own limits. Check yours with `oc describe quota` and `oc describe limitrange`.
 - **Storage for recordings.** Each hour of video takes roughly 1–2 GB (the original plus a 720p streaming copy); audio about 0.1 GB. Ask ITS for more volume storage if you need more than about 4 GB.
 - **GitHub access** to the repository, with a fine-grained token that can read its contents.
 - **A Firebase project** with the Email/Password and Google sign-in methods turned on.
@@ -32,121 +33,62 @@ Recordings live on a shared volume mounted at `/data/media` in both `api` and `w
 
 ## 3. First-time setup
 
-### 3.1 Secrets
+Everything that runs is described by two OpenShift templates in `deploy/cloudapps/`:
 
-Keys and passwords go in OpenShift Secrets, never in the repository. Make a database password with `openssl rand -hex 24` (hex, so it's safe inside a URL), then:
+| File | What it creates | How often |
+|---|---|---|
+| `setup.yaml` | The Secrets (database password, API keys, GitHub token, build webhook secrets) and the two volumes (`db-data`, `media`) | Once. Re-creating it would replace the generated database password. |
+| `app.yaml` | The builds, the four Deployments with their limits, the Services, the routes on one hostname, and the shared settings (`app-settings` ConfigMap) | Every time something in it changes. Safe to re-run. |
 
-```sh
-oc create secret generic db-credentials \
-  --from-literal=POSTGRES_USER=swayambhu \
-  --from-literal=POSTGRES_DB=swayambhu \
-  --from-literal=POSTGRES_PASSWORD=<password> \
-  --from-literal=DATABASE_URL=postgresql://swayambhu:<password>@db:5432/swayambhu
+Run the commands below from the repository's top folder. They work the same in PowerShell and in a Unix shell.
 
-oc create secret generic ai-providers \
-  --from-literal=OPENAI_API_KEY=<openai key> \
-  --from-literal=GOOGLE_TRANSLATE_API_KEY=<google key> \
-  --from-literal=MEDIA_URL_SECRET=$(openssl rand -hex 32)
+### 3.1 Fill in the parameters
 
-oc create secret generic github-read \
-  --type=kubernetes.io/basic-auth \
-  --from-literal=username=<github username> \
-  --from-literal=password=<github token>
-```
-
-### 3.2 Database
-
-Use the `pgvector/pgvector:pg16` image, not CloudApps' PostgreSQL template (its versions are too old and have no pgvector).
+Copy the two example files and fill them in. The copies are git-ignored; never commit them.
 
 ```sh
-oc new-app docker.io/pgvector/pgvector:pg16 --name=db \
-  -e PGDATA=/var/lib/postgresql/data/pgdata
-oc set env deploy/db --from=secret/db-credentials
-oc set resources deploy/db --limits=memory=512Mi --requests=memory=512Mi
-oc set volume deploy/db --add --name=data --type=pvc --claim-name=db-data \
-  --claim-size=1Gi --claim-mode=ReadWriteOnce --mount-path=/var/lib/postgresql/data
-oc patch deploy/db -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+cp deploy/cloudapps/secrets.env.example deploy/cloudapps/secrets.env   # PowerShell: Copy-Item
+cp deploy/cloudapps/app.env.example deploy/cloudapps/app.env
 ```
 
-`Recreate` matters: a rolling update would start a second database on the same volume and hang. When the pod is Running, turn on pgvector once:
+- `secrets.env`: the OpenAI and Google Cloud Translation keys, and the GitHub username and token CloudApps builds the repository with. The database password, the media-link key and the webhook secrets are generated for you.
+- `app.env`: the site's hostname. CloudApps gives every project hostnames of the form `<name>-<project>.apps.cloudapps.unc.edu`, so use `web-<project>.apps.cloudapps.unc.edu`, where `<project>` is what `oc project -q` prints. (A custom domain needs ITS.) and the OpenAI transcription model id. Check the current model name before setting it (verify before use). The other settings have working defaults, listed in the file.
+
+### 3.2 Create the Secrets and volumes (once)
 
 ```sh
-oc exec deploy/db -- psql -U swayambhu -d swayambhu -c "CREATE EXTENSION IF NOT EXISTS vector;"
+oc process -f deploy/cloudapps/setup.yaml --param-file=deploy/cloudapps/secrets.env | oc create -f -
 ```
 
-Tables are created by the API on its first start (it runs the database migrations itself).
+Then delete `secrets.env`: the values now live only in the project's Secrets. If something already exists, `oc create` says `AlreadyExists` and leaves it as it is. The two volumes take 5 GiB together (1 GiB database, 4 GiB recordings), which is the whole default quota; `DB_VOLUME_SIZE` and `MEDIA_VOLUME_SIZE` in `secrets.env` change that.
 
-### 3.3 API, worker and website
-
-Each app is built from the repository by CloudApps. In the console: **+Add**, then **Import from Git**, repository URL `https://github.com/<owner>/comp523-project`, **Show advanced Git options**, Git reference `main`, source secret `github-read`, Import Strategy **Dockerfile**.
-
-| Name | Context dir | Dockerfile path | Target port | Route |
-|---|---|---|---|---|
-| `api` | `/` | `services/api/Dockerfile` | pick 8080 from the list | Path `/api`, Secure (Edge, Redirect) |
-| `worker` | `/` | `services/worker/Dockerfile` | — | Untick "Create a route" |
-| `web` | `/apps/web` | `Dockerfile` | pick 8080 from the list | Path empty, Secure (Edge, Redirect) |
-
-Pick the port from the dropdown: typing it can list it twice and fail with `Duplicate value: "8080-tcp"`. The `api` and `worker` builds include the search model, so they take a few minutes.
-
-Then give `api` and `worker` their settings, volume and limits:
+### 3.3 Deploy everything
 
 ```sh
-for app in api worker; do
-  # One command per Secret: repeating --from in one command keeps only the last Secret.
-  oc set env deploy/$app --from=secret/db-credentials
-  oc set env deploy/$app --from=secret/ai-providers
-  oc set env deploy/$app \
-    TRANSCRIPTION_PROVIDER=openai TRANSCRIPTION_MODEL=<openai transcription model> \
-    TRANSLATION_PROVIDER=google_nmt \
-    EMBEDDING_PROVIDER=local EMBEDDING_MODEL=intfloat/multilingual-e5-small \
-    EMBEDDING_QUERY_PREFIX="query: " EMBEDDING_PASSAGE_PREFIX="passage: " \
-    LOCAL_EMBEDDING_THREADS=1
-  oc set resources deploy/$app --limits=cpu=1,memory=768Mi --requests=cpu=250m,memory=768Mi
-  oc patch deploy/$app -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
-done
-oc set env deploy/api FIREBASE_PROJECT_ID=<firebase project id>
-oc set volume deploy/api --add --name=media --type=pvc --claim-name=media \
-  --claim-size=4Gi --claim-mode=ReadWriteMany --mount-path=/data/media
-oc set volume deploy/worker --add --name=media --type=pvc --claim-name=media \
-  --mount-path=/data/media
-oc set resources deploy/web --limits=cpu=300m,memory=128Mi
+oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply -f -
 ```
 
-Check that both Secrets are attached, without printing their values (each line should show `DATABASE_URL` and `OPENAI_API_KEY`, and so on):
+This is the one command. The first time, it also starts a build of `api`, `worker` and `web` from `main`. The `api` and `worker` builds include the search model and take several minutes; follow them with `oc get builds -w` or under **Builds** in the console. Each finished build rolls out by itself. The database uses the `pgvector/pgvector:pg16` image (CloudApps' own PostgreSQL template has no pgvector), and the API creates the tables and turns on pgvector when it first starts.
 
-```sh
-for app in api worker; do oc set env deploy/$app --list | cut -d= -f1; done
-```
+When `oc get pods` shows `api`, `worker`, `web` and `db` Running, `https://<web hostname>/api/health/ready` should return `{"status":"ok","database":true,"pgvector":true}`.
 
-Check the current OpenAI transcription model name before setting it (verify before use). Search compares only vectors made by the same model, so `api` and `worker` must always have the same `EMBEDDING_*` settings.
+Run the same command again after changing `app.env` or `app.yaml`; it changes only what differs. Pods read the shared settings when they start, so after changing a setting also run `oc rollout restart deploy/api deploy/worker`.
 
-Health checks for `api` (console: **Actions**, then **Add Health Checks**): readiness `GET /api/health/ready` and liveness `GET /api/health`, both on port 8080.
+*(Optional, verify)* For a click-only first install, `oc create -f deploy/cloudapps/app.yaml` adds the template to the project's catalog: **+Add**, then **All services**, find **swayambhu**, fill in the form and click **Create**. Do later changes with the command above.
 
-### 3.4 One hostname for the website and the API
+### 3.4 Firebase
 
-The website calls `/api` on its own hostname. Find the web route's hostname (**Networking**, then **Routes**, e.g. `web-<project>.apps.cloudapps.unc.edu`), then replace the API's route with one on that hostname:
-
-```sh
-oc delete route api
-oc create route edge api --service=api --port=8080 --hostname=<web hostname> \
-  --path=/api --insecure-policy=Redirect
-```
-
-`https://<web hostname>/api/health/ready` should now return `{"status":"ok","database":true,"pgvector":true}`.
-
-### 3.5 Firebase
-
-The website's Firebase settings are public and live in `apps/web/.env.production`. For a different Firebase project, change the values there (they are build settings, not secrets) and set `FIREBASE_PROJECT_ID` on `api` to match. Also update the Content-Security-Policy in `apps/web/security-headers.inc`: the `frame-src` host (the project's auth domain, `<project>.firebaseapp.com`) and, if they change, the Firebase hosts in `connect-src`. The build config and the CSP must name the same project, or the browser blocks the sign-in frame. Rebuild `web`, then test sign-in in a private window. In the Firebase console:
+The website's Firebase settings are public and live in `apps/web/.env.production`. For a different Firebase project, change the values there (they are build settings, not secrets) and set `FIREBASE_PROJECT_ID` in `app.env` to match. Also update the Content-Security-Policy in `apps/web/security-headers.inc`: the `frame-src` host (the project's auth domain, `<project>.firebaseapp.com`) and, if they change, the Firebase hosts in `connect-src`. The build config and the CSP must name the same project, or the browser blocks the sign-in frame. Rebuild `web`, then test sign-in in a private window. In the Firebase console:
 
 1. **Authentication**, then **Sign-in method**: turn on Email/Password and Google.
 2. **Authentication**, then **Settings**, then **Authorized domains**: add the web hostname.
 3. In the Google Cloud console for the same project, restrict the browser API key to the web hostname (Websites) and to the Identity Toolkit and Token Service APIs.
 
-### 3.6 Rebuild automatically when `main` changes
+### 3.5 Rebuild automatically when `main` changes
 
-The workflow `.github/workflows/cloudapps-build.yml` rebuilds only the apps whose files changed. For each of `api`, `web` and `worker`: **Builds**, then **BuildConfigs**, the app, **Details**, and under **Webhooks**, **Generic**, click **Copy URL with Secret**. On GitHub, add the three URLs as repository secrets (**Settings**, then **Secrets and variables**, then **Actions**) named `OPENSHIFT_WEBHOOK_API`, `OPENSHIFT_WEBHOOK_WEB` and `OPENSHIFT_WEBHOOK_WORKER`. **Actions**, then **CloudApps build**, then **Run workflow** rebuilds all three by hand.
+The workflow `.github/workflows/cloudapps-build.yml` rebuilds only the apps whose files changed, by calling each build's Generic webhook. For each of `api`, `web` and `worker`: **Builds**, then **BuildConfigs**, the app, **Details**, and under **Webhooks**, **Generic**, click **Copy URL with Secret**. On GitHub, add the three URLs as repository secrets (**Settings**, then **Secrets and variables**, then **Actions**) named `OPENSHIFT_WEBHOOK_API`, `OPENSHIFT_WEBHOOK_WEB` and `OPENSHIFT_WEBHOOK_WORKER`. **Actions**, then **CloudApps build**, then **Run workflow** rebuilds all three by hand. To build by hand from the command line instead: `oc start-build <app>`.
 
-### 3.7 First admin, and a test
+### 3.6 First admin, and a test
 
 ```sh
 oc exec deploy/api -- python -m swayambhu_api.manage_admins add <email>
@@ -158,6 +100,24 @@ Then check, in this order:
 - [ ] **Admin sign-in** at the bottom of the site works with that email.
 - [ ] A short test upload finishes processing (Done) and plays.
 - [ ] After **Publish**, it appears in search from a private browser window. After **Unpublish**, it doesn't.
+
+### 3.7 Moving a project that was set up by hand
+
+Projects set up before these templates (with the console's Import from Git) can switch to them in place: the templates use the same Deployment, Service, route and Secret names (`media`, `db-credentials`, `ai-providers`, and `<app>-generic-webhook-secret` for the build webhooks, so the URLs in the GitHub secrets keep working). Skip §3.2, since the Secrets and volumes already exist. Before applying, look at what would change; neither command changes anything:
+
+```sh
+oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc diff -f -
+oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply --dry-run=server -f -
+```
+
+The dry run prints `configured (server dry run)` for each object, plus a warning about a missing `last-applied-configuration` annotation for each object made by hand; that warning is expected and fixes itself on the first apply.
+
+- **Names that differ from the templates' defaults.** Projects made by hand may have used other names. Set them in `app.env`: `DB_VOLUME_CLAIM` for the database volume and `GIT_SOURCE_SECRET` for the GitHub token Secret. Find them with `oc get pvc` and `oc get bc/api -o jsonpath='{.spec.source.sourceSecret.name}'`.
+- **Check the database is on its volume** before anything else: `oc get deploy/db -o jsonpath='{.spec.template.spec.volumes}'`. If it shows `emptyDir`, the database lives only inside the pod and is wiped whenever the pod restarts. Applying the template moves it onto `DB_VOLUME_CLAIM`, which starts a database from whatever is on that volume. So first take a dump (§5 step 2), apply, then restore the dump into the new database (§5 restore step 3).
+- **Selectors.** The templates select pods by `app=<name>`, as the console's Import from Git does. If the dry run says a Deployment's `spec.selector` is immutable, delete just that Deployment (`oc delete deploy/<name>`) and apply again. Its volume and Secrets stay.
+- **A port listed twice.** Typing the target port in Import from Git can save it twice; `oc apply` then warns `duplicate port definition`. It's harmless. To remove the copy, save `[{"op":"remove","path":"/spec/template/spec/containers/0/ports/1"}]` to a file and run `oc patch deploy/web --type=json --patch-file=<file>`.
+- **Settings set earlier with `oc set env`** stay on the Deployments and take precedence over `app-settings`. List them with `oc set env deploy/api --list`, and remove any you now set in `app.env` with `oc set env deploy/api <NAME>-`.
+- **GitHub-type build webhooks.** The templates keep only the Generic webhook that the workflow in §3.5 calls (same Secret names as the console's, so its URLs don't change). Applying removes the GitHub-type trigger that Import from Git adds by default; delete any OpenShift webhooks left under the repository's **Settings**, then **Webhooks**. The `<app>-github-webhook-secret` Secrets are then unused and can be deleted.
 
 ## 4. Day-to-day jobs
 
@@ -184,9 +144,11 @@ Changing `MEDIA_URL_SECRET` only makes open media links stop working until the p
 
 **Disk space.** `oc exec deploy/api -- df -h /data/media`. Uploads fail when the media volume is full, so keep `MAX_UPLOAD_BYTES` (default 10 GiB) below its free space.
 
-**Roll back a bad deploy.** `oc rollout undo deploy/<name>` redeploys the previous image. `api` uses the `Recreate` strategy (§3.3), so the old pod is stopped before the new one starts. The API runs database migrations on start; if one fails, the new pod exits and never becomes ready, and the site's API is down until you roll back or fix it. Migrations only go forward: rolling back the image does not undo a migration that already succeeded, and the previous release may not run against the new schema unless the change was written to allow it. If it can't, restore the database from the paired backup taken before the deploy (§5). Take a backup pair before any deploy that includes a migration.
+**Roll back a bad deploy.** `oc rollout undo deploy/<name>` redeploys the previous image. `api` uses the `Recreate` strategy, so the old pod is stopped before the new one starts. The API runs database migrations on start; if one fails, the new pod exits and never becomes ready, and the site's API is down until you roll back or fix it. Migrations only go forward: rolling back the image does not undo a migration that already succeeded, and the previous release may not run against the new schema unless the change was written to allow it. If it can't, restore the database from the paired backup taken before the deploy (§5). Take a backup pair before any deploy that includes a migration.
 
-**Change the search model.** Set the same new `EMBEDDING_*` values on both `api` and `worker`, then run `oc exec deploy/worker -- python -m swayambhu_worker.reindex` (add `--dry-run` first to see what it would do). Keyword search keeps working while it runs.
+**Change a setting** (transcription model or languages, Firebase project, branch). Edit `app.env`, re-run the deploy command (§3.3), then `oc rollout restart deploy/api deploy/worker`. Settings `api` and `worker` share live in one ConfigMap, `app-settings`, so the two can't drift apart.
+
+**Change the search model.** Change `EMBEDDING_MODEL` as above (the images must include the model; see the README), then run `oc exec deploy/worker -- python -m swayambhu_worker.reindex` (add `--dry-run` first to see what it would do). Keyword search keeps working while it runs.
 
 ## 5. Backups and restore
 
@@ -226,8 +188,8 @@ Do this daily or before any big change, and always before a deploy that includes
    ```sh
    oc scale deploy/api --replicas=0
    oc scale deploy/worker --replicas=0
-   oc wait --for=delete pod -l deployment=api --timeout=300s
-   oc wait --for=delete pod -l deployment=worker --timeout=300s
+   oc wait --for=delete pod -l app=api --timeout=300s
+   oc wait --for=delete pod -l app=worker --timeout=300s
    ```
 
    (Check the labels with `oc get pods --show-labels` and use the ones your pods carry. Don't continue until no `api-` or `worker-` pod is listed.)
@@ -256,11 +218,13 @@ Do this daily or before any big change, and always before a deploy that includes
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
-| Pod restarts with `OOMKilled` | Memory limit too low or missing | Check §3.3 limits; `oc describe pod <pod>` shows the limit in use |
+| Pod restarts with `OOMKilled` | Memory limit too low or missing | Check the limits in `deploy/cloudapps/app.yaml`; `oc describe pod <pod>` shows the limit in use |
 | `api` never becomes ready | Database down, or a migration failed | `oc logs deploy/api`; check `db` is Running |
 | An interview stays Processing | Worker stopped or out of memory | `oc logs deploy/worker`; `oc rollout restart deploy/worker` |
 | An interview says Failed | A provider refused or timed out | The admin page shows a plain message; check the key and spending limit, then press Retry |
 | English is missing for Nepal Bhasa | Google doesn't translate it reliably | Expected; the original stays searchable and editable |
 | Sign-in says "not an admin" | Email not added | `manage_admins add <email>` |
-| Sign-in popup fails | Hostname not in Firebase's authorized domains | §3.5 step 2 |
+| Sign-in popup fails | Hostname not in Firebase's authorized domains | §3.4 step 2 |
+| Pods stuck in `ImagePullBackOff` right after the first deploy | The first builds haven't finished | Wait for `oc get builds` to show Complete; they roll out by themselves |
+| `oc create` or `oc apply` says `exceeded quota` | The project's quota is smaller than the defaults | `oc describe quota`; lower the volume sizes in `secrets.env`, or ask ITS for more |
 | Uploads fail near the end | Media volume full | Check disk space (§4); ask ITS for more storage |
