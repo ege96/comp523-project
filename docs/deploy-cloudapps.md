@@ -110,7 +110,7 @@ oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | 
 oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply --dry-run=server -f -
 ```
 
-The dry run prints `configured (server dry run)` for each object, plus a warning about a missing `last-applied-configuration` annotation for each object made by hand; that warning is expected and fixes itself on the first apply. `oc diff` needs a `diff` program: on Windows, run `$env:KUBECTL_EXTERNAL_DIFF = "C:\Program Files\Git\usr\bin\diff.exe"` first (it comes with Git for Windows), or skip `oc diff` and rely on the dry run.
+The dry run prints `configured (server dry run)` for each object, plus a warning about a missing `last-applied-configuration` annotation for each object made by hand; that warning is expected and fixes itself on the first apply.
 
 - **Names that differ from the templates' defaults.** Projects made by hand may have used other names. Set them in `app.env`: `DB_VOLUME_CLAIM` for the database volume and `GIT_SOURCE_SECRET` for the GitHub token Secret. Find them with `oc get pvc` and `oc get bc/api -o jsonpath='{.spec.source.sourceSecret.name}'`.
 - **Check the database is on its volume** before anything else: `oc get deploy/db -o jsonpath='{.spec.template.spec.volumes}'`. If it shows `emptyDir`, the database lives only inside the pod and is wiped whenever the pod restarts. Applying the template moves it onto `DB_VOLUME_CLAIM`, which starts a database from whatever is on that volume. So first take a dump (§5 step 2), apply, then restore the dump into the new database (§5 restore step 3).
