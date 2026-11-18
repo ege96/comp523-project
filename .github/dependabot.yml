@@ -2,7 +2,8 @@ version: 2
 
 # Every ecosystem below is part of one multi-ecosystem group, so a week's version updates
 # arrive as a single PR (Python locks, npm, Actions, base images and compose together)
-# instead of one per directory. Security updates still come as their own PRs.
+# instead of one per directory. Security updates come as their own PRs, but only while
+# Dependabot alerts and security updates are on in the repo's Settings > Advanced Security.
 multi-ecosystem-groups:
   weekly:
     schedule: { interval: weekly }
@@ -12,6 +13,11 @@ updates:
     directories: [/services/api, /services/worker, /packages/core, /packages/providers]
     patterns: ["*"]
     multi-ecosystem-group: weekly
+    # Also bump packages that are only in uv.lock (e.g. opentelemetry-api, pulled in by
+    # fastapi). Version updates skip them by default, so they only moved when CI's
+    # pip-audit failed on one.
+    allow:
+      - dependency-type: all
   - package-ecosystem: npm
     directory: /apps/web
     patterns: ["*"]
