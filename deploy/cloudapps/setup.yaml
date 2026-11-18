@@ -19,6 +19,9 @@ parameters:
   - name: GOOGLE_TRANSLATE_API_KEY
     description: Google Cloud Translation key.
     required: true
+  - name: AZURE_SPEECH_KEY
+    description: Azure Speech key, only for TRANSCRIPTION_PROVIDER=mai.
+    value: ""
   - name: GITHUB_USERNAME
     description: GitHub user that CloudApps builds the repository as.
     required: true
@@ -69,6 +72,7 @@ objects:
     stringData:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY}
+      AZURE_SPEECH_KEY: ${AZURE_SPEECH_KEY}
       MEDIA_URL_SECRET: ${MEDIA_URL_SECRET}
   - apiVersion: v1
     kind: Secret

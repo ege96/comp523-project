@@ -18,7 +18,7 @@ class ProviderSettings(BaseSettings):
     # Subclasses' model_config is merged with this.
     model_config = SettingsConfigDict(env_ignore_empty=True)
 
-    transcription_provider: Literal["openai", "elevenlabs", "fake"] = "openai"
+    transcription_provider: Literal["openai", "elevenlabs", "mai", "fake"] = "openai"
     transcription_model: str | None = None
     # OpenAI only: languages to expect when no admin confirmed one, comma separated. Verify
     # codes against OpenAI's supported list; an unsupported code fails every request.
@@ -43,4 +43,8 @@ class ProviderSettings(BaseSettings):
 
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
+    # `mai` provider: the Azure Speech resource's key and endpoint
+    # (https://<resource>.cognitiveservices.azure.com), in a region that serves the model.
+    azure_speech_key: SecretStr | None = None
+    azure_speech_endpoint: str | None = None
     google_translate_api_key: SecretStr | None = None

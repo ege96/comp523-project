@@ -14,9 +14,15 @@ parameters:
   - name: WEB_HOSTNAME
     description: Public hostname for the site; the API is served at /api on it.
     required: true
+  - name: TRANSCRIPTION_PROVIDER
+    description: openai or mai (Microsoft MAI-Transcribe via Azure Speech; needs AZURE_SPEECH_KEY in ai-providers).
+    value: openai
   - name: TRANSCRIPTION_MODEL
-    description: OpenAI transcription model id (verify the current name before use).
+    description: Transcription model id for that provider, e.g. gpt-transcribe or MAI-Transcribe-2 (verify before use).
     required: true
+  - name: AZURE_SPEECH_ENDPOINT
+    description: mai only. The Speech resource's endpoint, e.g. https://<resource>.cognitiveservices.azure.com.
+    value: ""
   - name: TRANSCRIPTION_LANGUAGES
     description: Languages OpenAI should expect when an upload has none confirmed (codes, comma separated).
     value: ne,en
@@ -50,9 +56,10 @@ objects:
       labels: { app.kubernetes.io/part-of: swayambhu }
     data:
       MEDIA_ROOT: /data/media
-      TRANSCRIPTION_PROVIDER: openai
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER}
       TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL}
       TRANSCRIPTION_LANGUAGES: ${TRANSCRIPTION_LANGUAGES}
+      AZURE_SPEECH_ENDPOINT: ${AZURE_SPEECH_ENDPOINT}
       TRANSLATION_PROVIDER: google_nmt
       EMBEDDING_PROVIDER: local
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}

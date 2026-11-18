@@ -16,6 +16,7 @@ from swayambhu_providers.factory import (
 )
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber
 from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.mai_provider import MaiTranscriber, azure_speech_client
 from swayambhu_providers.openai_provider import OpenAIEmbedder, OpenAITranscriber
 from swayambhu_providers.settings import ProviderSettings
 
@@ -157,6 +158,81 @@ def test_elevenlabs_uses_word_timings(clip: AudioClip) -> None:
     assert (segment.start_ms, segment.end_ms, segment.language) == (400, 1250, "nep")
 
 
+def _mai(handler: object) -> MaiTranscriber:
+    configured = azure_speech_client("k", "https://example.test/")
+    mock = httpx.Client(
+        base_url=configured.base_url,
+        headers=configured.headers,
+        transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
+    )
+    return MaiTranscriber(mock, "MAI-Transcribe-2")
+
+
+def _definition(request: httpx.Request) -> dict[str, object]:
+    body = request.read()
+    part = body.split(b'name="definition"')[1].split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
+    data: dict[str, object] = json.loads(part)
+    return data
+
+
+def test_mai_transcriber_uses_phrase_timings_and_one_locale(clip: AudioClip) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Ocp-Apim-Subscription-Key"] == "k"
+        assert request.url.path == "/speechtotext/transcriptions:transcribe"
+        definition = _definition(request)
+        assert definition["enhancedMode"] == {"enabled": True, "model": "MAI-Transcribe-2"}
+        assert definition["locales"] == ["ne"]
+        phrases = [
+            {
+                "offsetMilliseconds": 400,
+                "durationMilliseconds": 900,
+                "text": "म",
+                "locale": "ne-NP",
+            },
+            {"offsetMilliseconds": 1500, "durationMilliseconds": 800, "text": "आएँ", "locale": "ne"},
+        ]
+        return httpx.Response(200, json={"combinedPhrases": [{"text": "म आएँ"}], "phrases": phrases})
+
+    transcriber = _mai(handler)
+    assert transcriber.name == "azure:MAI-Transcribe-2"
+    [segment] = transcriber.transcribe(clip, ["ne"])
+    assert (segment.start_ms, segment.end_ms, segment.text, segment.language) == (
+        400,
+        2300,
+        "म आएँ",
+        "ne",
+    )
+
+
+@pytest.mark.parametrize("hints", [[], ["new"], ["ne", "en"]])
+def test_mai_transcriber_lets_the_model_detect_without_one_supported_hint(
+    clip: AudioClip, hints: list[str]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "locales" not in _definition(request)
+        phrases = [{"text": "a", "locale": "ne-NP"}, {"text": "b", "locale": "en-US"}]
+        return httpx.Response(200, json={"combinedPhrases": [{"text": "a b"}], "phrases": phrases})
+
+    [segment] = _mai(handler).transcribe(clip, hints)
+    # No timings: the clip is the segment. Mixed languages: the translator decides.
+    assert (segment.start_ms, segment.end_ms, segment.language) == (0, 12_000, None)
+
+
+def test_mai_transcriber_returns_nothing_for_silence_and_flags_retryable_errors(
+    clip: AudioClip,
+) -> None:
+    assert (
+        _mai(lambda request: httpx.Response(200, json={"combinedPhrases": []})).transcribe(clip, [])
+        == []
+    )
+    with pytest.raises(ProviderError) as busy:
+        _mai(lambda request: httpx.Response(429, text="slow down")).transcribe(clip, [])
+    assert busy.value.retryable
+    with pytest.raises(ProviderError) as bad:
+        _mai(lambda request: httpx.Response(400, text="bad locale")).transcribe(clip, [])
+    assert not bad.value.retryable
+
+
 def test_google_translator_sends_key_in_header_and_keeps_order() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert "key=" not in str(request.url)
@@ -226,6 +302,15 @@ def test_factory_picks_providers_from_settings() -> None:
     transcriber = build_transcriber(openai)
     assert isinstance(transcriber, OpenAITranscriber)
     assert transcriber._languages == ["ne", "en"]
+    mai = settings.model_copy(
+        update={
+            "transcription_provider": "mai",
+            "transcription_model": "MAI-Transcribe-2",
+            "azure_speech_key": SecretStr("k"),
+            "azure_speech_endpoint": "https://example.test",
+        }
+    )
+    assert build_transcriber(mai).name == "azure:MAI-Transcribe-2"
 
     fake = ProviderSettings(
         transcription_provider="fake", translation_provider="fake", embedding_provider="fake"
@@ -240,6 +325,14 @@ def test_factory_picks_providers_from_settings() -> None:
     [
         (ProviderSettings(transcription_model=None), "TRANSCRIPTION_MODEL"),
         (ProviderSettings(transcription_model="m", openai_api_key=None), "OPENAI_API_KEY"),
+        (
+            ProviderSettings(
+                transcription_provider="mai",
+                transcription_model="m",
+                azure_speech_key=SecretStr("k"),
+            ),
+            "AZURE_SPEECH_ENDPOINT",
+        ),
     ],
 )
 def test_factory_names_the_missing_setting(settings: ProviderSettings, missing: str) -> None:
