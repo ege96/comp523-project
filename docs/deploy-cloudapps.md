@@ -138,6 +138,8 @@ oc rollout restart deployment/api deployment/worker
 
 Changing `MEDIA_URL_SECRET` only makes open media links stop working until the page is reloaded.
 
+**Switch transcription to MAI-Transcribe.** Add `AZURE_SPEECH_KEY` to `ai-providers` (as above), set `TRANSCRIPTION_PROVIDER=mai`, `TRANSCRIPTION_MODEL=MAI-Transcribe-2` and `AZURE_SPEECH_ENDPOINT` in `app.env`, then re-apply `app.yaml` and restart api and worker. Only new transcriptions use it; existing transcripts stay as they are.
+
 **Restart.** `oc rollout restart deploy/<name>`. Processing that was interrupted is picked up again by the worker.
 
 **Logs.** `oc logs deploy/api` (one JSON line per request; an unexpected error's response carries a `request_id`, which leads to its log line) and `oc logs deploy/worker`.

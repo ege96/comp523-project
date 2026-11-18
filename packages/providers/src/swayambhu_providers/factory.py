@@ -7,6 +7,7 @@ from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber, eleve
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber, FakeTranslator
 from swayambhu_providers.google_provider import GoogleNmtTranslator
 from swayambhu_providers.identity import local_embedding_name
+from swayambhu_providers.mai_provider import MaiTranscriber, azure_speech_client
 from swayambhu_providers.openai_provider import (
     OpenAIEmbedder,
     OpenAITranscriber,
@@ -38,6 +39,10 @@ def build_transcriber(settings: ProviderSettings) -> Transcriber:
         return OpenAITranscriber(
             openai_client(key, timeout=timeout), model, [c for c in languages if c]
         )
+    if provider == "mai":
+        key = _required(settings.azure_speech_key, "AZURE_SPEECH_KEY", provider)
+        endpoint = _required(settings.azure_speech_endpoint, "AZURE_SPEECH_ENDPOINT", provider)
+        return MaiTranscriber(azure_speech_client(key, endpoint, timeout=timeout), model)
     key = _required(settings.elevenlabs_api_key, "ELEVENLABS_API_KEY", provider)
     return ElevenLabsTranscriber(elevenlabs_client(key, timeout=timeout), model)
 
