@@ -11,8 +11,6 @@ Visitors search the interviews by meaning or by exact words, in English, Nepali 
 | Look up an environment variable | [docs/configuration.md](docs/configuration.md) |
 | Deploy it, add admins, back it up | [docs/deploy-cloudapps.md](docs/deploy-cloudapps.md) |
 
-Project decisions are recorded in `decisions_log.md` in the team's handoff bundle.
-
 ## Layout
 
 | Path | What | Stack |
