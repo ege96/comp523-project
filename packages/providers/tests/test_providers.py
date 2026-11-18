@@ -175,13 +175,13 @@ def _definition(request: httpx.Request) -> dict[str, object]:
     return data
 
 
-def test_mai_transcriber_uses_phrase_timings_and_one_locale(clip: AudioClip) -> None:
+def test_mai_transcriber_uses_phrase_timings(clip: AudioClip) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["Ocp-Apim-Subscription-Key"] == "k"
         assert request.url.path == "/speechtotext/transcriptions:transcribe"
         definition = _definition(request)
         assert definition["enhancedMode"] == {"enabled": True, "model": "MAI-Transcribe-2"}
-        assert definition["locales"] == ["ne"]
+        assert "locales" not in definition
         phrases = [
             {
                 "offsetMilliseconds": 400,
@@ -204,10 +204,8 @@ def test_mai_transcriber_uses_phrase_timings_and_one_locale(clip: AudioClip) -> 
     )
 
 
-@pytest.mark.parametrize("hints", [[], ["new"], ["ne", "en"]])
-def test_mai_transcriber_lets_the_model_detect_without_one_supported_hint(
-    clip: AudioClip, hints: list[str]
-) -> None:
+@pytest.mark.parametrize("hints", [[], ["ne"], ["new"], ["ne", "en"]])
+def test_mai_transcriber_never_forces_a_language(clip: AudioClip, hints: list[str]) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert "locales" not in _definition(request)
         phrases = [{"text": "a", "locale": "ne-NP"}, {"text": "b", "locale": "en-US"}]

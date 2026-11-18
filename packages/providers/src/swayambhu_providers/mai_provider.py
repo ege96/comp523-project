@@ -45,11 +45,11 @@ class MaiTranscriber:
         self, clip: AudioClip, language_hints: Sequence[str]
     ) -> list[TranscribedSegment]:
         definition: dict[str, object] = {"enhancedMode": {"enabled": True, "model": self._model}}
-        # `locales` takes one code and forces it. With none the model detects the language,
-        # which is as accurate on Nepali (FLEURS test, 2026-11-18). Nepal Bhasa ("new") has no
-        # code, so it is sent without one rather than pushed towards Nepali.
-        if len(language_hints) == 1 and len(language_hints[0]) == 2:
-            definition["locales"] = [language_hints[0]]
+        # No `locales`, ever: one locale forces that language, so English stretches in a
+        # Nepali interview would come out as Nepali. Auto-detect handles code-switching and
+        # scored the same on Nepali (FLEURS, 2026-11-18: 8.5% vs 8.4% CER). The hints are
+        # ignored; Nepal Bhasa has no code anyway.
+        del language_hints
         try:
             with clip.path.open("rb") as audio:
                 response = self._client.post(
