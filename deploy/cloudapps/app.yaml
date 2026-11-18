@@ -58,7 +58,7 @@ objects:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL}
       EMBEDDING_QUERY_PREFIX: "query: "
       EMBEDDING_PASSAGE_PREFIX: "passage: "
-      # Matches the 1 CPU limit below (the code's default of 4 oversubscribes it).
+      # Matches the api's 1 CPU limit (the code's default of 4 oversubscribes it).
       LOCAL_EMBEDDING_THREADS: "1"
 
   # ---------- database ----------
@@ -293,13 +293,18 @@ objects:
           containers:
             - name: worker
               image: "worker:latest"
+              env:
+                # Overrides app-settings: the worker has 2 CPUs, the api 1.
+                - { name: LOCAL_EMBEDDING_THREADS, value: "2" }
               envFrom:
                 - secretRef: { name: db-credentials }
                 - secretRef: { name: ai-providers }
                 - configMapRef: { name: app-settings }
+              # The worker gets the spare quota: FFmpeg and batch embedding are its peaks.
+              # Long-running total: 2,432Mi of 2,560Mi and 3.8 of 4 CPU.
               resources:
-                limits: { cpu: "1", memory: 768Mi }
-                requests: { cpu: 250m, memory: 768Mi }
+                limits: { cpu: "2", memory: 1Gi }
+                requests: { cpu: 250m, memory: 1Gi }
               volumeMounts:
                 - { name: media, mountPath: /data/media }
           volumes:

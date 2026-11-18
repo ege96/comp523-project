@@ -17,7 +17,7 @@ Values in `<angle brackets>` are yours to fill in. Steps marked *(verify)* haven
 |---|---|---|---|
 | Website (nginx serving the React app) | `web` | Yes, at `/` | 128Mi |
 | API (FastAPI): search, sign-in checks, uploads, media links | `api` | Yes, at `/api` on the same hostname | 768Mi |
-| Worker: playback copies, transcription, translation, search index | `worker` | No | 768Mi |
+| Worker: playback copies, transcription, translation, search index | `worker` | No | 1Gi (2 CPU) |
 | PostgreSQL 16 with pgvector | `db` | No | 512Mi |
 
 Recordings live on a shared volume mounted at `/data/media` in both `api` and `worker`. The database has its own volume. Sign-in is Firebase Authentication, transcription is OpenAI, and translation is Google Cloud Translation. Search runs inside `api` and `worker` (`EMBEDDING_PROVIDER=local`), so it calls no outside service.
@@ -25,7 +25,7 @@ Recordings live on a shared volume mounted at `/data/media` in both `api` and `w
 ## 2. What you need first
 
 - **The `oc` tool**, logged in as above, and a copy of this repository.
-- **A CloudApps project.** The default UNC quota we built for is 4 CPU and 2,560 MiB of memory for all long-running pods together, at most 2 CPU and 2 GiB per container, and 5 GiB of volume storage. The four pods above use 2,176 MiB. Containers with no limit get 300Mi by default, which is too small for `api` and `worker`, so every Deployment in the templates sets its own limits. Check yours with `oc describe quota` and `oc describe limitrange`.
+- **A CloudApps project.** The default UNC quota we built for is 4 CPU and 2,560 MiB of memory for all long-running pods together, at most 2 CPU and 2 GiB per container, and 5 GiB of volume storage. The four pods above use 2,432 MiB and 3.8 CPU, leaving a little room; the worker gets the most because FFmpeg and indexing are the heaviest work. Containers with no limit get 300Mi by default, which is too small for `api` and `worker`, so every Deployment in the templates sets its own limits. Check yours with `oc describe quota` and `oc describe limitrange`.
 - **Storage for recordings.** Each hour of video takes roughly 1–2 GB (the original plus a 720p streaming copy); audio about 0.1 GB. Ask ITS for more volume storage if you need more than about 4 GB.
 - **GitHub access** to the repository, with a fine-grained token that can read its contents.
 - **A Firebase project** with the Email/Password and Google sign-in methods turned on.
