@@ -166,10 +166,10 @@ objects:
       output:
         to: { kind: ImageStreamTag, name: "api:latest" }
       triggers:
-        - type: ConfigChange
         - type: Generic
           generic:
             secretReference: { name: api-generic-webhook-secret }
+        - type: ConfigChange
   - apiVersion: build.openshift.io/v1
     kind: BuildConfig
     metadata:
@@ -188,10 +188,10 @@ objects:
       output:
         to: { kind: ImageStreamTag, name: "worker:latest" }
       triggers:
-        - type: ConfigChange
         - type: Generic
           generic:
             secretReference: { name: worker-generic-webhook-secret }
+        - type: ConfigChange
   - apiVersion: build.openshift.io/v1
     kind: BuildConfig
     metadata:
@@ -210,10 +210,10 @@ objects:
       output:
         to: { kind: ImageStreamTag, name: "web:latest" }
       triggers:
-        - type: ConfigChange
         - type: Generic
           generic:
             secretReference: { name: web-generic-webhook-secret }
+        - type: ConfigChange
 
   # ---------- api ----------
   # The image trigger annotation rolls out each finished build. The API runs database
