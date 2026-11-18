@@ -31,33 +31,69 @@ def clip(tmp_path: Path) -> AudioClip:
     return AudioClip(path=path, duration_ms=12_000)
 
 
+def _sent_languages(body: bytes) -> list[str]:
+    parts = body.split(b'name="languages[]"')[1:]
+    return [part.split(b"\r\n\r\n", 1)[1].split(b"\r\n", 1)[0].decode() for part in parts]
+
+
 def test_openai_transcriber_spans_the_clip(clip: AudioClip) -> None:
     seen: dict[str, bytes] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/audio/transcriptions"
         seen["body"] = request.read()
-        return httpx.Response(200, json={"text": " नमस्ते ", "language": "ne"})
+        return httpx.Response(200, json={"text": " नमस्ते ", "languages": [{"code": "ne"}]})
 
-    transcriber = OpenAITranscriber(client(handler), "some-transcribe-model")
-    segments = transcriber.transcribe(clip, ["ne"])
+    transcriber = OpenAITranscriber(client(handler), "some-transcribe-model", ["ne", "en"])
+    segments = transcriber.transcribe(clip, ["en"])
     assert [(s.start_ms, s.end_ms, s.text, s.language) for s in segments] == [
         (0, 12_000, "नमस्ते", "ne")
     ]
-    assert b'name="language"' in seen["body"]
+    # The confirmed language goes first; the API rejects `language` sent with `languages`.
+    assert _sent_languages(seen["body"]) == ["en", "ne"]
+    assert b'name="language"' not in seen["body"]
     assert transcriber.name == "openai:some-transcribe-model"
 
 
-def test_openai_transcriber_omits_language_without_a_two_letter_code(clip: AudioClip) -> None:
-    """Nepal Bhasa ("new") has no ISO 639-1 code, so the model has to detect it."""
+@pytest.mark.parametrize(
+    ("hints", "sent"),
+    [
+        ([], ["ne", "en"]),  # nothing confirmed: the default list
+        (["ne"], ["ne", "en"]),
+        (["new"], []),  # Nepal Bhasa has no code the API accepts, and ne,en would mislead
+    ],
+)
+def test_openai_transcriber_expected_languages(
+    clip: AudioClip, hints: list[str], sent: list[str]
+) -> None:
     bodies: list[bytes] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         bodies.append(request.read())
         return httpx.Response(200, json={"text": ""})
 
-    assert OpenAITranscriber(client(handler), "m").transcribe(clip, ["new"]) == []
-    assert b'name="language"' not in bodies[0]
+    assert OpenAITranscriber(client(handler), "m", ["ne", "en"]).transcribe(clip, hints) == []
+    assert _sent_languages(bodies[0]) == sent
+
+
+@pytest.mark.parametrize(
+    ("languages", "expected"),
+    [
+        ([{"code": "en"}], "en"),
+        ([], None),  # the model couldn't tell
+        ([{"code": "ne"}, {"code": "en"}], None),  # mixed speech: the translator decides
+        (None, None),
+    ],
+)
+def test_openai_transcriber_reads_the_detected_language(
+    clip: AudioClip, languages: object, expected: str | None
+) -> None:
+    body: dict[str, object] = {"text": "x"}
+    if languages is not None:
+        body["languages"] = languages
+    transcriber = OpenAITranscriber(client(lambda _: httpx.Response(200, json=body)), "m")
+    [segment] = transcriber.transcribe(clip, [])
+    assert segment.language == expected
 
 
 @pytest.mark.parametrize(("status", "retryable"), [(429, True), (503, True), (400, False)])
@@ -184,6 +220,12 @@ def test_factory_picks_providers_from_settings() -> None:
     unsized = settings.model_copy(update={"embedding_dimensions": None})
     assert build_embedder(unsized).name == embedder_name(unsized) == "openai:embed-model"
     assert build_translator(settings).name == "google:nmt"
+    openai = settings.model_copy(
+        update={"transcription_provider": "openai", "transcription_languages": " NE, ,en "}
+    )
+    transcriber = build_transcriber(openai)
+    assert isinstance(transcriber, OpenAITranscriber)
+    assert transcriber._languages == ["ne", "en"]
 
     fake = ProviderSettings(
         transcription_provider="fake", translation_provider="fake", embedding_provider="fake"

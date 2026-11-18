@@ -34,7 +34,10 @@ def build_transcriber(settings: ProviderSettings) -> Transcriber:
     timeout = settings.provider_timeout_seconds
     if provider == "openai":
         key = _required(settings.openai_api_key, "OPENAI_API_KEY", provider)
-        return OpenAITranscriber(openai_client(key, timeout=timeout), model)
+        languages = [c.strip().lower() for c in settings.transcription_languages.split(",")]
+        return OpenAITranscriber(
+            openai_client(key, timeout=timeout), model, [c for c in languages if c]
+        )
     key = _required(settings.elevenlabs_api_key, "ELEVENLABS_API_KEY", provider)
     return ElevenLabsTranscriber(elevenlabs_client(key, timeout=timeout), model)
 

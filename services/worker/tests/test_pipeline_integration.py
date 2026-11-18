@@ -52,7 +52,7 @@ class ScriptedTranscriber:
 
 
 class SilentTranscriber(ScriptedTranscriber):
-    """Reports no language, like OpenAI's transcription models. The second piece is English."""
+    """Reports no language, as a transcriber may. The second piece is English."""
 
     def transcribe(
         self, clip: AudioClip, language_hints: Sequence[str]
