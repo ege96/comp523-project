@@ -193,11 +193,11 @@ def edit_segment(
             segment.edited_by = admin.id
             segment.edited_at = func.now()
         # Search must find the corrected words: re-embed (only) the changed chunk.
-        jobs.enqueue(session, "index", interview_id)
+        jobs.enqueue(session, "index", interview_id, jobs.Priority.ADMIN)
         if english_is_stale(segment):
             # Each edit pushes this back, so a run of edits is translated in one batch.
             delay = timedelta(seconds=settings.retranslate_delay_seconds)
-            jobs.schedule(session, "retranslate", interview_id, delay)
+            jobs.schedule(session, "retranslate", interview_id, delay, jobs.Priority.ADMIN)
         session.commit()
         log.info("admin %s edited segment %s of interview %s", admin.id, seq, interview_id)
         session.refresh(segment)
@@ -225,6 +225,6 @@ def retranslate_now(
     segments = session.scalars(select(SegmentRow).where(SegmentRow.interview_id == interview_id))
     stale = sum(1 for s in segments if english_is_stale(s))
     if stale:
-        jobs.schedule(session, "retranslate", interview_id, timedelta(0))
+        jobs.schedule(session, "retranslate", interview_id, timedelta(0), jobs.Priority.ADMIN)
         session.commit()
     return RetranslateResult(stale_lines=stale)

@@ -315,6 +315,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage Space
+         * @description Room for uploads, so the upload page can warn before a batch starts.
+         */
+        get: operations["storage_space_api_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -747,6 +767,13 @@ export interface components {
         SegmentList: {
             /** Items */
             items: components["schemas"]["Segment"][];
+        };
+        /** StorageSpace */
+        StorageSpace: {
+            /** Usable Bytes */
+            usable_bytes: number;
+            /** Max Upload Bytes */
+            max_upload_bytes: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -1414,6 +1441,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storage_space_api_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSpace"];
                 };
             };
         };

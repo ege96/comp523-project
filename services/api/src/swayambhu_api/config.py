@@ -53,6 +53,9 @@ class Settings(ProviderSettings):
     # and to hold the upload's lock only briefly. Clients send smaller chunks (tus-js-client
     # `chunkSize`).
     upload_chunk_max_bytes: int = 64 * 1024**2
+    # Space a new upload must leave free on the media volume, so the worker still has room
+    # for the recording's playback copy. An upload that would leave less is refused.
+    upload_free_space_margin_bytes: int = 1024**3
     # How long an unfinished upload can be resumed before it is deleted. Keep the worker's
     # UPLOAD_RETENTION_DAYS the same: the worker does the deleting.
     upload_retention_days: int = 3

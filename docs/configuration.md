@@ -16,6 +16,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `TRANSCRIPTION_PROVIDER` | `openai` | | `openai`, `elevenlabs`, `mai` or `fake` |
 | `TRANSCRIPTION_MODEL` | none | | Provider's model id, e.g. `gpt-transcribe` or `MAI-Transcribe-2`. Required unless `fake` |
 | `TRANSCRIPTION_LANGUAGES` | `ne,en` | | `openai` only: languages to expect when no admin confirmed one |
+| `TRANSCRIPTION_CONCURRENCY` | 8 | | Worker: pieces of one recording sent to the transcription provider at once (1 to 16). 8 fits every provider's published limit, including ElevenLabs Free (8 concurrent); verify before raising |
 | `TRANSLATION_PROVIDER` | `google_nmt` | | `google_nmt` or `fake` |
 | `EMBEDDING_PROVIDER` | `openai` | | `openai`, `local` or `fake` (deployments use `local`) |
 | `EMBEDDING_MODEL` | none | | e.g. `intfloat/multilingual-e5-small` (local) or `text-embedding-3-large`. Required unless `fake` |
@@ -42,6 +43,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `MEDIA_URL_TTL_SECONDS` | `21600` (6 h) | | How long a media link works |
 | `MAX_UPLOAD_BYTES` | 10 GiB | | Largest upload; keep it below the media volume's free space |
 | `UPLOAD_CHUNK_MAX_BYTES` | 64 MiB | | Largest single tus PATCH |
+| `UPLOAD_FREE_SPACE_MARGIN_BYTES` | 1 GiB | | Space an upload must leave free on the media volume (room for playback copies); larger uploads are refused |
 | `RETRANSLATE_DELAY_SECONDS` | `300` | | Wait after the last edit before re-translating edited lines |
 | `SEARCH_EMBEDDING_TIMEOUT_SECONDS` | `5` | | How long search waits to embed the query before going keyword-only (remote providers) |
 | `SEARCH_CANDIDATES` | `100` | | Hits taken from each of keyword and semantic search; also the deepest page |

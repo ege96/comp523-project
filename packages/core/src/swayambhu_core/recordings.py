@@ -36,5 +36,6 @@ def add_original(
             sha256=sha256,
         )
     )
-    jobs.enqueue(session, "transcribe", interview_id)
-    jobs.enqueue(session, "playback", interview_id)
+    # Behind admins' work and interviews already started, so a batch finishes one by one.
+    jobs.enqueue(session, "transcribe", interview_id, jobs.Priority.NEW)
+    jobs.enqueue(session, "playback", interview_id, jobs.Priority.NEW)

@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> None:
         for interview_id in ids:
             print(interview_id)
             if not args.dry_run:
-                jobs.enqueue(session, "index", interview_id)
+                jobs.enqueue(session, "index", interview_id, jobs.Priority.NEW)
         session.commit()
     verb = "Would queue" if args.dry_run else "Queued"
     print(f"{verb} {len(ids)} interview(s) for indexing with {model}")

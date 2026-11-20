@@ -79,6 +79,11 @@ export const SearchFiltersSchema = z.object({
   interviewees: z.array(z.object({ id: z.number().int(), name: z.string() })),
 }) satisfies z.ZodType<Schemas["SearchFilters"]>;
 
+export const StorageSpaceSchema = z.object({
+  usable_bytes: z.number().int(),
+  max_upload_bytes: z.number().int(),
+}) satisfies z.ZodType<Schemas["StorageSpace"]>;
+
 export const AdminSchema = z.object({
   id: z.number().int(),
   email: z.string(),

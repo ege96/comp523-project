@@ -19,13 +19,14 @@ id in `Upload-Interview-Id`.
 
 import mimetypes
 import re
+import shutil
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
@@ -171,6 +172,12 @@ def check_new_upload(session: DbSession, settings: SettingsDep) -> PreCreate:
                 status.HTTP_413_CONTENT_TOO_LARGE,
                 f"Recordings can be at most {settings.max_upload_bytes} bytes",
             )
+        if size > usable_bytes(settings):
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE,
+                "There isn't enough storage space left for this recording. "
+                "Ask the archive's operator to add storage.",
+            )
         await run_in_threadpool(_check_references, session, parsed)
         await run_in_threadpool(session.rollback)  # don't hold a connection between requests
 
@@ -265,6 +272,41 @@ def finish_upload(
 
 def uploads_dir(settings: Settings) -> Path:
     return settings.media_root / "uploads"
+
+
+def free_bytes(settings: Settings) -> int:
+    """Free space on the volume that holds the media (and the uploads in progress)."""
+    path = settings.media_root
+    while not path.exists() and path != path.parent:
+        path = path.parent  # nothing uploaded yet: the volume is mounted further up
+    return shutil.disk_usage(path).free
+
+
+def usable_bytes(settings: Settings) -> int:
+    """How much a new upload may take: free space less the margin kept for playback copies.
+
+    Checked when each upload is created. Two admins uploading at once could still overfill
+    the volume, since neither upload counts the bytes the other has yet to send.
+    """
+    return max(0, free_bytes(settings) - settings.upload_free_space_margin_bytes)
+
+
+class StorageSpace(BaseModel):
+    # What a new upload may take now; a batch larger than this won't all fit.
+    usable_bytes: int
+    # The largest single recording the API accepts.
+    max_upload_bytes: int
+
+
+space_router = APIRouter(tags=["uploads"])
+
+
+@space_router.get("/api/storage", response_model=StorageSpace)
+def storage_space(_admin: CurrentAdmin, settings: SettingsDep) -> StorageSpace:
+    """Room for uploads, so the upload page can warn before a batch starts."""
+    return StorageSpace(
+        usable_bytes=usable_bytes(settings), max_upload_bytes=settings.max_upload_bytes
+    )
 
 
 # Built once at import: tuspyserver fixes its directory and size limit when the router is

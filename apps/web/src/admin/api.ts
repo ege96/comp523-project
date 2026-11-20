@@ -9,6 +9,7 @@ import {
   ReplaceResultSchema,
   RerunConflictSchema,
   RetranslateResultSchema,
+  StorageSpaceSchema,
   type AdminSegment,
   type FindReplace,
   type InterviewSummary,
@@ -73,6 +74,13 @@ export const adminQueries = {
       // Out-of-date English is refreshed by the worker a few minutes after the last edit.
       refetchInterval: (q) =>
         q.state.data?.items.some((line) => line.english_stale) ? PROCESSING_POLL_MS : false,
+    }),
+  // Room left for uploads, so a batch that won't fit is flagged before it starts.
+  storage: (viewer: Viewer) =>
+    queryOptions({
+      queryKey: ["storage", viewer.key],
+      queryFn: async ({ signal }) =>
+        getJson("/api/storage", StorageSpaceSchema, { token: await viewer.getToken(), signal }),
     }),
 };
 

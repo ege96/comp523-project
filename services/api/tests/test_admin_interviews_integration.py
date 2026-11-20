@@ -1,4 +1,5 @@
 import base64
+import shutil
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import date
@@ -76,6 +77,7 @@ def send(client: TestClient, location: str, offset: int, chunk: bytes) -> Respon
         ("DELETE", "/api/uploads/0123456789abcdef0123456789abcdef"),
         ("PATCH", f"/api/interviews/{uuid.uuid4()}"),
         ("GET", f"/api/interviews/{uuid.uuid4()}/jobs"),
+        ("GET", "/api/storage"),
     ],
 )
 def test_anonymous_visitors_are_refused(
@@ -205,6 +207,25 @@ def test_bad_uploads_are_refused_before_any_bytes_arrive(
     }  # fmt: skip
     res = client.post("/api/uploads", headers={k: v for k, v in headers.items() if v})
     assert res.status_code == expected, res.text
+    assert not uploads.uploads_dir(settings).exists()
+
+
+@pytest.mark.integration
+def test_uploads_that_would_fill_the_volume_are_refused(
+    client: TestClient, admin: Admin, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    margin = settings.upload_free_space_margin_bytes
+    free = margin + len(RECORDING) - 1
+    usage = shutil.disk_usage(settings.media_root)._replace(free=free)
+    monkeypatch.setattr(uploads.shutil, "disk_usage", lambda _path: usage)
+
+    space = client.get("/api/storage")
+    assert space.json() == {
+        "usable_bytes": len(RECORDING) - 1, "max_upload_bytes": settings.max_upload_bytes,
+    }  # fmt: skip
+    res = create(client)
+    assert res.status_code == 507
+    assert "storage space" in res.json()["detail"]
     assert not uploads.uploads_dir(settings).exists()
 
 

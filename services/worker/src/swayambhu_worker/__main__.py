@@ -43,6 +43,7 @@ def build_runner(settings: WorkerSettings) -> JobRunner:
         transcriber=build_transcriber(settings),
         translator=build_translator(settings),
         embedder=build_embedder(settings),
+        transcription_concurrency=settings.transcription_concurrency,
     )
     return JobRunner(
         session_factory(settings),

@@ -216,5 +216,5 @@ def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: D
     if body.step != "playback":
         interview.status = "processing"
         interview.status_detail = _WAITING[body.step]
-    jobs.enqueue(session, kind, interview_id)
+    jobs.enqueue(session, kind, interview_id, jobs.Priority.ADMIN)
     session.commit()

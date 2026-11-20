@@ -1,3 +1,5 @@
+import threading
+import time
 import uuid
 from collections.abc import Sequence
 from datetime import timedelta
@@ -87,6 +89,31 @@ class FlakyTranslator(FakeTranslator):
             self.failures -= 1
             raise ProviderError("translator down", retryable=self.retryable)
         return super().translate_to_english(texts, source_language)
+
+
+class SlowTranscriber(ScriptedTranscriber):
+    """Takes longer over earlier pieces, so answers come back out of order; counts overlap."""
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        super().__init__()
+        self.fail_on = fail_on
+        self.lock = threading.Lock()
+        self.running = self.most_at_once = 0
+
+    def transcribe(
+        self, clip: AudioClip, language_hints: Sequence[str]
+    ) -> list[TranscribedSegment]:
+        with self.lock:
+            self.running += 1
+            self.most_at_once = max(self.most_at_once, self.running)
+        try:
+            time.sleep(0.05 / (1 + int(clip.path.stem.rsplit("-", 1)[1]) % 3))
+            if clip.path.stem == self.fail_on:
+                raise ProviderError("rate limited", retryable=True)
+            return super().transcribe(clip, language_hints)
+        finally:
+            with self.lock:
+                self.running -= 1
 
 
 def start(
@@ -547,3 +574,45 @@ def test_the_reindex_command_queues_interviews_missing_the_configured_model(
         }  # fmt: skip
     assert run().startswith("Queued 0")
     assert run("--all").startswith(f"{interview_id}\nQueued 1")
+
+
+def test_pieces_are_transcribed_several_at_once_and_kept_in_order(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    def runner_with(transcriber: SlowTranscriber) -> JobRunner:
+        providers = Providers(transcriber, FakeTranslator(), FakeEmbedder(8), 3)
+        return JobRunner(new_session, providers, store, lease=timedelta(minutes=10))
+
+    slow = SlowTranscriber()
+    interview_id, _ = start(new_session, store, tmp_path)
+    assert runner_with(slow).handle_one()
+    assert slow.most_at_once == 3
+    with new_session() as session:
+        lines = session.scalars(
+            select(SegmentRow)
+            .where(SegmentRow.interview_id == interview_id)
+            .order_by(SegmentRow.seq)
+        ).all()
+    assert [line.original_machine for line in lines] == [
+        f"टुक्रा piece-{i:05d}" for i in range(len(lines))
+    ]
+    assert all(a.end_ms <= b.start_ms for a, b in pairwise(lines))
+
+    # One failed piece fails the attempt and keeps the transcript there was.
+    runner = runner_with(SlowTranscriber(fail_on="piece-00001"))
+    with new_session() as session:
+        jobs.enqueue(session, "transcribe", interview_id, jobs.Priority.ADMIN)
+        session.commit()
+    drain(runner)
+    with new_session() as session:
+        transcribe = session.scalars(
+            select(JobRow).where(JobRow.kind == "transcribe").order_by(JobRow.id.desc())
+        ).first()
+        assert transcribe is not None and transcribe.last_error is not None
+        assert "rate limited" in transcribe.last_error
+        kept = session.scalar(
+            select(func.count())
+            .select_from(SegmentRow)
+            .where(SegmentRow.interview_id == interview_id)
+        )
+    assert kept == len(lines)

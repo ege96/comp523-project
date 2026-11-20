@@ -23,6 +23,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    SmallInteger,
     Text,
     UniqueConstraint,
     func,
@@ -360,6 +361,8 @@ class JobRow(Base):
     attempts: Mapped[int] = mapped_column(Integer, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, server_default="3")
     run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Higher runs first among due jobs: see `swayambhu_core.jobs.Priority`.
+    priority: Mapped[int] = mapped_column(SmallInteger, server_default="1")
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Last failure, kept after a retry succeeds. Admin-only: provider errors can be verbose.
     last_error: Mapped[str | None] = mapped_column(Text)

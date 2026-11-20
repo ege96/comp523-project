@@ -11,6 +11,7 @@ failure, completion and output publication find the claim gone and raise `ClaimL
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import IntEnum
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -22,6 +23,19 @@ from swayambhu_core.models import JobRow
 
 # Retry delay after the first, second, ... failed attempt.
 RETRY_BACKOFF = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
+
+
+class Priority(IntEnum):
+    """Which due job a worker takes first: the highest priority, then the oldest.
+
+    An admin waiting on an edit or a retry shouldn't wait behind a batch of uploads, and an
+    interview that has started should finish before the next one starts, so a batch of
+    uploads comes back one interview at a time instead of all at the end.
+    """
+
+    NEW = 0  # a new recording's first steps, and bulk re-indexing
+    NEXT_STEP = 1  # the next step of an interview that is already being processed
+    ADMIN = 2  # something an admin did and is waiting for: an edit, a retry, a re-run
 
 
 class ClaimLostError(Exception):
@@ -37,22 +51,40 @@ class Job:
     max_attempts: int
 
 
-def enqueue(session: Session, kind: str, interview_id: uuid.UUID) -> None:
-    """Queue a step for an interview. A no-op if that step is already queued.
+def _raised_priority(priority: Priority) -> ColumnElement[int]:
+    """An already-queued job keeps the higher of its priority and the new one."""
+    return func.greatest(JobRow.priority, int(priority))
+
+
+def enqueue(
+    session: Session,
+    kind: str,
+    interview_id: uuid.UUID,
+    priority: Priority = Priority.NEXT_STEP,
+) -> None:
+    """Queue a step for an interview. If that step is already queued, only raise its priority.
 
     If the step is running, the new job waits for it to finish and then runs again, so a
     change made after the running job read its inputs (an admin's edit) isn't missed.
     """
     session.execute(
         insert(JobRow)
-        .values(kind=kind, interview_id=interview_id)
-        .on_conflict_do_nothing(
-            index_elements=["interview_id", "kind"], index_where=text("state = 'queued'")
+        .values(kind=kind, interview_id=interview_id, priority=int(priority))
+        .on_conflict_do_update(
+            index_elements=["interview_id", "kind"],
+            index_where=text("state = 'queued'"),
+            set_={"priority": _raised_priority(priority)},
         )
     )
 
 
-def schedule(session: Session, kind: str, interview_id: uuid.UUID, delay: timedelta) -> None:
+def schedule(
+    session: Session,
+    kind: str,
+    interview_id: uuid.UUID,
+    delay: timedelta,
+    priority: Priority = Priority.NEXT_STEP,
+) -> None:
     """Queue a step to run after `delay`, moving an already-queued one to that time.
 
     Used to batch bursts of edits: each save pushes the step back, so it runs once, `delay`
@@ -61,11 +93,11 @@ def schedule(session: Session, kind: str, interview_id: uuid.UUID, delay: timede
     run_after = func.now() + delay
     session.execute(
         insert(JobRow)
-        .values(kind=kind, interview_id=interview_id, run_after=run_after)
+        .values(kind=kind, interview_id=interview_id, run_after=run_after, priority=int(priority))
         .on_conflict_do_update(
             index_elements=["interview_id", "kind"],
             index_where=text("state = 'queued'"),
-            set_={"run_after": run_after},
+            set_={"run_after": run_after, "priority": _raised_priority(priority)},
         )
     )
 
@@ -75,7 +107,9 @@ def _to_job(row: JobRow) -> Job:
 
 
 def claim(session: Session, lease: timedelta) -> Job | None:
-    """Take the next due job, or a running one whose worker stopped heartbeating."""
+    """Take the next due job, or a running one whose worker stopped heartbeating.
+
+    Due jobs go highest priority first, then oldest first (see `Priority`)."""
     stale = (JobRow.state == "running") & (JobRow.heartbeat_at < func.now() - lease)
     running = aliased(JobRow)
     same_step_running = (
@@ -93,7 +127,7 @@ def claim(session: Session, lease: timedelta) -> Job | None:
             ((JobRow.state == "queued") & (JobRow.run_after <= func.now()) & ~same_step_running)
             | (stale & (JobRow.attempts < JobRow.max_attempts))
         )
-        .order_by(JobRow.run_after, JobRow.id)
+        .order_by(JobRow.priority.desc(), JobRow.run_after, JobRow.id)
         .limit(1)
         .with_for_update(skip_locked=True)
         .scalar_subquery()

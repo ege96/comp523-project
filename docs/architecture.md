@@ -42,11 +42,11 @@ In the web app, the footer links to `/signin` (Google in a popup, or email and p
 
 Admins upload with the [tus](https://tus.io) resumable-upload protocol at `/api/uploads` (served by `tuspyserver`; the web app uses `tus-js-client`). A dropped connection resumes from the last byte the server has. Every route needs an admin token.
 
-In the web app this is **Upload & review** (`/admin`): pick or drop a file, fill in what is known, and watch the progress bar. Pressing Upload again with the same file and details resumes rather than restarting. The same page lists interviews in tabs by what to do next (needs attention, processing, not published, published). Each interview's page (`/admin/interviews/{id}`) shows its next step, processing steps and plain-language errors with a Retry button, its details, the transcript editor, and Publish or Unpublish.
+In the web app this is **Upload & review** (`/admin`): pick or drop one or more files, or a whole folder. Each recording gets a row with a title taken from its file name and optional details; "Same details for all recordings" fills what the rows leave empty. The files upload one at a time, each with its own progress, Retry after a failure, and Stop for the batch. Uploading the same file again with the same details resumes rather than restarting. The page compares the batch with the space left (`GET /api/storage`), and the API refuses an upload that would leave less than `UPLOAD_FREE_SPACE_MARGIN_BYTES` free. The same page lists interviews in tabs by what to do next (needs attention, processing, not published, published). Each interview's page (`/admin/interviews/{id}`) shows its next step, processing steps and plain-language errors with a Retry button, its details, the transcript editor, and Publish or Unpublish.
 
 The protocol, for scripts:
 
-1. `POST /api/uploads` with `Upload-Length` and `Upload-Metadata`, and no body. Metadata keys: `title`, `filename`, `filetype` (required); `language` (`en`, `ne`, `new`), `interviewee_id` or `interviewee_name`, `recorded_on` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) (optional). Bad metadata is refused here, before any bytes are sent.
+1. `POST /api/uploads` with `Upload-Length` and `Upload-Metadata`, and no body. Metadata keys: `title`, `filename`, `filetype` (required); `language` (`en`, `ne`, `new`), `interviewee_id` or `interviewee_name`, `recorded_on` (`YYYY`, `YYYY-MM` or `YYYY-MM-DD`) (optional). Bad metadata, and a file too big for the space left (507), are refused here, before any bytes are sent.
 2. `PATCH` the returned `Location` in chunks of at most `UPLOAD_CHUNK_MAX_BYTES`. `HEAD` on it tells you where to resume.
 3. The last PATCH's response has the new interview's id in `Upload-Interview-Id`. The interview is Private and its processing is already queued.
 
@@ -80,7 +80,11 @@ Unfinished uploads sit in `<MEDIA_ROOT>/uploads`; the worker deletes them after 
 
 All media work runs in the worker, never in a request. Providers sit behind small interfaces in `packages/providers` and are chosen by settings, so swapping one is a config change.
 
+Jobs wait in a Postgres table (`packages/core/.../jobs.py`). Among due jobs the worker takes the highest priority first, then the oldest: an admin's action (an edit, a retry, a re-run), then the next step of an interview already being processed, then a new recording's first steps and bulk re-indexing. So an admin never waits behind a batch of uploads, and a batch finishes one interview at a time.
+
 **Transcription** (`TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`):
+
+The worker cuts the recording into 5 to 20 second pieces at quiet moments and sends `TRANSCRIPTION_CONCURRENCY` of them to the provider at once (default 8), keeping the results in order. It mostly waits on the provider, so this makes long recordings several times faster without more CPU or memory.
 
 - `openai`: an upload whose language no admin has confirmed is sent with the languages in `TRANSCRIPTION_LANGUAGES`. Admins confirm or change the detected language afterwards.
 - `mai`: Microsoft's MAI-Transcribe models through Azure Speech's fast transcription API (`TRANSCRIPTION_MODEL=MAI-Transcribe-2`, plus `AZURE_SPEECH_KEY` and `AZURE_SPEECH_ENDPOINT` from a Speech resource in a region that serves the model). It never sends a language: a set language forces it, and interviews often switch between languages, so the model detects the language of each phrase. On 7 minutes of FLEURS Nepali (2026-11-18) it scored 8.4% CER against gpt-transcribe's 10.6%.
