@@ -127,11 +127,11 @@ def replace_in_transcript(
 
     if changed:
         # One re-index for the whole batch; it re-embeds only the chunks whose text changed.
-        jobs.enqueue(session, "index", interview_id)
+        jobs.enqueue(session, "index", interview_id, jobs.Priority.ADMIN)
         if any(english_is_stale(s) for s in changed):
             # Like a hand edit: one delayed batch, pushed back by further edits.
             delay = timedelta(seconds=settings.retranslate_delay_seconds)
-            jobs.schedule(session, "retranslate", interview_id, delay)
+            jobs.schedule(session, "retranslate", interview_id, delay, jobs.Priority.ADMIN)
         session.commit()
         log.info(
             "admin %s replaced text in %d lines of interview %s",

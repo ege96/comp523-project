@@ -1,5 +1,6 @@
 """A worker whose job was taken over publishes nothing; playback copies never overwrite the
-bytes in use; reindex repair isn't held back by unrelated jobs."""
+bytes in use; reindex repair isn't held back by unrelated jobs; admins' work goes first and
+started interviews finish before new ones start."""
 
 import uuid
 from collections.abc import Sequence
@@ -174,3 +175,26 @@ def test_reindex_is_not_held_back_by_playback_but_waits_for_indexing(
         jobs.enqueue(session, "index", interview_id)
         session.commit()
         assert needs_index(session, "other:model") == []
+
+
+def test_admin_work_first_then_one_interview_at_a_time(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    first, runner = start(new_session, store, tmp_path)
+    second, _ = start(new_session, store, tmp_path)
+    with new_session() as session:
+        # An admin re-runs a step that is already queued: it moves to the front.
+        jobs.enqueue(session, "playback", second, jobs.Priority.ADMIN)
+        session.commit()
+    drain(runner)
+
+    with new_session() as session:
+        done = session.execute(
+            select(JobRow.interview_id, JobRow.kind).order_by(JobRow.finished_at)
+        ).all()
+    steps = ["transcribe", "translate", "index", "playback"]
+    assert [tuple(row) for row in done] == [
+        (second, "playback"),
+        *[(first, kind) for kind in steps],
+        *[(second, kind) for kind in steps if kind != "playback"],
+    ]
