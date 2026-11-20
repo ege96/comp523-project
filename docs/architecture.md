@@ -84,7 +84,7 @@ Jobs wait in a Postgres table (`packages/core/.../jobs.py`). Among due jobs the 
 
 **Transcription** (`TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_MODEL`):
 
-The worker cuts the recording into 5 to 20 second pieces at quiet moments and sends `TRANSCRIPTION_CONCURRENCY` of them to the provider at once (default 4), keeping the results in order. It mostly waits on the provider, so this makes long recordings several times faster without more CPU or memory.
+The worker cuts the recording into 5 to 20 second pieces at quiet moments and sends `TRANSCRIPTION_CONCURRENCY` of them to the provider at once (default 8), keeping the results in order. It mostly waits on the provider, so this makes long recordings several times faster without more CPU or memory.
 
 - `openai`: an upload whose language no admin has confirmed is sent with the languages in `TRANSCRIPTION_LANGUAGES`. Admins confirm or change the detected language afterwards.
 - `mai`: Microsoft's MAI-Transcribe models through Azure Speech's fast transcription API (`TRANSCRIPTION_MODEL=MAI-Transcribe-2`, plus `AZURE_SPEECH_KEY` and `AZURE_SPEECH_ENDPOINT` from a Speech resource in a region that serves the model). It never sends a language: a set language forces it, and interviews often switch between languages, so the model detects the language of each phrase. On 7 minutes of FLEURS Nepali (2026-11-18) it scored 8.4% CER against gpt-transcribe's 10.6%.

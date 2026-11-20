@@ -21,8 +21,10 @@ class WorkerSettings(ProviderSettings):
     # The longest one FFmpeg or FFprobe run may take before it's stopped and the job retried.
     media_timeout_seconds: float = 4 * 3600.0
     # Pieces of one recording sent to the transcription provider at once. The worker mostly
-    # waits on the provider, so a few at once make long recordings much faster; more may hit
-    # the provider's rate limits (verify before raising).
-    transcription_concurrency: int = Field(default=4, ge=1, le=16)
+    # waits on the provider, so several at once make long recordings much faster. 8 is the
+    # tightest published cap (ElevenLabs Free: 8 concurrent); OpenAI's lowest paid tier allows
+    # thousands of requests a minute and Azure fast transcription 600 (checked 2026-11-20;
+    # verify before raising). Above 8, FFmpeg cutting pieces on 1 CPU may become the limit.
+    transcription_concurrency: int = Field(default=8, ge=1, le=16)
     # Unfinished uploads untouched this long are deleted. Keep the API's value the same.
     upload_retention_days: int = 3
