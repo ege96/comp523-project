@@ -144,7 +144,7 @@ Changing `MEDIA_URL_SECRET` only makes open media links stop working until the p
 
 **Logs.** `oc logs deploy/api` (one JSON line per request; an unexpected error's response carries a `request_id`, which leads to its log line) and `oc logs deploy/worker`.
 
-**Disk space.** `oc exec deploy/api -- df -h /data/media`. Uploads fail when the media volume is full, so keep `MAX_UPLOAD_BYTES` (default 10 GiB) below its free space.
+**Disk space.** `oc exec deploy/api -- df -h /data/media`. The API refuses an upload that would leave less than `UPLOAD_FREE_SPACE_MARGIN_BYTES` (default 1 GiB) free on the media volume, and the upload page warns when a batch won't fit.
 
 **Roll back a bad deploy.** `oc rollout undo deploy/<name>` redeploys the previous image. `api` uses the `Recreate` strategy, so the old pod is stopped before the new one starts. The API runs database migrations on start; if one fails, the new pod exits and never becomes ready, and the site's API is down until you roll back or fix it. Migrations only go forward: rolling back the image does not undo a migration that already succeeded, and the previous release may not run against the new schema unless the change was written to allow it. If it can't, restore the database from the paired backup taken before the deploy (§5). Take a backup pair before any deploy that includes a migration.
 

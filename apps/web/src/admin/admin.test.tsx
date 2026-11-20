@@ -236,116 +236,145 @@ describe("admin page", () => {
   });
 
   // Opens the admin page and returns its Upload button.
-  async function openUploadForm() {
-    stubApi(adminApi);
+  async function openUploadForm(storage = { usable_bytes: 10_000, max_upload_bytes: 5_000 }) {
+    stubApi({ ...adminApi, "/api/storage": { body: storage } });
     renderApp("/admin", fakeAuthClient({ signedIn: true }));
     return screen.findByRole("button", { name: "Upload" }, SLOW);
   }
-  const recording = () => new File(["x"], "village-talk.mp3", { type: "audio/mpeg" });
-  const pick = async (field: string, option: string) => {
-    await userEvent.click(screen.getByRole("combobox", { name: field }));
+  const recording = (name = "village-talk.mp3", size = 1) =>
+    new File(["x".repeat(size)], name, { type: "audio/mpeg" });
+  const pick = async (field: string, option: string, scope: HTMLElement = document.body) => {
+    await userEvent.click(within(scope).getByRole("combobox", { name: field }));
     await userEvent.click(await screen.findByRole("option", { name: option }));
   };
+  const row = (name: string) => screen.getByRole("group", { name });
+  const addFiles = (...files: File[]) =>
+    userEvent.upload(screen.getByLabelText("Recording files"), files);
 
-  it("points to the missing file first when the form is empty", async () => {
+  it("points to the missing files first when the form is empty", async () => {
     await userEvent.click(await openUploadForm());
     const fileError = await screen.findByText("Choose a recording to upload");
     expect(fileError.getAttribute("role")).toBe("alert");
-    expect(screen.getByText("Enter a title")).toBeTruthy();
-    // The file error belongs to Choose file, which gets the focus as the first problem.
-    const choose = screen.getByRole("button", { name: "Choose file" });
+    const choose = screen.getByRole("button", { name: "Choose files" });
     expect(choose.getAttribute("aria-describedby")).toBe(fileError.id);
-    expect(screen.getByLabelText("Recording file").getAttribute("aria-describedby")).toBe(
-      fileError.id,
-    );
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(choose);
     });
   });
 
-  it("refuses a dropped file that isn't audio or video", async () => {
+  it("makes a row per recording, skipping other files and repeats, and fills shared details", async () => {
     await openUploadForm();
+    const talk = recording();
     const notes = new File(["x"], "notes.txt", { type: "text/plain" });
-    fireEvent.drop(screen.getByText("Drop a video or audio file here"), {
-      dataTransfer: { files: [notes] },
+    fireEvent.drop(screen.getByText(/Drop video or audio files/), {
+      dataTransfer: { files: [talk, notes, recording("dawn.m4a")] },
     });
-    expect(await screen.findByText("Choose an audio or video file")).toBeTruthy();
-  });
+    expect(await screen.findByText(/Skipped notes.txt: not audio or video/)).toBeTruthy();
+    await addFiles(talk);
+    expect(await screen.findByText(/village-talk.mp3 already in the list/)).toBeTruthy();
+    expect(
+      within(row("dawn.m4a")).getByRole("textbox", { name: /Interview title/ }),
+    ).toHaveProperty("value", "dawn");
 
-  it("titles the upload after its file and tells new interviewees from existing ones", async () => {
-    await openUploadForm();
-    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
-    expect(screen.getByRole("textbox", { name: /Interview title/ })).toHaveProperty(
-      "value",
-      "village-talk",
+    // One recording has its own language; the shared details fill only what's empty.
+    await userEvent.click(
+      within(row("dawn.m4a")).getByRole("button", { name: /language and date/ }),
     );
-    const person = screen.getByRole("combobox", { name: "Interviewee" });
-    await userEvent.type(person, "New person");
-    expect(screen.getByText("A new interviewee will be added")).toBeTruthy();
-    await userEvent.clear(person);
-    await userEvent.type(person, "Pers");
+    await pick("Original language", "English", row("dawn.m4a"));
+    await userEvent.click(screen.getByRole("button", { name: "Same details for all recordings" }));
+    const shared = screen.getByRole("group", { name: "Same details for all recordings" });
+    await userEvent.type(within(shared).getByRole("combobox", { name: "Interviewee" }), "Pers");
     await userEvent.click(await screen.findByRole("option", { name: "Person F" }));
-    expect(screen.getByText("An existing interviewee")).toBeTruthy();
-  });
+    await pick("Original language", "Nepali", shared);
+    await userEvent.click(screen.getByRole("button", { name: "Fill in all recordings" }));
 
-  it("refuses a recording date that can't be right", async () => {
-    const submit = await openUploadForm();
-    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
-    await pick("Month", "February");
-    await userEvent.click(submit);
-    expect(await screen.findByText("Add the year too, or leave the month empty")).toBeTruthy();
-    await userEvent.type(screen.getByRole("textbox", { name: "Year" }), "2023");
-    await pick("Day", "29");
-    await userEvent.click(submit);
-    expect(await screen.findByText("February 2023 has no day 29")).toBeTruthy();
-    expect(upload.start).not.toHaveBeenCalled();
-  });
-
-  it("uploads with only the details given, and cancels", async () => {
-    const submit = await openUploadForm();
-    const file = recording();
-    await userEvent.upload(screen.getByLabelText("Recording file"), file);
-    await userEvent.type(screen.getByRole("combobox", { name: "Interviewee" }), "Pers");
-    await userEvent.click(await screen.findByRole("option", { name: "Person F" }));
-    await pick("Original language", "Nepal Bhasa");
-    await userEvent.type(screen.getByRole("textbox", { name: "Year" }), "2019");
-    await pick("Month", "May");
-    await userEvent.click(submit);
+    await userEvent.click(screen.getByRole("button", { name: "Upload 2 recordings" }));
     expect(upload.start).toHaveBeenCalledWith(
-      file,
+      talk,
       {
         title: "village-talk",
-        language: "new",
+        language: "ne",
         intervieweeId: 7,
         intervieweeName: undefined,
-        recordedOn: "2019-05",
+        recordedOn: undefined,
       },
       expect.anything(),
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-    expect(upload.abort).toHaveBeenCalled();
-    expect(screen.queryByText(/Keep this page open/)).toBeNull();
+    upload.finish(id);
+    await vi.waitFor(() => {
+      expect(upload.start).toHaveBeenCalledTimes(2);
+    });
+    expect(upload.start.mock.calls[1]?.[1]).toMatchObject({
+      title: "dawn",
+      language: "en",
+      intervieweeId: 7,
+    });
   });
 
-  it("keeps the form filled in after a failed attempt, so Upload retries", async () => {
-    const submit = await openUploadForm();
-    await userEvent.upload(screen.getByLabelText("Recording file"), recording());
-    await userEvent.click(submit);
+  it("refuses a recording date that can't be right, unfolding the row it's in", async () => {
+    await openUploadForm();
+    await addFiles(recording(), recording("dawn.m4a"));
+    const dawn = row("dawn.m4a");
+    await userEvent.click(within(dawn).getByRole("button", { name: /language and date/ }));
+    await pick("Month", "February", dawn);
+    await userEvent.click(within(dawn).getByRole("button", { name: "Hide other details" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload 2 recordings" }));
+    expect(await screen.findByText("Add the year too, or leave the month empty")).toBeTruthy();
+    expect(within(dawn).getByRole("button", { name: "Hide other details" })).toBeTruthy();
+    expect(upload.start).not.toHaveBeenCalled();
+  });
+
+  it("sends the files one by one, carries on past a failure, and retries it", async () => {
+    await openUploadForm();
+    await addFiles(recording(), recording("dawn.m4a"));
+    await userEvent.click(screen.getByRole("button", { name: "Upload 2 recordings" }));
+    expect(within(row("dawn.m4a")).getByText("Waiting to upload")).toBeTruthy();
+    expect(await screen.findByText(/Keep this page open/)).toBeTruthy();
     upload.fail(new Error("offline"));
-    expect(await screen.findByText(/connection to the archive was lost/)).toBeTruthy();
-    await userEvent.click(submit);
-    expect(upload.start).toHaveBeenCalledTimes(2);
+    expect(
+      await within(row("village-talk.mp3")).findByText(/connection to the archive was lost/),
+    ).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(upload.start).toHaveBeenCalledTimes(2);
+    });
     upload.finish(id);
-    await userEvent.click(await screen.findByRole("link", { name: "Follow its progress" }));
-    expect(await screen.findByText("Nothing has started yet.")).toBeTruthy();
+    expect(
+      await within(row("dawn.m4a")).findByRole("link", { name: "Follow its progress" }),
+    ).toBeTruthy();
+
+    await userEvent.click(within(row("village-talk.mp3")).getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() => {
+      expect(upload.start).toHaveBeenCalledTimes(3);
+    });
+    upload.finish(id);
+    await userEvent.click(await screen.findByRole("button", { name: "Clear finished" }));
+    expect(screen.queryByRole("group", { name: "dawn.m4a" })).toBeNull();
+  });
+
+  it("stops the upload, keeping the rest to send later", async () => {
+    await openUploadForm();
+    await addFiles(recording(), recording("dawn.m4a"));
+    await userEvent.click(screen.getByRole("button", { name: "Upload 2 recordings" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Stop" }));
+    expect(upload.abort).toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Upload 2 recordings" })).toBeTruthy();
+    expect(upload.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns when a batch won't fit and flags a file over the size limit", async () => {
+    await openUploadForm({ usable_bytes: 6_000, max_upload_bytes: 5_000 });
+    await addFiles(recording("big.mp3", 5_001), recording("dawn.m4a", 2_000));
+    expect(await screen.findByText(/but only .* of space is left/)).toBeTruthy();
+    expect(within(row("big.mp3")).getByText(/larger than the .* limit/)).toBeTruthy();
+    await userEvent.click(within(row("big.mp3")).getByRole("button", { name: "Remove big.mp3" }));
+    expect(await screen.findByText(/to upload · .* of space left/)).toBeTruthy();
   });
 
   it("asks before leaving the page during an upload, and stops it on leaving", async () => {
     stubApi(adminApi);
     const router = renderApp("/admin", fakeAuthClient({ signedIn: true }));
     const submit = await screen.findByRole("button", { name: "Upload" }, SLOW);
-    const file = new File(["x"], "village-talk.mp3", { type: "audio/mpeg" });
-    await userEvent.upload(screen.getByLabelText("Recording file"), file);
+    await addFiles(recording());
     await userEvent.click(submit);
     expect(await screen.findByText(/Keep this page open/)).toBeTruthy();
 

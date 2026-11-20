@@ -42,6 +42,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `MEDIA_URL_TTL_SECONDS` | `21600` (6 h) | | How long a media link works |
 | `MAX_UPLOAD_BYTES` | 10 GiB | | Largest upload; keep it below the media volume's free space |
 | `UPLOAD_CHUNK_MAX_BYTES` | 64 MiB | | Largest single tus PATCH |
+| `UPLOAD_FREE_SPACE_MARGIN_BYTES` | 1 GiB | | Space an upload must leave free on the media volume (room for playback copies); larger uploads are refused |
 | `RETRANSLATE_DELAY_SECONDS` | `300` | | Wait after the last edit before re-translating edited lines |
 | `SEARCH_EMBEDDING_TIMEOUT_SECONDS` | `5` | | How long search waits to embed the query before going keyword-only (remote providers) |
 | `SEARCH_CANDIDATES` | `100` | | Hits taken from each of keyword and semantic search; also the deepest page |
