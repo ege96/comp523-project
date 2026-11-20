@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import SettingsConfigDict
 from swayambhu_providers.settings import ProviderSettings
 
@@ -19,5 +20,9 @@ class WorkerSettings(ProviderSettings):
     job_lease_seconds: float = 600.0
     # The longest one FFmpeg or FFprobe run may take before it's stopped and the job retried.
     media_timeout_seconds: float = 4 * 3600.0
+    # Pieces of one recording sent to the transcription provider at once. The worker mostly
+    # waits on the provider, so a few at once make long recordings much faster; more may hit
+    # the provider's rate limits (verify before raising).
+    transcription_concurrency: int = Field(default=4, ge=1, le=16)
     # Unfinished uploads untouched this long are deleted. Keep the API's value the same.
     upload_retention_days: int = 3

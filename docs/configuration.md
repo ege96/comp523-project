@@ -16,6 +16,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `TRANSCRIPTION_PROVIDER` | `openai` | | `openai`, `elevenlabs`, `mai` or `fake` |
 | `TRANSCRIPTION_MODEL` | none | | Provider's model id, e.g. `gpt-transcribe` or `MAI-Transcribe-2`. Required unless `fake` |
 | `TRANSCRIPTION_LANGUAGES` | `ne,en` | | `openai` only: languages to expect when no admin confirmed one |
+| `TRANSCRIPTION_CONCURRENCY` | 4 | | Worker: pieces of one recording sent to the transcription provider at once (1 to 16). Higher is faster until the provider's rate limits (verify before raising) |
 | `TRANSLATION_PROVIDER` | `google_nmt` | | `google_nmt` or `fake` |
 | `EMBEDDING_PROVIDER` | `openai` | | `openai`, `local` or `fake` (deployments use `local`) |
 | `EMBEDDING_MODEL` | none | | e.g. `intfloat/multilingual-e5-small` (local) or `text-embedding-3-large`. Required unless `fake` |

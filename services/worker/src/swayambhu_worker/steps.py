@@ -9,10 +9,13 @@ Steps read persisted outputs so a retry can restart the failed step.
 import hashlib
 import tempfile
 import uuid
-from collections import Counter
-from collections.abc import Callable
+from collections import Counter, deque
+from collections.abc import Callable, Generator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import islice
 from pathlib import Path
 
 from sqlalchemy import delete, func, select, tuple_
@@ -32,7 +35,14 @@ from swayambhu_core.models import (
 )
 from swayambhu_core.storage import MediaStore, file_sha256
 from swayambhu_core.text import english_is_stale, translation_fingerprint
-from swayambhu_providers import AudioClip, Embedder, Transcriber, Translation, Translator
+from swayambhu_providers import (
+    AudioClip,
+    Embedder,
+    TranscribedSegment,
+    Transcriber,
+    Translation,
+    Translator,
+)
 
 from swayambhu_worker import audio
 from swayambhu_worker.chunking import Timed, chunk_segments
@@ -61,6 +71,8 @@ class Providers:
     transcriber: Transcriber
     translator: Translator
     embedder: Embedder
+    # Pieces of one recording sent to the transcriber at once (TRANSCRIPTION_CONCURRENCY).
+    transcription_concurrency: int = 1
 
 
 Heartbeat = Callable[[], None]
@@ -139,6 +151,29 @@ def _refuse_to_replace_corrections(
     )
 
 
+def _in_order[T, R](work: Callable[[T], R], items: Sequence[T], at_once: int) -> Generator[R]:
+    """`work` on each item, up to `at_once` running in threads, yielded in the items' order.
+
+    Transcription waits on the provider, not the CPU, so pieces overlap well. Only `at_once`
+    pieces are cut or in flight at a time, which bounds the temporary files. The first error
+    stops the rest: queued pieces are cancelled and running ones finish before it is raised.
+    The caller's thread does everything else (the database, heartbeats).
+    """
+    at_once = max(1, at_once)
+    upcoming = iter(items)
+    with ThreadPoolExecutor(max_workers=at_once) as pool:
+        running: deque[Future[R]] = deque(pool.submit(work, i) for i in islice(upcoming, at_once))
+        try:
+            while running:
+                yield running.popleft().result()
+                # Only once the caller has taken that result (and heartbeated): a lost claim
+                # then stops the work before another piece starts.
+                running.extend(pool.submit(work, i) for i in islice(upcoming, 1))
+        finally:
+            for future in running:
+                future.cancel()
+
+
 def transcribe(
     session: Session,
     interview_id: uuid.UUID,
@@ -166,28 +201,38 @@ def transcribe(
     rows: list[SegmentRow] = []
     with store.local_copy(media.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
         total_ms = audio.duration_ms(source)
-        for index, piece in enumerate(audio.plan_pieces(total_ms, audio.loudness(source))):
+        pieces = audio.plan_pieces(total_ms, audio.loudness(source))
+
+        def hear(index: int) -> list[TranscribedSegment]:
+            piece = pieces[index]
             clip_path = Path(tmp) / f"piece-{index:05d}.flac"
-            audio.cut(source, piece, clip_path)
-            clip = AudioClip(clip_path, piece.end_ms - piece.start_ms)
-            for found in providers.transcriber.transcribe(clip, hints):
-                text = found.text.strip()
-                start = piece.start_ms + max(0, found.start_ms)
-                end = min(piece.end_ms, piece.start_ms + found.end_ms)
-                if not text or end <= start:
-                    continue
-                rows.append(
-                    SegmentRow(
-                        interview_id=interview_id,
-                        seq=len(rows),
-                        start_ms=start,
-                        end_ms=end,
-                        language=_known_language(known, found.language),
-                        original_machine=text,
+            try:
+                audio.cut(source, piece, clip_path)
+                clip = AudioClip(clip_path, piece.end_ms - piece.start_ms)
+                return providers.transcriber.transcribe(clip, hints)
+            finally:
+                clip_path.unlink(missing_ok=True)
+
+        heard = _in_order(hear, range(len(pieces)), providers.transcription_concurrency)
+        with closing(heard):  # stops the pieces still in flight if this loop fails
+            for piece, found_in_piece in zip(pieces, heard, strict=True):
+                for found in found_in_piece:
+                    text = found.text.strip()
+                    start = piece.start_ms + max(0, found.start_ms)
+                    end = min(piece.end_ms, piece.start_ms + found.end_ms)
+                    if not text or end <= start:
+                        continue
+                    rows.append(
+                        SegmentRow(
+                            interview_id=interview_id,
+                            seq=len(rows),
+                            start_ms=start,
+                            end_ms=end,
+                            language=_known_language(known, found.language),
+                            original_machine=text,
+                        )
                     )
-                )
-            clip_path.unlink()
-            heartbeat()
+                heartbeat()
     if not rows:
         raise StepError(
             "The transcription service returned no text for this recording, so any "
