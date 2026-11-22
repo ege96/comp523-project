@@ -10,6 +10,8 @@ from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
 from swayambhu_api.interviews import router as interviews_router
+from swayambhu_api.live import ChangeHub
+from swayambhu_api.live import router as live_router
 from swayambhu_api.logging_setup import install_request_context, setup_logging
 from swayambhu_api.search import get_embedder
 from swayambhu_api.search import router as search_router
@@ -20,13 +22,17 @@ from swayambhu_api.uploads import router as uploads_router
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(settings.log_format, settings.log_level)
     # Builds the embedder now, so a local model loads at startup instead of on the first
     # search (and a misconfigured one is logged straight away).
     get_embedder()
-    yield
+    app.state.change_hub = ChangeHub(settings.database_url, settings.db_connect_timeout_seconds)
+    try:
+        yield
+    finally:
+        await app.state.change_hub.aclose()
 
 
 app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
@@ -40,6 +46,7 @@ app.include_router(transcript_replace_router)
 # the body; its own `auth` dependency runs after that one.
 app.include_router(uploads_router, dependencies=[Depends(require_upload_admin)])
 app.include_router(space_router)
+app.include_router(live_router)
 
 
 class LivenessResponse(BaseModel):

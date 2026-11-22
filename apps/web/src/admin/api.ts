@@ -20,11 +20,12 @@ import {
 } from "../api/schemas";
 import { API_BASE_URL } from "../config";
 import { useAuth } from "../auth/useAuth";
+import { isLive } from "./live";
 
 export type Status = InterviewSummary["status"];
 type Visibility = InterviewSummary["visibility"];
 
-/** How often admin screens re-ask while the worker is still busy (there is no push yet). */
+/** How often admin screens re-ask while the worker is busy, when live updates are down. */
 export const PROCESSING_POLL_MS = 10_000;
 
 // Admin queries share the "interviews" prefix, so one invalidation refreshes public pages too.
@@ -51,7 +52,9 @@ export const adminQueries = {
         });
       },
       refetchInterval: (q) =>
-        q.state.data?.items.some((i) => i.status === "processing") ? PROCESSING_POLL_MS : false,
+        !isLive() && q.state.data?.items.some((i) => i.status === "processing")
+          ? PROCESSING_POLL_MS
+          : false,
     }),
   jobs: (viewer: Viewer, id: string) =>
     queryOptions({
@@ -73,7 +76,9 @@ export const adminQueries = {
         }),
       // Out-of-date English is refreshed by the worker a few minutes after the last edit.
       refetchInterval: (q) =>
-        q.state.data?.items.some((line) => line.english_stale) ? PROCESSING_POLL_MS : false,
+        !isLive() && q.state.data?.items.some((line) => line.english_stale)
+          ? PROCESSING_POLL_MS
+          : false,
     }),
   // Room left for uploads, so a batch that won't fit is flagged before it starts.
   storage: (viewer: Viewer) =>

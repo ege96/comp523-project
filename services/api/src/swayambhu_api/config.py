@@ -62,6 +62,9 @@ class Settings(ProviderSettings):
     # After an admin edits a line's original text, wait this long after their last edit
     # before re-translating the edited lines, so a burst of edits is one translation batch.
     retranslate_delay_seconds: int = 300
+    # Longest a live-updates stream stays open before the page reconnects, which re-checks the
+    # sign-in and keeps redeploys from waiting on open streams.
+    live_stream_max_seconds: int = 600
 
 
 @lru_cache

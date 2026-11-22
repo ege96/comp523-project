@@ -9,13 +9,14 @@ import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { adminQueries, PROCESSING_POLL_MS, useUpdateInterview } from "../admin/api";
 import { DetailsDialog } from "../admin/DetailsDialog";
 import { PublishButton } from "../admin/PublishButton";
+import { isLive } from "../admin/live";
 import { languageMismatch, retryableJobs } from "../admin/rerun";
 import { RerunActions, RetryButton } from "../admin/RerunActions";
 import { StagePill } from "../admin/StagePill";
@@ -51,7 +52,7 @@ export function AdminInterviewPage() {
     ...interviewQueries.detail(viewer, interviewId),
     enabled: viewer.ready,
     refetchInterval: (q) =>
-      q.state.data?.status === "processing" || busy ? PROCESSING_POLL_MS : false,
+      !isLive() && (q.state.data?.status === "processing" || busy) ? PROCESSING_POLL_MS : false,
   });
 
   return (
@@ -88,10 +89,11 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
     ...adminQueries.jobs(viewer, interview.id),
     enabled: viewer.ready,
     refetchInterval: (q) =>
-      interview.status === "processing" || anyActive(q.state.data?.items)
+      !isLive() && (interview.status === "processing" || anyActive(q.state.data?.items))
         ? PROCESSING_POLL_MS
         : false,
   });
+  useRefreshTranscriptOnProgress(interview);
   const queue = queueOf(interview);
   return (
     <>
@@ -144,6 +146,25 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
       </Box>
     </>
   );
+}
+
+/**
+ * The transcript is loaded once and is empty until transcription finishes, so re-read it when
+ * the interview moves on (transcribed, translated, failed). Live updates do this too; this
+ * covers the polling fallback.
+ */
+function useRefreshTranscriptOnProgress(interview: InterviewDetail) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  const progress = `${interview.status}/${interview.translation_status}/${interview.status_detail ?? ""}`;
+  const seen = useRef(progress);
+  useEffect(() => {
+    if (seen.current === progress) return;
+    seen.current = progress;
+    void queryClient.invalidateQueries({
+      queryKey: adminQueries.transcript(viewer, interview.id).queryKey,
+    });
+  }, [progress, queryClient, viewer, interview.id]);
 }
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {

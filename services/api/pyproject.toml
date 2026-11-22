@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "FastAPI backend for the Swayambhu Stories Searchable Archive"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.135",
     "uvicorn[standard]>=0.30",
     "pydantic-settings>=2.4",
     "psycopg[binary]>=3.2",
