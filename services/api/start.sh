@@ -6,4 +6,5 @@ set -e
 if [ "${RUN_MIGRATIONS:-1}" != "0" ]; then
     python -m swayambhu_api.migrate upgrade head
 fi
-exec uvicorn swayambhu_api.main:app --host 0.0.0.0 --port 8080 --proxy-headers
+exec uvicorn swayambhu_api.main:app --host 0.0.0.0 --port 8080 --proxy-headers \
+    --timeout-graceful-shutdown 10

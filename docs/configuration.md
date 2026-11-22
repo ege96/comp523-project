@@ -45,6 +45,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `UPLOAD_CHUNK_MAX_BYTES` | 64 MiB | | Largest single tus PATCH |
 | `UPLOAD_FREE_SPACE_MARGIN_BYTES` | 1 GiB | | Space an upload must leave free on the media volume (room for playback copies); larger uploads are refused |
 | `RETRANSLATE_DELAY_SECONDS` | `300` | | Wait after the last edit before re-translating edited lines |
+| `LIVE_STREAM_MAX_SECONDS` | `600` | | Longest an admin live-updates stream stays open before the page reconnects (re-checking the sign-in) |
 | `SEARCH_EMBEDDING_TIMEOUT_SECONDS` | `5` | | How long search waits to embed the query before going keyword-only (remote providers) |
 | `SEARCH_CANDIDATES` | `100` | | Hits taken from each of keyword and semantic search; also the deepest page |
 | `SEARCH_RRF_K` | `60` | | Rank fusion constant; larger flattens the gap between ranks |
