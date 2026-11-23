@@ -127,6 +127,8 @@ describe("the admin page with live updates", () => {
 
     expect(await screen.findByText(/no transcript yet/, {}, SLOW)).toBeTruthy();
     stream.send("event: ready\ndata: {}\n\n");
+    // Going live re-reads everything once; let that finish before counting.
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     // The worker finishes transcribing; the stream says so and the page re-reads.
     routes[base] = { body: { ...processing, status_detail: "Translating" } };
@@ -134,10 +136,16 @@ describe("the admin page with live updates", () => {
       body: { items: [job("transcribe", "done"), job("translate", "running")] },
     };
     routes[`${base}/transcript`] = { body: { items: [line] } };
+    const transcriptReads = () =>
+      vi.mocked(fetch).mock.calls.filter(([url]) => url === `${base}/transcript`).length;
+    const before = transcriptReads();
     stream.send(`event: change\ndata: {"interview_id": "${processing.id}"}\n\n`);
 
     expect(await screen.findByText("Freshly transcribed line", {}, SLOW)).toBeTruthy();
     expect(screen.getByText("Translating")).toBeTruthy();
+    // Re-read once per change, not again when the new status shows.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(transcriptReads() - before).toBe(1);
     stream.end();
   });
 });

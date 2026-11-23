@@ -32,6 +32,13 @@ export const QUEUE_EMPTY = {
 
 type Stage = Pick<InterviewSummary, "status" | "visibility">;
 
+/** Each tab's count, from the counts per status and visibility. */
+export function queueCounts(counts: readonly (Stage & { count: number })[]): Record<Queue, number> {
+  const totals: Record<Queue, number> = { attention: 0, processing: 0, ready: 0, published: 0 };
+  for (const c of counts) totals[queueOf(c)] += c.count;
+  return totals;
+}
+
 /** Where a recording is in the admin's work. A problem comes first, even when Public. */
 export function queueOf({ status, visibility }: Stage): Queue {
   if (status === "failed") return "attention";

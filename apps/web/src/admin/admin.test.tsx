@@ -57,6 +57,14 @@ const privateOne = {
 const adminApi = {
   "/api/auth/me": { body: { id: 1, email: "someone@example.org" } },
   "/api/interviews": { body: { items: [interviewSummary, privateOne], total: 2 } },
+  "/api/admin/interview-counts": {
+    body: {
+      items: [
+        { status: "done", visibility: "public", count: 2 },
+        { status: "processing", visibility: "private", count: 1 },
+      ],
+    },
+  },
   "/api/search/filters": { body: { languages: [], interviewees: [{ id: 7, name: "Person F" }] } },
   [`/api/interviews/${privateOne.id}`]: { status: 500, body: {} },
   [`/api/interviews/${id}`]: { body: interviewDetail },
@@ -102,8 +110,11 @@ describe("admin page", () => {
         requests().some((r) => r.url.includes("limit=20&offset=0&status=done&visibility=public")),
       ).toBe(true);
     });
-    // Each tab shows how many recordings are waiting in it.
+    // Each tab shows how many recordings are waiting in it, all from one request.
     expect(screen.getByRole("tab", { name: /^Published.*\(2\)$/ })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: /^Processing.*\(1\)$/ })).toBeTruthy();
+    expect(requests().filter((r) => r.url.includes("/api/admin/interview-counts"))).toHaveLength(1);
+    expect(requests().some((r) => r.url.includes("limit=1&"))).toBe(false);
   });
 
   it("keeps the view and page in the URL", async () => {

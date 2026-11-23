@@ -137,6 +137,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/interview-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Counts
+         * @description How many interviews there are of each status and visibility, Private included, in
+         *     one request instead of one per tab.
+         */
+        get: operations["interview_counts_api_admin_interview_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/interviews/{interview_id}/jobs": {
         parameters: {
             query?: never;
@@ -335,6 +356,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Changes
+         * @description Which interviews change, as they change. Admin-only.
+         *
+         *     Events: `ready` once listening (fetch what's shown now, so nothing between page load and
+         *     this point is missed), `change` with `{"interview_id": ...}`, and `resync` (refresh
+         *     everything). FastAPI adds a keep-alive comment after 15 s of quiet, inside the router's
+         *     idle timeout. The stream ends after `live_stream_max_seconds`, so a reconnect re-checks
+         *     the sign-in (Firebase ID tokens last an hour) and a redeploy isn't held up for long.
+         */
+        get: operations["interview_changes_api_admin_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -465,6 +512,26 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** InterviewCount */
+        InterviewCount: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "processing" | "done" | "failed";
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "private";
+            /** Count */
+            count: number;
+        };
+        /** InterviewCounts */
+        InterviewCounts: {
+            /** Items */
+            items: components["schemas"]["InterviewCount"][];
         };
         /** InterviewDetail */
         InterviewDetail: {
@@ -1039,6 +1106,26 @@ export interface operations {
             };
         };
     };
+    interview_counts_api_admin_interview_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewCounts"];
+                };
+            };
+        };
+    };
     list_jobs_api_interviews__interview_id__jobs_get: {
         parameters: {
             query?: never;
@@ -1461,6 +1548,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StorageSpace"];
+                };
+            };
+        };
+    };
+    interview_changes_api_admin_changes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
                 };
             };
         };

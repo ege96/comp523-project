@@ -40,11 +40,19 @@ def _signature(settings: Settings, media_id: int, expires: int, scope: Scope) ->
     return hmac.new(_key(settings), message, hashlib.sha256).hexdigest()
 
 
+# Expiry times are rounded up to a multiple of this, so every fetch of an interview within the
+# same hour gets the same link. A new link would make the browser's player load the file
+# again from the start, and miss the browser cache, whose key is the full URL.
+EXPIRY_STEP_SECONDS = 3600
+
+
 def signed_url(
     settings: Settings, media_id: int, scope: Scope, now: float | None = None
 ) -> tuple[str, int]:
-    """The link and its expiry (Unix seconds)."""
-    expires = int(now if now is not None else time.time()) + settings.media_url_ttl_seconds
+    """The link and its expiry (Unix seconds). The link stays valid for at least the
+    configured TTL, and at most one `EXPIRY_STEP_SECONDS` longer."""
+    earliest = int(now if now is not None else time.time()) + settings.media_url_ttl_seconds
+    expires = -(-earliest // EXPIRY_STEP_SECONDS) * EXPIRY_STEP_SECONDS
     sig = _signature(settings, media_id, expires, scope)
     return f"/api/media/{media_id}?expires={expires}&scope={scope}&sig={sig}", expires
 

@@ -106,7 +106,7 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
   const [finding, setFinding] = useState(false);
   const [filter, setFilter] = useState<LineFilter>("all");
   const [follow, setFollow] = useState(true);
-  const player = useSegmentPlayer(interview.id);
+  const player = useSegmentPlayer(interview);
   const lineRefs = useRef(new Map<number, HTMLLIElement>());
   const scroller = useRef<HTMLDivElement>(null);
   const isVideo = interview.media?.content_type.startsWith("video/") ?? false;
@@ -409,7 +409,6 @@ export function TranscriptEditor({ interview }: { interview: Interview }) {
             <Stack spacing={1.5}>
               <Box
                 component={isVideo ? "video" : "audio"}
-                src={interview.media.url}
                 controls
                 playsInline
                 aria-label="Recording"

@@ -84,6 +84,16 @@ export const StorageSpaceSchema = z.object({
   max_upload_bytes: z.number().int(),
 }) satisfies z.ZodType<Schemas["StorageSpace"]>;
 
+export const InterviewCountsSchema = z.object({
+  items: z.array(
+    z.object({
+      status: z.enum(["processing", "done", "failed"]),
+      visibility: z.enum(["public", "private"]),
+      count: z.number().int(),
+    }),
+  ),
+}) satisfies z.ZodType<Schemas["InterviewCounts"]>;
+
 export const AdminSchema = z.object({
   id: z.number().int(),
   email: z.string(),
@@ -151,4 +161,5 @@ export const RerunConflictSchema = z.object({
 });
 
 export type Job = z.infer<typeof JobListSchema>["items"][number];
+export type InterviewCounts = z.infer<typeof InterviewCountsSchema>;
 export type Moment = z.infer<typeof SearchResultsSchema>["items"][number];

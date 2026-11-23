@@ -1,5 +1,6 @@
 import type { FirebaseWebConfig } from "../config";
 import { SignInError, type AuthClient } from "./authClient";
+import { singleFlight } from "./singleFlight";
 
 const errorCode = (error: unknown) =>
   typeof error === "object" && error !== null && "code" in error ? error.code : null;
@@ -23,7 +24,8 @@ export async function createFirebaseAuthClient(config: FirebaseWebConfig): Promi
                 uid: user.uid,
                 email: user.email,
                 emailVerified: user.emailVerified,
-                getIdToken: () => user.getIdToken(),
+                // Every query asks for a token; share one refresh when it has expired.
+                getIdToken: singleFlight(() => user.getIdToken()),
               }
             : null,
         );

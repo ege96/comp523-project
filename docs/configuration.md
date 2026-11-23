@@ -40,7 +40,7 @@ The API and worker must use the same embedding settings, or search won't find th
 |---|---|---|---|
 | `FIREBASE_PROJECT_ID` | none | | Firebase project whose sign-ins are accepted. Unset: admin requests get 503. Must match the web's `VITE_FIREBASE_PROJECT_ID` |
 | `MEDIA_URL_SECRET` | random per process | yes | Signs expiring media links. Set the same value on every API pod |
-| `MEDIA_URL_TTL_SECONDS` | `21600` (6 h) | | How long a media link works |
+| `MEDIA_URL_TTL_SECONDS` | `21600` (6 h) | | How long a media link works at least. Expiry is rounded up to the next hour, so fetches within the same hour get the same link and players don't reload |
 | `MAX_UPLOAD_BYTES` | 10 GiB | | Largest upload; keep it below the media volume's free space |
 | `UPLOAD_CHUNK_MAX_BYTES` | 64 MiB | | Largest single tus PATCH |
 | `UPLOAD_FREE_SPACE_MARGIN_BYTES` | 1 GiB | | Space an upload must leave free on the media volume (room for playback copies); larger uploads are refused |
