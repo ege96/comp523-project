@@ -11,6 +11,7 @@ import shutil
 import uuid
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
@@ -26,6 +27,11 @@ class MediaStore(Protocol):
         ...
 
     def delete(self, key: str) -> None: ...
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete every object whose key starts with `prefix/`, such as all of one interview's
+        files. Deleting what isn't there is not an error."""
+        ...
 
 
 class LocalMediaStore:
@@ -86,6 +92,38 @@ class LocalMediaStore:
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
+
+    def delete_prefix(self, prefix: str) -> None:
+        shutil.rmtree(self._path(prefix), ignore_errors=False, onexc=_ignore_missing)
+
+    def folders(self, prefix: str) -> Iterator["StoredFolder"]:
+        """The folders directly under `prefix` (one level of the key path), for sweeping
+        leftovers. Local disk only."""
+        parent = self._path(prefix)
+        if not parent.is_dir():
+            return
+        for child in parent.iterdir():
+            try:
+                if not child.is_dir():
+                    continue
+                files = [f.stat() for f in child.rglob("*") if f.is_file()]
+                changed = max([child.stat().st_mtime, *(f.st_mtime for f in files)])
+            except FileNotFoundError:
+                continue  # deleted meanwhile
+            yield StoredFolder(child.name, changed, sum(f.st_size for f in files))
+
+
+@dataclass(frozen=True)
+class StoredFolder:
+    name: str
+    changed: float  # when anything in it last changed, as a Unix time
+    size_bytes: int
+
+
+def _ignore_missing(_function: object, _path: str, error: BaseException) -> None:
+    """For `rmtree`: something already gone is fine, anything else is a real failure."""
+    if not isinstance(error, FileNotFoundError):
+        raise error
 
 
 def file_sha256(path: Path) -> str:

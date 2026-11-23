@@ -20,6 +20,10 @@ export const tokens = {
   inkMuted: "#635d57",
   rule: "#e2dbd3",
   ruleStrong: "#8a8178",
+  // Brick red for destructive actions and failures: redder than the terracotta, so Delete
+  // doesn't look like Publish, but warm enough to sit with it (MUI's stock red doesn't).
+  brick: "#ab2a20",
+  brickDeep: "#8a2019",
   // Find-in-page matches, like a highlighter on paper.
   mark: "#f4d58d",
   // "You are here": the line opened from a search, or the one playing.
@@ -37,6 +41,7 @@ export const theme = createTheme({
     text: { primary: tokens.ink, secondary: tokens.inkMuted },
     divider: tokens.rule,
     warning: { main: "#9a5b00" },
+    error: { main: tokens.brick, dark: tokens.brickDeep, contrastText: "#ffffff" },
   },
   shape: { borderRadius: 4 },
   typography: {

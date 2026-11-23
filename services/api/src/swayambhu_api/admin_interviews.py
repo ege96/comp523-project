@@ -1,17 +1,18 @@
-"""Admin-only interview routes: publish or hide an interview, correct its details, and follow
-or re-run its processing. Recordings arrive through `uploads` (tus).
+"""Admin-only interview routes: publish or hide an interview, correct its details, follow or
+re-run its processing, and delete it. Recordings arrive through `uploads` (tus).
 
 Every route here takes `CurrentAdmin`, so anonymous visitors get a 401 and signed-in
 non-admins a 403 before anything else runs.
 """
 
+import logging
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import exists, func, or_, select, update
+from sqlalchemy import delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs, transcripts
 from swayambhu_core.languages import sync_interview_languages
@@ -20,12 +21,18 @@ from swayambhu_core.models import (
     InterviewRow,
     JobRow,
     LanguageRow,
+    MediaFileRow,
     SegmentRow,
 )
+from swayambhu_core.recordings import interview_prefix
+from swayambhu_core.storage import LocalMediaStore
 
 from swayambhu_api.auth import CurrentAdmin
+from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DbSession
 from swayambhu_api.recording_dates import DATE_PATTERN, recorded_date
+
+log = logging.getLogger("swayambhu_api")
 
 router = APIRouter()
 
@@ -246,3 +253,84 @@ def rerun(interview_id: uuid.UUID, body: Rerun, _admin: CurrentAdmin, session: D
         interview.status_detail = _WAITING[body.step]
     jobs.enqueue(session, kind, interview_id, jobs.Priority.ADMIN)
     session.commit()
+
+
+@router.delete(
+    "/api/interviews/{interview_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={409: {"description": "The interview is published; unpublish it first"}},
+)
+def delete_interview(
+    interview_id: uuid.UUID,
+    admin: CurrentAdmin,
+    session: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> None:
+    """Delete an interview for good: its recording and playback copy, transcript, corrections,
+    English, search entries and processing jobs, and its interviewee if no other interview
+    names them. There is no undo.
+
+    A published interview is refused, so deleting takes two deliberate steps and never removes
+    a page a visitor may have open. The rows go in one transaction (the foreign keys cascade);
+    the files go after it commits, so a failed commit never leaves rows pointing at missing
+    files. A file that can't be removed is logged and left for the worker's `sweep_media`
+    command. A step the worker is running for the interview loses its job row, so it finds
+    its claim gone and writes nothing more.
+    """
+    interview = session.scalar(
+        select(InterviewRow).where(InterviewRow.id == interview_id).with_for_update()
+    )
+    if interview is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Interview not found")
+    if interview.visibility == "public":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "The interview is published. Unpublish it first."
+        )
+    lines, corrected = session.execute(
+        select(
+            func.count(),
+            func.count().filter(
+                or_(SegmentRow.original_edited.is_not(None), SegmentRow.english_edited.is_not(None))
+            ),
+        ).where(SegmentRow.interview_id == interview_id)
+    ).one()
+    stored_bytes = session.scalar(
+        select(func.coalesce(func.sum(MediaFileRow.size_bytes), 0)).where(
+            MediaFileRow.interview_id == interview_id
+        )
+    )
+    interviewee_id = interview.interviewee_id
+    session.execute(delete(InterviewRow).where(InterviewRow.id == interview_id))
+    if interviewee_id is not None:
+        # Names aren't unique, so a person no interview names is just a dangling name.
+        session.execute(
+            delete(IntervieweeRow).where(
+                IntervieweeRow.id == interviewee_id,
+                ~exists().where(InterviewRow.interviewee_id == interviewee_id),
+            )
+        )
+    session.commit()
+
+    files_removed = True
+    try:
+        LocalMediaStore(settings.media_root).delete_prefix(interview_prefix(interview_id))
+    except OSError:
+        files_removed = False
+        log.exception("could not remove the files of deleted interview %s", interview_id)
+    # Ids and counts only: titles and names may be personal, and logs travel further.
+    log.info(
+        "admin %s deleted interview %s",
+        admin.id,
+        interview_id,
+        extra={
+            "fields": {
+                "event": "interview_deleted",
+                "admin_id": admin.id,
+                "interview_id": str(interview_id),
+                "lines": lines,
+                "corrected_lines": corrected,
+                "stored_bytes": stored_bytes,
+                "files_removed": files_removed,
+            }
+        },
+    )

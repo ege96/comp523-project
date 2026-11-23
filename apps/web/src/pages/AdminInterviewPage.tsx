@@ -5,6 +5,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Collapse from "@mui/material/Collapse";
 import Container from "@mui/material/Container";
 import LinearProgress from "@mui/material/LinearProgress";
+import Link from "@mui/material/Link";
 import Paper from "@mui/material/Paper";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
@@ -19,6 +20,7 @@ import {
   PROCESSING_POLL_MS,
   useUpdateInterview,
 } from "../admin/api";
+import { DELETE_SECTION_ID, DeleteInterview } from "../admin/DeleteInterview";
 import { DetailsDialog } from "../admin/DetailsDialog";
 import { PublishButton } from "../admin/PublishButton";
 import { isLive } from "../admin/live";
@@ -78,7 +80,7 @@ export function AdminInterviewPage() {
         ) : error ? (
           <Alert severity="error">
             {error instanceof ApiError && error.status === 404
-              ? "This interview doesn't exist."
+              ? "This interview doesn't exist. It may have been deleted, or the link is wrong."
               : "The interview couldn't be loaded. Please try again."}
           </Alert>
         ) : (
@@ -150,6 +152,8 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
       <Box id="transcript" sx={{ scrollMarginTop: 16 }}>
         <TranscriptEditor interview={interview} />
       </Box>
+
+      <DeleteInterview interview={interview} />
     </>
   );
 }
@@ -195,6 +199,16 @@ const ACCENT = {
   published: "#4d7f52",
 } as const satisfies Record<Queue, string>;
 
+/** For a wrong upload still being processed: deleting it is how to stop it. */
+function WrongFile() {
+  return (
+    <>
+      {" "}
+      Wrong file? <Link href={`#${DELETE_SECTION_ID}`}>Delete this interview</Link>.
+    </>
+  );
+}
+
 /** The one thing to do now, in a sentence, with its button. */
 function anyActive(jobs: readonly Job[] | undefined): boolean {
   return jobs?.some((j) => j.state === "queued" || j.state === "running") ?? false;
@@ -239,7 +253,7 @@ function NextStep({
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {unreadable
-                  ? "The recording's file couldn't be read. Retrying sometimes works; if not, convert the file (for example to MP4 or MP3) and upload it as a new interview. "
+                  ? "The recording's file couldn't be read. Retrying sometimes works; if not, convert the file (for example to MP4 or MP3), upload it as a new interview and delete this one. "
                   : "Retrying often works. "}
                 If it keeps stopping, the steps below have details to pass on to whoever looks after
                 the archive.
@@ -284,6 +298,7 @@ function NextStep({
                   : null}
                 Long recordings take a while. You can leave this page; it carries on without you.
                 Meanwhile, check the details are right.
+                {interview.visibility === "private" ? <WrongFile /> : null}
               </Typography>
               <LinearProgress aria-label="Processing" sx={{ maxWidth: 320 }} />
             </>

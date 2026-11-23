@@ -530,6 +530,10 @@ describe("admin page", () => {
 
     cleanup();
     renderApp("/admin/interviews/missing", fakeAuthClient({ signedIn: true }));
-    expect(await screen.findByText("This interview doesn't exist.")).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "This interview doesn't exist. It may have been deleted, or the link is wrong.",
+      ),
+    ).toBeTruthy();
   });
 });

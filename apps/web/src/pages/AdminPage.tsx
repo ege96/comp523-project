@@ -1,9 +1,10 @@
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Container from "@mui/material/Container";
 import Stack from "@mui/material/Stack";
 import Typography from "@mui/material/Typography";
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, useRouterState } from "@tanstack/react-router";
 
 import { AdminInterviewList } from "../admin/AdminInterviewList";
 import { UploadCard } from "../admin/UploadCard";
@@ -16,6 +17,8 @@ const route = getRouteApi("/admin/");
 export function AdminPage() {
   const { state } = useAuth();
   const { view, page = 1 } = route.useSearch();
+  // Set by the delete dialog in the history entry (not the URL, which would keep the title).
+  const deleted = useRouterState({ select: (s) => s.location.state.deletedTitle });
   const navigate = route.useNavigate();
   return (
     <Container sx={{ py: { xs: 4, md: 6 } }}>
@@ -48,6 +51,18 @@ export function AdminPage() {
             </Button>
           </Stack>
         </Stack>
+        {deleted ? (
+          <Alert
+            severity="success"
+            role="status"
+            onClose={() => {
+              void navigate({ search: (prev) => prev, state: {}, replace: true });
+            }}
+          >
+            Deleted “{deleted}”. Its recording, transcript and corrections are gone from the
+            archive.
+          </Alert>
+        ) : null}
         <Box
           sx={{
             display: "grid",
