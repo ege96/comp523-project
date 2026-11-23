@@ -126,7 +126,7 @@ export function InterviewPage() {
   const linkMs = hereLine?.start_ms ?? playing?.ms ?? t ?? 0;
 
   return (
-    <Container sx={{ pt: { xs: 2, md: 4 } }}>
+    <Container maxWidth="xl" sx={{ pt: { xs: 2, md: 4 } }}>
       <Stack
         direction="row"
         spacing={2}
@@ -169,19 +169,20 @@ export function InterviewPage() {
         <Typography color="text.secondary">{summaryLine(interview.data)}</Typography>
         <InterviewChips interview={interview.data} />
       </Stack>
-      {/* Phones: one column, the player pinned while the transcript scrolls (audio only: a
-          pinned video would cover the text). Wide screens: player and details in a side
-          column as tall as the transcript, where only the player stays pinned, so long
-          details never end up out of reach below the screen. The aside dissolves into the
-          column on phones so the player can pin. */}
+      {/* Phones: one column, the player and its copy-link button pinned while the transcript
+          scrolls (audio only: a pinned video would cover the text, so its button floats at
+          the bottom of the screen instead). Wide screens: player and details in a side
+          column as tall as the transcript, where only the player and the copy-link button
+          stay pinned, so long details never end up out of reach below the screen. The aside
+          dissolves into the column on phones so the player can pin. */}
       <Box
         sx={{
           display: { xs: "block", md: "grid" },
-          columnGap: 6,
-          // A video gets about half the width (more on wide screens) so faces and gestures
-          // are visible; audio needs only a slim column.
+          columnGap: { md: 4, lg: 6 },
+          // A video gets three fifths of the width so faces and gestures are visible; audio
+          // needs only a slim column.
           gridTemplateColumns: video
-            ? { md: "minmax(0, 1fr) minmax(0, 1fr)", lg: "minmax(0, 7fr) minmax(0, 6fr)" }
+            ? { md: "minmax(0, 3fr) minmax(0, 2fr)" }
             : "minmax(0, 20rem) minmax(0, 1fr)",
           alignItems: "start",
         }}
@@ -221,8 +222,8 @@ export function InterviewPage() {
                 setMediaFailed(false);
               }}
             />
+            <CopyTimeLink ms={linkMs} floatOnPhone={video} />
           </Box>
-          <CopyTimeLink ms={linkMs} />
           <Box sx={{ mt: { xs: 3, md: 4 }, mb: { xs: 4, md: 0 } }}>
             <AboutRecording interview={interview.data} />
           </Box>
@@ -403,8 +404,9 @@ function Player({
             // The file's own shape once it loads (a phone video may be upright), 16:9 until
             // then so the page doesn't jump.
             aspectRatio: "auto 16 / 9",
-            // Never taller than most of the screen, so the transcript stays reachable.
-            maxHeight: "70vh",
+            // Never taller than the screen less the page's top and the copy-link button, so
+            // an upright video stays whole while pinned and the transcript stays reachable.
+            maxHeight: { xs: "70vh", md: "calc(100vh - 11rem)" },
             bgcolor: "black",
           }}
         >
@@ -467,7 +469,8 @@ function CaptionTrack({ label, srcLang, vtt, isDefault }: Caption) {
   return <track ref={ref} kind="captions" label={label} srcLang={srcLang} default={isDefault} />;
 }
 
-function CopyTimeLink({ ms }: { ms: number }) {
+/** Pinned with the player. On a phone a video isn't pinned, so there the button floats. */
+function CopyTimeLink({ ms, floatOnPhone }: { ms: number; floatOnPhone: boolean }) {
   const { pathname } = useLocation();
   const [note, setNote] = useState("");
   const copy = async () => {
@@ -480,7 +483,36 @@ function CopyTimeLink({ ms }: { ms: number }) {
     }
   };
   return (
-    <Stack direction="row" sx={{ alignItems: "center", flexWrap: "wrap", columnGap: 1.5, mt: 1 }}>
+    <Stack
+      direction="row"
+      sx={[
+        { alignItems: "center", flexWrap: "wrap", columnGap: 1.5 },
+        floatOnPhone
+          ? {
+              position: { xs: "fixed", md: "static" },
+              bottom: { xs: 12 },
+              left: { xs: "50%" },
+              transform: { xs: "translateX(-50%)", md: "none" },
+              maxWidth: { xs: "calc(100% - 32px)", md: "none" },
+              zIndex: 5,
+              bgcolor: { xs: "background.paper", md: "transparent" },
+              border: { xs: 1, md: 0 },
+              borderColor: "divider",
+              borderRadius: { xs: 4, md: 0 },
+              boxShadow: { xs: 3, md: "none" },
+              px: { xs: 1.5, md: 0 },
+              mt: { md: 1 },
+            }
+          : {
+              // The audio player's bar: one more line under it, full width.
+              bgcolor: { xs: "background.default", md: "transparent" },
+              borderBottom: { xs: 1, md: 0 },
+              borderColor: "divider",
+              px: { xs: 2, sm: 3, md: 0 },
+              mt: { md: 1 },
+            },
+      ]}
+    >
       <Button
         size="small"
         onClick={() => {
