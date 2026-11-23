@@ -122,7 +122,7 @@ The worker cuts the recording into 5 to 20 second pieces at quiet moments and se
 - A step the worker is running for the interview loses its job row, so its next heartbeat or commit finds the claim gone and it writes nothing. A playback copy it already stored is deleted by the same failed commit.
 - The API logs one `interview_deleted` line with the admin id, interview id and counts, never the title or names.
 
-**Leftover folders.** `python -m swayambhu_worker.sweep_media` lists folders under `interviews/` that no interview owns and that haven't changed for a day (`--min-age-hours`), with their sizes. `--delete` removes them. A failed file removal leaves such folders, and so does restoring or resetting the database without the media volume. Folders whose name isn't an interview id are listed but never deleted.
+**Leftover folders.** `python -m swayambhu_worker.sweep_media` lists folders under `interviews/` that no interview owns, with their sizes and when they last changed. `--delete` removes them. An upload stores its file a moment before its interview is committed, so don't run `--delete` while recordings are being uploaded. A failed file removal leaves such folders, and so does restoring or resetting the database without the media volume. Folders whose name isn't an interview id are listed but never deleted.
 
 ### Live admin updates
 

@@ -7,9 +7,9 @@ volume. Run it where the worker runs, with the same settings:
     python -m swayambhu_worker.sweep_media            # list leftovers, change nothing
     python -m swayambhu_worker.sweep_media --delete   # delete them; there is no undo
 
-Only folders untouched for `--min-age-hours` (default 24) count, so an upload being finished
-right now (its file is stored a moment before its interview is committed) is never touched.
-Folders whose name isn't an interview id are listed but never deleted.
+An upload stores its file a moment before its interview is committed, so don't run `--delete`
+while recordings are being uploaded. Folders whose name isn't an interview id are listed but
+never deleted.
 """
 
 import argparse
@@ -34,11 +34,9 @@ class Leftover:
     interview_id: uuid.UUID | None  # None: the name isn't an interview id, so it's kept
 
 
-def find_leftovers(
-    session: Session, folders: Iterable[StoredFolder], *, older_than: float
-) -> list[Leftover]:
-    """Folders changed before `older_than` (a Unix time) that no interview row owns."""
-    old = [f for f in folders if f.changed < older_than]
+def find_leftovers(session: Session, folders: Iterable[StoredFolder]) -> list[Leftover]:
+    """Folders that no interview row owns."""
+    old = list(folders)
     ids: dict[str, uuid.UUID | None] = {}
     for folder in old:
         try:
@@ -71,19 +69,12 @@ def _size(n: int) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--delete", action="store_true", help="delete them (default: list)")
-    parser.add_argument(
-        "--min-age-hours", type=float, default=24.0, help="skip folders changed more recently"
-    )
     args = parser.parse_args(argv)
 
     settings = WorkerSettings()
     store = LocalMediaStore(settings.media_root)
     with session_factory(settings)() as session:
-        leftovers = find_leftovers(
-            session,
-            store.folders(INTERVIEWS_PREFIX),
-            older_than=time.time() - args.min_age_hours * 3600,
-        )
+        leftovers = find_leftovers(session, store.folders(INTERVIEWS_PREFIX))
     freed = 0
     for leftover in leftovers:
         folder = leftover.folder

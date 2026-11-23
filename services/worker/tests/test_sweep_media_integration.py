@@ -26,7 +26,7 @@ def _folder(root: Path, name: str, *, age_days: float) -> None:
     os.utime(folder, (when, when))
 
 
-def test_only_old_folders_without_an_interview_are_leftovers(
+def test_folders_without_an_interview_are_leftovers(
     new_session: SessionFactory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:  # fmt: skip
@@ -39,7 +39,7 @@ def test_only_old_folders_without_an_interview_are_leftovers(
     orphan, fresh = uuid.uuid4(), uuid.uuid4()
     _folder(root, str(owned_id), age_days=5)
     _folder(root, str(orphan), age_days=5)
-    _folder(root, str(fresh), age_days=0)  # maybe an upload being finished right now
+    _folder(root, str(fresh), age_days=0)
     _folder(root, "notes", age_days=5)
     monkeypatch.setenv("MEDIA_ROOT", str(root))  # DATABASE_URL is already the test database
 
@@ -47,11 +47,12 @@ def test_only_old_folders_without_an_interview_are_leftovers(
     out = capsys.readouterr().out
     assert f"leftover {orphan}  2.0 KiB" in out
     assert "kept     notes" in out
-    assert str(owned_id) not in out and str(fresh) not in out
-    assert "1 leftover folder(s), 2.0 KiB" in out
+    assert f"leftover {fresh}" in out  # however recently it changed
+    assert str(owned_id) not in out
+    assert "2 leftover folder(s), 4.0 KiB" in out
     assert (root / "interviews" / str(orphan)).is_dir()
 
     sweep_media.main(["--delete"])
     names = sorted(f.name for f in LocalMediaStore(root).folders("interviews"))
-    assert names == sorted([str(owned_id), str(fresh), "notes"])
-    assert "Deleted 1 folder(s), 2.0 KiB" in capsys.readouterr().out
+    assert names == sorted([str(owned_id), "notes"])
+    assert "Deleted 2 folder(s), 4.0 KiB" in capsys.readouterr().out
