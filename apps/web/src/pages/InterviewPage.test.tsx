@@ -268,11 +268,17 @@ describe("interview viewer: links", () => {
     const write = vi.spyOn(navigator.clipboard, "writeText");
     await user.click(screen.getByRole("button", { name: "Copy link to this time" }));
     expect(write).toHaveBeenCalledWith(`${window.location.origin}/interviews/${id}?t=10000`);
-    expect(await screen.findByText("Link to 0:10 copied")).toBeTruthy();
+    // The button says so itself, and screen readers hear which time was copied.
+    expect(await screen.findByRole("button", { name: "Link copied" })).toBeTruthy();
+    expect(screen.getByText("Link to 0:10 copied")).toBeTruthy();
+    // Then it reads as before, so no note lingers.
+    expect(
+      await screen.findByRole("button", { name: "Copy link to this time" }, { timeout: 3000 }),
+    ).toBeTruthy();
 
     write.mockRejectedValueOnce(new Error("denied"));
     await user.click(screen.getByRole("button", { name: "Copy link to this time" }));
-    expect(await screen.findByText(/couldn't be copied/)).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toMatch(/couldn't be copied/);
   });
 
   it("goes back to the results it came from, or to all interviews", async () => {
