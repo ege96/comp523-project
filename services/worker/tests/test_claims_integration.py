@@ -8,9 +8,10 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from swayambhu_core import jobs
-from swayambhu_core.models import JobRow, MediaFileRow, SegmentRow
+from swayambhu_core.models import InterviewRow, JobRow, MediaFileRow, SegmentRow
+from swayambhu_core.recordings import interview_prefix
 from swayambhu_core.storage import LocalMediaStore
 from swayambhu_providers import AudioClip, TranscribedSegment
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranslator
@@ -161,6 +162,39 @@ def test_a_taken_over_playback_job_keeps_the_current_copy(
 
     assert playback_row(new_session, interview_id).storage_key == old.storage_key
     assert playback_files(tmp_path, interview_id) == [Path(old.storage_key).name]
+
+
+class DeletedBeforePut(LocalMediaStore):
+    """An admin deletes the interview (rows, then its folder) while playback is being made."""
+
+    def __init__(self, root: Path, new_session: SessionFactory, interview_id: uuid.UUID) -> None:
+        super().__init__(root)
+        self.new_session = new_session
+        self.interview_id = interview_id
+
+    def put(self, key: str, source: Path, *, move: bool = False) -> None:
+        with self.new_session() as session:
+            session.execute(delete(InterviewRow).where(InterviewRow.id == self.interview_id))
+            session.commit()
+        self.delete_prefix(interview_prefix(self.interview_id))
+        super().put(key, source, move=move)
+
+
+def test_a_playback_job_for_a_deleted_interview_leaves_no_file(
+    new_session: SessionFactory, store: LocalMediaStore, tmp_path: Path
+) -> None:
+    interview_id, runner = start(new_session, store, tmp_path)
+    drain(runner)
+    with new_session() as session:
+        jobs.enqueue(session, "playback", interview_id)
+        session.commit()
+
+    deleting = DeletedBeforePut(tmp_path / "media", new_session, interview_id)
+    assert JobRunner(new_session, runner_providers(), deleting, LEASE).handle_one()
+
+    assert playback_files(tmp_path, interview_id) == []
+    with new_session() as session:
+        assert session.scalar(select(func.count()).select_from(JobRow)) == 0
 
 
 def test_reindex_is_not_held_back_by_playback_but_waits_for_indexing(

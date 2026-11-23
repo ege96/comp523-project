@@ -33,6 +33,7 @@ from swayambhu_core.models import (
     SearchChunkRow,
     SegmentRow,
 )
+from swayambhu_core.recordings import interview_prefix
 from swayambhu_core.storage import MediaStore, file_sha256
 from swayambhu_core.text import english_is_stale, translation_fingerprint
 from swayambhu_providers import (
@@ -611,7 +612,7 @@ def playback(
     session.commit()
     with store.local_copy(original.storage_key) as source, tempfile.TemporaryDirectory() as tmp:
         made, content_type = audio.make_playback(source, Path(tmp) / "playback", heartbeat)
-        key = f"interviews/{interview_id}/playback-{uuid.uuid4().hex}{made.suffix}"
+        key = f"{interview_prefix(interview_id)}/playback-{uuid.uuid4().hex}{made.suffix}"
         size = made.stat().st_size
         digest = file_sha256(made)
         try:

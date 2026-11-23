@@ -342,3 +342,42 @@ export function useRerun(interviewId: string) {
       ),
   });
 }
+
+/** Deleting was refused because the interview is published (visitors could be on it). */
+export class StillPublished extends Error {
+  constructor() {
+    super("Unpublish the interview before deleting it");
+    this.name = "StillPublished";
+  }
+}
+
+/**
+ * Delete an interview for good: its recording, transcript, corrections and search entries.
+ * The API refuses a published one (`StillPublished`). Afterwards everything cached about it
+ * is dropped rather than refetched, so going back never flashes the deleted page.
+ */
+export function useDeleteInterview(interviewId: string) {
+  const { viewer } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const token = await viewer.getToken();
+      const url = `${API_BASE_URL}/api/interviews/${encodeURIComponent(interviewId)}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 409) throw new StillPublished();
+      // Already gone (another admin, another tab): the outcome the admin wanted.
+      if (!res.ok && res.status !== 404) throw new ApiError(res.status, url);
+    },
+    onSuccess: async () => {
+      queryClient.removeQueries({ queryKey: ["interviews", viewer.key, interviewId] });
+      await Promise.all(
+        ["interviews", "search", "storage"].map((prefix) =>
+          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
+        ),
+      );
+    },
+  });
+}

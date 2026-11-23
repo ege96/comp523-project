@@ -150,6 +150,8 @@ Changing `MEDIA_URL_SECRET` only makes open media links stop working until the p
 
 **Change a setting** (transcription model or languages, Firebase project, branch). Edit `app.env`, re-run the deploy command (§3.3), then `oc rollout restart deploy/api deploy/worker`. Settings `api` and `worker` share live in one ConfigMap, `app-settings`, so the two can't drift apart.
 
+**Free space taken by leftovers.** `oc exec deploy/worker -- python -m swayambhu_worker.sweep_media` lists media folders no interview owns, for example after the database was restored or reset without the media volume. Check the list, then run it again with `--delete` while nobody is uploading; there is no undo.
+
 **Change the search model.** Change `EMBEDDING_MODEL` as above (the images must include the model; see the README), then run `oc exec deploy/worker -- python -m swayambhu_worker.reindex` (add `--dry-run` first to see what it would do). Keyword search keeps working while it runs.
 
 ## 5. Backups and restore

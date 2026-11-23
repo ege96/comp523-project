@@ -39,7 +39,20 @@ export interface paths {
         get: operations["get_interview_api_interviews__interview_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Interview
+         * @description Delete an interview for good: its recording and playback copy, transcript, corrections,
+         *     English, search entries and processing jobs, and its interviewee if no other interview
+         *     names them. There is no undo.
+         *
+         *     A published interview is refused, so deleting takes two deliberate steps and never removes
+         *     a page a visitor may have open. The rows go in one transaction (the foreign keys cascade);
+         *     the files go after it commits, so a failed commit never leaves rows pointing at missing
+         *     files. A file that can't be removed is logged and left for the worker's `sweep_media`
+         *     command. A step the worker is running for the interview loses its job row, so it finds
+         *     its claim gone and writes nothing more.
+         */
+        delete: operations["delete_interview_api_interviews__interview_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -927,6 +940,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InterviewDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_interview_api_interviews__interview_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The interview is published; unpublish it first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

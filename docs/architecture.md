@@ -107,9 +107,22 @@ The worker cuts the recording into 5 to 20 second pieces at quiet moments and se
 - Publish or hide: `PATCH /api/interviews/{id}` `{"visibility": "public"}`.
 - Follow processing: `GET /api/interviews/{id}/jobs`. List by status: `GET /api/interviews?status=processing`.
 - Count by status and visibility: `GET /api/admin/interview-counts` (one request for the admin page's tab counts).
+- Delete for good: `DELETE /api/interviews/{id}` (details below).
 - Live updates: admin pages keep `GET /api/admin/changes` open, a Server-Sent Events stream of which interviews changed (details below).
 - Correct a line: `PATCH /api/interviews/{id}/segments/{seq}`. The machine text is kept beside the edit; `GET /api/interviews/{id}/transcript` shows both.
 - Editing an original line's words makes its English out of date. A `retranslate` job refreshes those lines in one batch `RETRANSLATE_DELAY_SECONDS` after the last edit, or at once with `POST /api/interviews/{id}/retranslate`. Spacing and punctuation alone don't count, and an admin's English edit is never overwritten; it is flagged for checking instead.
+
+### Deleting an interview
+
+`DELETE /api/interviews/{id}` removes an interview for good; there is no undo or trash.
+
+- A published interview is refused with 409, so an admin unpublishes first and never removes a page a visitor has open.
+- One transaction deletes the interview row. Its lines (corrections included), search chunks and vectors, language tags, jobs and media rows go with it through `ON DELETE CASCADE`. Its interviewee goes too when no other interview names them.
+- After the commit, the API deletes the interview's storage prefix `interviews/<id>/` (original and playback copy). If that fails, the error is logged and the folder is left for `sweep_media` (below).
+- A step the worker is running for the interview loses its job row, so its next heartbeat or commit finds the claim gone and it writes nothing. A playback copy it already stored is deleted by the same failed commit.
+- The API logs one `interview_deleted` line with the admin id, interview id and counts, never the title or names.
+
+**Leftover folders.** `python -m swayambhu_worker.sweep_media` lists folders under `interviews/` that no interview owns, with their sizes and when they last changed. `--delete` removes them. An upload stores its file a moment before its interview is committed, so don't run `--delete` while recordings are being uploaded. A failed file removal leaves such folders, and so does restoring or resetting the database without the media volume. Folders whose name isn't an interview id are listed but never deleted.
 
 ### Live admin updates
 
