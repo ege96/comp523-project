@@ -18,6 +18,7 @@ import { UploadIcon } from "../components/icons";
 import { TextLink } from "../components/links";
 import { formatBytes } from "../format";
 import { adminQueries } from "./api";
+import { isLive } from "./live";
 import { datePartsError, partsToText } from "./recordedOn";
 import { RecordedOnField } from "./RecordedOnField";
 import { startUpload, uploadErrorMessage, type UploadHandle } from "./upload";
@@ -156,10 +157,10 @@ export function UploadCard() {
     try {
       const interviewId = await Promise.race([handle.done, stop]);
       setRow(row.key, { phase: "done", interviewId });
+      // While live, the new interview arrives as a change and refreshes the lists itself.
+      const prefixes = isLive() ? ["search"] : ["interviews", "search"];
       await Promise.all(
-        ["interviews", "search"].map((prefix) =>
-          queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] }),
-        ),
+        prefixes.map((prefix) => queryClient.invalidateQueries({ queryKey: [prefix, viewer.key] })),
       );
     } catch (error) {
       setRow(

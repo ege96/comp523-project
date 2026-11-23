@@ -78,6 +78,7 @@ def send(client: TestClient, location: str, offset: int, chunk: bytes) -> Respon
         ("PATCH", f"/api/interviews/{uuid.uuid4()}"),
         ("GET", f"/api/interviews/{uuid.uuid4()}/jobs"),
         ("GET", "/api/storage"),
+        ("GET", "/api/admin/interview-counts"),
     ],
 )
 def test_anonymous_visitors_are_refused(
@@ -314,3 +315,27 @@ def test_finishing_is_retried_after_a_failed_commit_without_losing_the_upload(
     assert media.interview_id == interview_id
     assert (settings.media_root / media.storage_key).read_bytes() == RECORDING
     assert not staged.exists()
+
+
+@pytest.mark.integration
+def test_counts_by_status_and_visibility_include_private_interviews(
+    client: TestClient, admin: Admin, db_session: Session
+) -> None:
+    db_session.add_all(
+        [
+            InterviewRow(title="a", status="done", visibility="public"),
+            InterviewRow(title="b", status="done", visibility="private"),
+            InterviewRow(title="c", status="done", visibility="private"),
+            InterviewRow(title="d", status="failed", visibility="public"),
+        ]
+    )
+    db_session.commit()
+    res = client.get("/api/admin/interview-counts")
+    assert res.status_code == 200
+    assert res.json() == {
+        "items": [
+            {"status": "done", "visibility": "private", "count": 2},
+            {"status": "done", "visibility": "public", "count": 1},
+            {"status": "failed", "visibility": "public", "count": 1},
+        ]
+    }

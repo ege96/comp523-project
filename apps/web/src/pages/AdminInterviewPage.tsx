@@ -13,7 +13,12 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRouteApi } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { adminQueries, PROCESSING_POLL_MS, useUpdateInterview } from "../admin/api";
+import {
+  adminQueries,
+  NO_FOCUS_REFETCH,
+  PROCESSING_POLL_MS,
+  useUpdateInterview,
+} from "../admin/api";
 import { DetailsDialog } from "../admin/DetailsDialog";
 import { PublishButton } from "../admin/PublishButton";
 import { isLive } from "../admin/live";
@@ -53,6 +58,7 @@ export function AdminInterviewPage() {
     enabled: viewer.ready,
     refetchInterval: (q) =>
       !isLive() && (q.state.data?.status === "processing" || busy) ? PROCESSING_POLL_MS : false,
+    ...NO_FOCUS_REFETCH,
   });
 
   return (
@@ -150,8 +156,8 @@ function Workspace({ interview }: { interview: InterviewDetail }) {
 
 /**
  * The transcript is loaded once and is empty until transcription finishes, so re-read it when
- * the interview moves on (transcribed, translated, failed). Live updates do this too; this
- * covers the polling fallback.
+ * the interview moves on (transcribed, translated, failed). Only for the polling fallback:
+ * live updates refresh it with the interview.
  */
 function useRefreshTranscriptOnProgress(interview: InterviewDetail) {
   const { viewer } = useAuth();
@@ -161,6 +167,8 @@ function useRefreshTranscriptOnProgress(interview: InterviewDetail) {
   useEffect(() => {
     if (seen.current === progress) return;
     seen.current = progress;
+    // While live, the change that moved the interview on refreshed the transcript already.
+    if (isLive()) return;
     void queryClient.invalidateQueries({
       queryKey: adminQueries.transcript(viewer, interview.id).queryKey,
     });

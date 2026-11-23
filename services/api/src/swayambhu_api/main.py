@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Response, status
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from swayambhu_api.admin_interviews import router as admin_interviews_router
@@ -36,6 +37,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
+# /api is routed straight here, past nginx's gzip. Transcripts and search pages are JSON that
+# compresses about 4x. Starlette leaves event streams, audio and video uncompressed, so live
+# updates aren't buffered and Range requests for media still work. Added before the request
+# context, so it sits inside it and sees whole responses (and their size) from the routes.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 install_request_context(app)
 app.include_router(interviews_router)
 app.include_router(search_router)

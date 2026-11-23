@@ -7,6 +7,7 @@ import {
   nextStep,
   processingSteps,
   QUEUE_FILTERS,
+  queueCounts,
   queueOf,
   visitorGets,
 } from "./workflow";
@@ -59,6 +60,17 @@ describe("admin workflow", () => {
   it("keeps the views apart: Published is only finished, public interviews", () => {
     expect(QUEUE_FILTERS.published).toEqual({ status: "done", visibility: "public" });
     expect(QUEUE_FILTERS.processing).toEqual({ status: "processing" });
+  });
+
+  it("adds up the tab counts the same way it sorts interviews into tabs", () => {
+    expect(
+      queueCounts([
+        { status: "failed", visibility: "public", count: 1 },
+        { status: "failed", visibility: "private", count: 2 },
+        { status: "processing", visibility: "public", count: 4 },
+        { status: "done", visibility: "private", count: 8 },
+      ]),
+    ).toEqual({ attention: 3, processing: 4, ready: 8, published: 0 });
   });
 
   it("says what visitors get from publishing now, without promising what isn't there", () => {

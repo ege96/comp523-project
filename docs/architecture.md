@@ -106,6 +106,7 @@ The worker cuts the recording into 5 to 20 second pieces at quiet moments and se
 
 - Publish or hide: `PATCH /api/interviews/{id}` `{"visibility": "public"}`.
 - Follow processing: `GET /api/interviews/{id}/jobs`. List by status: `GET /api/interviews?status=processing`.
+- Count by status and visibility: `GET /api/admin/interview-counts` (one request for the admin page's tab counts).
 - Live updates: admin pages keep `GET /api/admin/changes` open, a Server-Sent Events stream of which interviews changed (details below).
 - Correct a line: `PATCH /api/interviews/{id}/segments/{seq}`. The machine text is kept beside the edit; `GET /api/interviews/{id}/transcript` shows both.
 - Editing an original line's words makes its English out of date. A `retranslate` job refreshes those lines in one batch `RETRANSLATE_DELAY_SECONDS` after the last edit, or at once with `POST /api/interviews/{id}/retranslate`. Spacing and punctuation alone don't count, and an admin's English edit is never overwritten; it is flagged for checking instead.
@@ -118,6 +119,7 @@ Admin pages change as processing moves on, without reloading or fast polling:
 2. Each API process holds one `LISTEN` connection (`swayambhu_api.live.ChangeHub`) and passes ids to every open stream. If that connection drops, it reconnects with backoff and tells streams to `resync`.
 3. `GET /api/admin/changes` (admins only) sends `ready` once listening, then `change` events with `{"interview_id": ...}`, and `resync` when updates may have been missed. FastAPI adds a keep-alive comment after 15 s of quiet, which keeps the OpenShift router (30 s idle timeout by default) from closing it. A stream ends after `LIVE_STREAM_MAX_SECONDS`, so reconnecting re-checks the sign-in, and the API stops within 10 s on a redeploy (`--timeout-graceful-shutdown`).
 4. The web app (`apps/web/src/admin/live.ts`) reads the stream with `fetch`, because `EventSource` can't send the token header. On each change it re-fetches that interview, its steps, its transcript and the admin lists through the normal routes, so the stream carries no interview data. It disconnects while the tab is hidden: browsers allow only 6 HTTP/1.1 connections per site. It reconnects with jittered backoff and falls back to 10 s polling while the stream is down.
+5. While the stream is live, admin queries don't also refetch when the tab regains focus, and a fetch already running when a change arrives is kept rather than restarted, so each change costs one read of each affected route.
 
 ## Search
 

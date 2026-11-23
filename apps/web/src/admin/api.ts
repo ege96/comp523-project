@@ -4,6 +4,7 @@ import { ApiError, getJson, interviewQueries, type Viewer } from "../api/client"
 import {
   AdminSegmentListSchema,
   AdminSegmentSchema,
+  InterviewCountsSchema,
   InterviewListSchema,
   JobListSchema,
   ReplaceResultSchema,
@@ -27,6 +28,13 @@ type Visibility = InterviewSummary["visibility"];
 
 /** How often admin screens re-ask while the worker is busy, when live updates are down. */
 export const PROCESSING_POLL_MS = 10_000;
+
+/**
+ * Admin screens don't refetch when the tab gets focus: the live stream reconnects then and
+ * refreshes everything once it is up (or polling takes over), so a focus refetch would only
+ * fetch the same data twice.
+ */
+export const NO_FOCUS_REFETCH = { refetchOnWindowFocus: false } as const;
 
 // Admin queries share the "interviews" prefix, so one invalidation refreshes public pages too.
 export const adminQueries = {
@@ -55,6 +63,18 @@ export const adminQueries = {
         !isLive() && q.state.data?.items.some((i) => i.status === "processing")
           ? PROCESSING_POLL_MS
           : false,
+      ...NO_FOCUS_REFETCH,
+    }),
+  // How many interviews of each status and visibility, for the tab counts, in one request.
+  counts: (viewer: Viewer) =>
+    queryOptions({
+      queryKey: ["interviews", viewer.key, "admin", "counts"],
+      queryFn: async ({ signal }) =>
+        getJson("/api/admin/interview-counts", InterviewCountsSchema, {
+          token: await viewer.getToken(),
+          signal,
+        }),
+      ...NO_FOCUS_REFETCH,
     }),
   jobs: (viewer: Viewer, id: string) =>
     queryOptions({
@@ -64,6 +84,7 @@ export const adminQueries = {
           token: await viewer.getToken(),
           signal,
         }),
+      ...NO_FOCUS_REFETCH,
     }),
   // Every line with its machine text and any edit, for the transcript editor.
   transcript: (viewer: Viewer, id: string) =>
@@ -79,6 +100,7 @@ export const adminQueries = {
         !isLive() && q.state.data?.items.some((line) => line.english_stale)
           ? PROCESSING_POLL_MS
           : false,
+      ...NO_FOCUS_REFETCH,
     }),
   // Room left for uploads, so a batch that won't fit is flagged before it starts.
   storage: (viewer: Viewer) =>
@@ -86,6 +108,7 @@ export const adminQueries = {
       queryKey: ["storage", viewer.key],
       queryFn: async ({ signal }) =>
         getJson("/api/storage", StorageSpaceSchema, { token: await viewer.getToken(), signal }),
+      ...NO_FOCUS_REFETCH,
     }),
 };
 
@@ -145,12 +168,15 @@ export function useUpdateInterview(interviewId: string) {
  * update are queued) and search results. The interview itself is unchanged.
  */
 function refreshAfterTextEdit(queryClient: QueryClient, viewer: Viewer, interviewId: string) {
+  const search = queryClient.invalidateQueries({ queryKey: ["search", viewer.key] });
+  // While live, the queued search update arrives as a change and refreshes the rest.
+  if (isLive()) return search;
   return Promise.all([
     queryClient.invalidateQueries({
       queryKey: interviewQueries.segments(viewer, interviewId).queryKey,
     }),
     queryClient.invalidateQueries({ queryKey: adminQueries.jobs(viewer, interviewId).queryKey }),
-    queryClient.invalidateQueries({ queryKey: ["search", viewer.key] }),
+    search,
   ]);
 }
 

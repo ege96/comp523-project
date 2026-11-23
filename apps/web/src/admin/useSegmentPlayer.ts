@@ -2,17 +2,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 
 import { interviewQueries } from "../api/client";
-import type { AdminSegment } from "../api/schemas";
+import type { AdminSegment, InterviewDetail } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
+import { usePinnedMediaUrl } from "../mediaUrl";
 
 /**
  * The transcript editor's one player. It plays the recording straight through (the editor
  * follows along), or just one line, stopping at the line's end. Spread `audioProps` onto a
- * single <audio> or <video> element.
+ * single <audio> or <video> element; it carries the media link as `src`.
  */
-export function useSegmentPlayer(interviewId: string) {
+export function useSegmentPlayer(interview: Pick<InterviewDetail, "id" | "media">) {
   const { viewer } = useAuth();
   const queryClient = useQueryClient();
+  const media = usePinnedMediaUrl(interview.media ?? undefined);
   const ref = useRef<HTMLMediaElement>(null);
   const endMs = useRef(0);
   // The line playing on its own, if any; null while playing straight through.
@@ -53,6 +55,7 @@ export function useSegmentPlayer(interviewId: string) {
 
   const audioProps = {
     ref,
+    src: media.src,
     preload: "metadata",
     // timeupdate fires a few times a second, so playback can run a moment past the line's end.
     onTimeUpdate: () => {
@@ -73,8 +76,9 @@ export function useSegmentPlayer(interviewId: string) {
     // Media links are signed and expire: fetch the interview again for a fresh one.
     onError: () => {
       setPlaying(null);
+      media.renew();
       void queryClient.invalidateQueries({
-        queryKey: interviewQueries.detail(viewer, interviewId).queryKey,
+        queryKey: interviewQueries.detail(viewer, interview.id).queryKey,
         exact: true,
       });
     },

@@ -23,6 +23,7 @@ import { InterviewChips } from "../components/InterviewChips";
 import { LinePair } from "../components/LinePair";
 import { ButtonLink, TextLink } from "../components/links";
 import { formatClock, formatRecordedOn } from "../format";
+import { usePinnedMediaUrl } from "../mediaUrl";
 import { searchOrigin } from "../searchOrigin";
 import { theme, tokens } from "../theme";
 import { finder, hasMatch, splitMatches } from "../transcriptFind";
@@ -308,6 +309,7 @@ function Player({
   onRetry: () => Promise<void>;
 }) {
   const media = interview.media;
+  const link = usePinnedMediaUrl(media ?? undefined);
   const video = media?.content_type.startsWith("video/") ?? false;
   const language = interview.primary_language?.code;
   // Where playback last was, so a retry picks up there.
@@ -331,13 +333,14 @@ function Player({
   }
   // A media fragment (#t=seconds) makes the browser start there, with no effect to run.
   const from = resumeMs ?? startMs;
-  const src = from === undefined ? media.url : `${media.url}#t=${String(from / 1000)}`;
+  const url = link.src ?? media.url;
+  const src = from === undefined ? url : `${url}#t=${String(from / 1000)}`;
   const report = (e: React.SyntheticEvent<HTMLMediaElement>) => {
     const ms = Math.round(e.currentTarget.currentTime * 1000);
     lastMs.current = ms;
     onTime(ms);
   };
-  // Media links are signed and expire; the API issues a fresh one on each load.
+  // Media links are signed and expire; a retry switches to the fresh one the refetch brings.
   const props = {
     ref,
     src,
@@ -374,6 +377,7 @@ function Player({
               onClick={() => {
                 setRetrying(true);
                 setResumeMs(lastMs.current);
+                link.renew();
                 void onRetry().finally(() => {
                   setRetrying(false);
                   setAttempt((n) => n + 1);

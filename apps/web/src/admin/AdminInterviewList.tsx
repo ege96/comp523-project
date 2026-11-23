@@ -9,7 +9,7 @@ import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 
-import type { InterviewSummary } from "../api/schemas";
+import type { InterviewCounts, InterviewSummary } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
 import { ArrowForwardIcon } from "../components/icons";
 import { ButtonLink, TextLink } from "../components/links";
@@ -22,6 +22,7 @@ import {
   QUEUE_EMPTY,
   QUEUE_FILTERS,
   QUEUE_LABELS,
+  queueCounts,
   queueOf,
   QUEUES,
   type Queue,
@@ -116,13 +117,17 @@ export function AdminInterviewList({
 }
 
 /** A tab's name with how many recordings are in it, so the admin sees where work waits. */
+const selectQueueCounts = (counts: InterviewCounts) => queueCounts(counts.items);
+
 function QueueTabLabel({ queue }: { queue: Queue }) {
   const { viewer } = useAuth();
+  // All four tabs share this one query.
   const { data } = useQuery({
-    ...adminQueries.interviews(viewer, { ...QUEUE_FILTERS[queue], limit: 1 }),
+    ...adminQueries.counts(viewer),
     enabled: viewer.ready,
+    select: selectQueueCounts,
   });
-  const count = data?.total;
+  const count = data?.[queue];
   const urgent = queue === "attention" && count !== undefined && count > 0;
   return (
     <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>

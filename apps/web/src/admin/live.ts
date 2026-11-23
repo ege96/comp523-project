@@ -22,6 +22,11 @@ const FLUSH_MS = 200;
 const GRACE_MS = 5_000;
 const RETRY_MIN_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
+/**
+ * A fetch already running when a change arrives is kept rather than cancelled and sent again;
+ * it started after the change, so its answer is current.
+ */
+const JOIN_RUNNING = { cancelRefetch: false } as const;
 
 let live = false;
 
@@ -86,11 +91,13 @@ function refreshInterviews(queryClient: QueryClient, viewer: Viewer, ids: Iterab
     ["interviews", key, "list"],
   ];
   for (const id of ids) keys.push(["interviews", key, id]);
-  return Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+  return Promise.all(
+    keys.map((queryKey) => queryClient.invalidateQueries({ queryKey }, JOIN_RUNNING)),
+  );
 }
 
 function refreshAll(queryClient: QueryClient, viewer: Viewer) {
-  return queryClient.invalidateQueries({ queryKey: ["interviews", viewer.key] });
+  return queryClient.invalidateQueries({ queryKey: ["interviews", viewer.key] }, JOIN_RUNNING);
 }
 
 /**
@@ -165,14 +172,16 @@ export function useLiveAdminUpdates(): void {
       retryTimer = setTimeout(() => void connect(), retryDelay(attempt));
     };
 
-    // A hidden tab needn't hold a connection; on return, "ready" brings the page up to date.
+    // A hidden tab needn't hold a connection (and doesn't poll). On return exactly one refresh
+    // follows: "ready" refreshes everything because `live` is still set, or, if the stream
+    // can't reconnect, the grace timer switches to polling and refreshes. Admin queries skip
+    // the focus refetch, which would fetch the same data a second time.
     const onVisibility = () => {
       if (document.visibilityState === "hidden") {
         controller?.abort();
         controller = null;
         clearTimeout(retryTimer);
         clearTimeout(graceTimer);
-        live = false;
       } else {
         void connect();
       }

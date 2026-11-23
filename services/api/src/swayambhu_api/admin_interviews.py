@@ -11,7 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import exists, or_, select, update
+from sqlalchemy import exists, func, or_, select, update
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs, transcripts
 from swayambhu_core.languages import sync_interview_languages
@@ -123,6 +123,34 @@ def update_interview(
         interview.language_confirmed = update.language
         sync_interview_languages(session, interview.id)
     session.commit()
+
+
+class InterviewCount(BaseModel):
+    status: Literal["processing", "done", "failed"]
+    visibility: Literal["public", "private"]
+    count: int
+
+
+class InterviewCounts(BaseModel):
+    # Only the combinations that have interviews; the admin page groups them into its tabs.
+    items: list[InterviewCount]
+
+
+@router.get("/api/admin/interview-counts", response_model=InterviewCounts)
+def interview_counts(_admin: CurrentAdmin, session: DbSession) -> InterviewCounts:
+    """How many interviews there are of each status and visibility, Private included, in
+    one request instead of one per tab."""
+    rows = session.execute(
+        select(InterviewRow.status, InterviewRow.visibility, func.count())
+        .group_by(InterviewRow.status, InterviewRow.visibility)
+        .order_by(InterviewRow.status, InterviewRow.visibility)
+    ).all()
+    return InterviewCounts(
+        items=[
+            InterviewCount.model_validate({"status": s, "visibility": v, "count": n})
+            for s, v, n in rows
+        ]
+    )
 
 
 @router.get("/api/interviews/{interview_id}/jobs", response_model=JobList)
