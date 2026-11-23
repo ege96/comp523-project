@@ -18,11 +18,12 @@ import { ApiError, interviewQueries } from "../api/client";
 import type { InterviewDetail, Segment } from "../api/schemas";
 import { useAuth } from "../auth/useAuth";
 import { englishText, toVtt } from "../captions";
-import { ArrowBackIcon, EditIcon, SearchIcon } from "../components/icons";
+import { ArrowBackIcon, CheckIcon, EditIcon, LinkIcon, SearchIcon } from "../components/icons";
 import { InterviewChips } from "../components/InterviewChips";
 import { LinePair } from "../components/LinePair";
 import { ButtonLink, TextLink } from "../components/links";
 import { formatClock, formatRecordedOn } from "../format";
+import { visuallyHidden } from "../components/visuallyHidden";
 import { usePinnedMediaUrl } from "../mediaUrl";
 import { searchOrigin } from "../searchOrigin";
 import { theme, tokens } from "../theme";
@@ -64,6 +65,25 @@ export function InterviewPage() {
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       setPinHeight(el.offsetHeight);
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+  // A video's width over its height, once it has loaded: an upright video is sized by its
+  // height, so it isn't drawn inside wide black bars.
+  const [shape, setShape] = useState<number | null>(null);
+  // Wide screens: the transcript scrolls in its own panel beside the recording.
+  const wide = useMediaQuery(theme.breakpoints.up("md"));
+  const panel = useRef<HTMLElement>(null);
+  // Phones: whether the video is on screen. Once it's scrolled away, the copy-link button
+  // floats at the bottom of the screen; while it's in view, the button sits under it.
+  const [playerInView, setPlayerInView] = useState(true);
+  const watchPlayer = useCallback((el: HTMLElement | null) => {
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry) setPlayerInView(entry.isIntersecting);
     });
     observer.observe(el);
     return () => {
@@ -115,6 +135,7 @@ export function InterviewPage() {
   const video = media?.content_type.startsWith("video/") ?? false;
   // Only an audio player pins on phones: a pinned video, or a notice, would cover the text.
   const pinned = media !== null && !video;
+  const portrait = video && shape !== null && shape < 1;
   const lines = segments.data?.items ?? NO_SEGMENTS;
   const lineAt = (ms: number) => lines.find((s) => ms >= s.start_ms && ms < s.end_ms);
   // The line a shared link opens at: the one playing, else the one the page opened at.
@@ -169,34 +190,36 @@ export function InterviewPage() {
         <Typography color="text.secondary">{summaryLine(interview.data)}</Typography>
         <InterviewChips interview={interview.data} />
       </Stack>
-      {/* Phones: one column, the player and its copy-link button pinned while the transcript
-          scrolls (audio only: a pinned video would cover the text, so its button floats at
-          the bottom of the screen instead). Wide screens: player and details in a side
-          column as tall as the transcript, where only the player and the copy-link button
-          stay pinned, so long details never end up out of reach below the screen. The aside
-          dissolves into the column on phones so the player can pin. */}
+      {/* Phones: one column. An audio player and its copy-link button pin while the
+          transcript scrolls; a video doesn't (it would cover the text), so its button floats
+          once the video is scrolled away. Wide screens: the transcript scrolls in its own
+          panel, so the recording, the button and the details stay put beside it, with
+          nothing pinned on top of anything else. The aside dissolves into the column on
+          phones so the audio player can pin. */}
       <Box
         sx={{
           display: { xs: "block", md: "grid" },
           columnGap: { md: 4, lg: 6 },
-          // A video gets three fifths of the width so faces and gestures are visible; audio
-          // needs only a slim column.
-          gridTemplateColumns: video
-            ? { md: "minmax(0, 3fr) minmax(0, 2fr)" }
-            : "minmax(0, 20rem) minmax(0, 1fr)",
+          // A wide video gets three fifths of the width so faces and gestures are visible; an
+          // upright one a column as wide as it is drawn; audio needs only a slim column.
+          gridTemplateColumns: portrait
+            ? `minmax(20rem, calc(${VIDEO_HEIGHT_WIDE} * ${String(shape)} + 26px)) minmax(0, 1fr)`
+            : video
+              ? "minmax(0, 3fr) minmax(0, 2fr)"
+              : "minmax(0, 20rem) minmax(0, 1fr)",
           alignItems: "start",
         }}
       >
         <Box
           component="aside"
           aria-label="Recording"
-          sx={{ display: { xs: "contents", md: "block" }, alignSelf: "stretch" }}
+          sx={{ display: { xs: "contents", md: "block" } }}
         >
           <Box
-            ref={measurePin}
+            ref={pinned ? measurePin : watchPlayer}
             sx={{
-              position: { xs: pinned ? "sticky" : "static", md: "sticky" },
-              top: { xs: 0, md: 24 },
+              position: { xs: pinned ? "sticky" : "static", md: "static" },
+              top: 0,
               zIndex: 2,
               mx: { xs: -2, sm: -3, md: 0 },
             }}
@@ -212,6 +235,8 @@ export function InterviewPage() {
                   prev && seq !== undefined && prev.seq === seq ? prev : { seq, ms },
                 );
               }}
+              shape={shape}
+              onShape={setShape}
               failed={mediaFailed}
               onFailed={() => {
                 setMediaFailed(true);
@@ -222,13 +247,31 @@ export function InterviewPage() {
                 setMediaFailed(false);
               }}
             />
-            <CopyTimeLink ms={linkMs} floatOnPhone={video} />
+            {pinned ? <CopyTimeLink ms={linkMs} look="bar" /> : null}
           </Box>
+          {pinned ? null : (
+            <CopyTimeLink ms={linkMs} look={video && !wide && !playerInView ? "float" : "inline"} />
+          )}
           <Box sx={{ mt: { xs: 3, md: 4 }, mb: { xs: 4, md: 0 } }}>
             <AboutRecording interview={interview.data} />
           </Box>
         </Box>
-        <Box component="section" aria-labelledby="transcript" sx={{ minWidth: 0 }}>
+        <Box
+          component="section"
+          ref={panel}
+          aria-labelledby="transcript"
+          // Its own scroll area on wide screens, so keyboard users can scroll it too.
+          tabIndex={wide ? 0 : undefined}
+          sx={{
+            minWidth: 0,
+            position: { md: "sticky" },
+            top: { md: 24 },
+            maxHeight: { md: "calc(100dvh - 48px)" },
+            overflowY: { md: "auto" },
+            pr: { md: 1.5 },
+            "&:focus-visible": { outline: `2px solid ${tokens.plate}`, outlineOffset: 2 },
+          }}
+        >
           <Typography
             variant="overline"
             component="h2"
@@ -271,6 +314,7 @@ export function InterviewPage() {
               highlightMs={t}
               playing={playing === null ? null : { seq: playing.seq }}
               stickyTop={pinned ? pinHeight : 0}
+              scrollRoot={wide ? panel : null}
             />
           )}
         </Box>
@@ -296,6 +340,8 @@ function Player({
   startMs,
   ref,
   onTime,
+  shape,
+  onShape,
   failed,
   onFailed,
   onRetry,
@@ -305,6 +351,9 @@ function Player({
   startMs: number | undefined;
   ref: React.Ref<HTMLMediaElement>;
   onTime: (ms: number) => void;
+  /** The video's width over its height, once known. */
+  shape: number | null;
+  onShape: (shape: number) => void;
   failed: boolean;
   onFailed: () => void;
   onRetry: () => Promise<void>;
@@ -353,6 +402,12 @@ function Player({
       if (!e.currentTarget.paused) report(e);
     },
     onSeeked: report,
+    onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+      const el = e.currentTarget;
+      if (el instanceof HTMLVideoElement && el.videoWidth > 0 && el.videoHeight > 0) {
+        onShape(el.videoWidth / el.videoHeight);
+      }
+    },
     onError: onFailed,
   } as const;
   return (
@@ -400,14 +455,23 @@ function Player({
           playsInline
           sx={{
             display: "block",
-            width: "100%",
-            // The file's own shape once it loads (a phone video may be upright), 16:9 until
-            // then so the page doesn't jump.
-            aspectRatio: "auto 16 / 9",
-            // Never taller than the screen less the page's top and the copy-link button, so
-            // an upright video stays whole while pinned and the transcript stays reachable.
-            maxHeight: { xs: "70vh", md: "calc(100vh - 11rem)" },
+            // The file's own shape once it loads, 16:9 until then so the page doesn't jump.
+            aspectRatio: shape === null ? "auto 16 / 9" : String(shape),
             bgcolor: "black",
+            ...(shape !== null && shape < 1
+              ? {
+                  // Upright (a phone recording): as tall as there's room for, as wide as
+                  // that makes it, centred, with no black bars beside it.
+                  height: { xs: "65svh", md: VIDEO_HEIGHT_WIDE },
+                  width: "auto",
+                  maxWidth: "100%",
+                  mx: "auto",
+                }
+              : {
+                  width: "100%",
+                  // Leaves room on screen for the copy-link button and the transcript.
+                  maxHeight: { xs: "70svh", md: VIDEO_HEIGHT_WIDE },
+                }),
           }}
         >
           {captions.map((track) => (
@@ -425,6 +489,10 @@ function Player({
     </Box>
   );
 }
+
+/** The most height a video takes on a wide screen: the screen less the page's top and the
+ * copy-link button below it. */
+const VIDEO_HEIGHT_WIDE = "calc(100dvh - 11rem)";
 
 type Caption = { label: string; srcLang: string; vtt: string; isDefault: boolean };
 
@@ -469,62 +537,95 @@ function CaptionTrack({ label, srcLang, vtt, isDefault }: Caption) {
   return <track ref={ref} kind="captions" label={label} srcLang={srcLang} default={isDefault} />;
 }
 
-/** Pinned with the player. On a phone a video isn't pinned, so there the button floats. */
-function CopyTimeLink({ ms, floatOnPhone }: { ms: number; floatOnPhone: boolean }) {
+/** How long "Link copied" shows before the button reads as before. */
+const COPIED_MS = 2000;
+
+/**
+ * "bar": a line under a pinned audio player (phones). "inline": under the recording.
+ * "float": a small button at the bottom of a phone screen, once the video is scrolled away.
+ * The button itself says when the link is copied, then goes back, so no note lingers.
+ */
+function CopyTimeLink({ ms, look }: { ms: number; look: "bar" | "inline" | "float" }) {
   const { pathname } = useLocation();
-  const [note, setNote] = useState("");
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  // Read out by screen readers only; the button shows the same thing.
+  const [announce, setAnnounce] = useState("");
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(
+    () => () => {
+      window.clearTimeout(timer.current);
+    },
+    [],
+  );
   const copy = async () => {
     const url = new URL(`${pathname}?t=${String(ms)}`, window.location.origin);
+    window.clearTimeout(timer.current);
     try {
       await navigator.clipboard.writeText(url.href);
-      setNote(`Link to ${formatClock(ms)} copied`);
+      setState("copied");
+      setAnnounce(`Link to ${formatClock(ms)} copied`);
+      timer.current = window.setTimeout(() => {
+        setState("idle");
+      }, COPIED_MS);
     } catch {
-      setNote("The link couldn't be copied. Copy it from the address bar.");
+      setState("failed");
+      setAnnounce("");
     }
   };
+  const copied = state === "copied";
   return (
-    <Stack
-      direction="row"
+    <Box
       sx={[
-        { alignItems: "center", flexWrap: "wrap", columnGap: 1.5 },
-        floatOnPhone
-          ? {
-              position: { xs: "fixed", md: "static" },
-              bottom: { xs: 12 },
-              left: { xs: "50%" },
-              transform: { xs: "translateX(-50%)", md: "none" },
-              maxWidth: { xs: "calc(100% - 32px)", md: "none" },
-              zIndex: 5,
-              bgcolor: { xs: "background.paper", md: "transparent" },
-              border: { xs: 1, md: 0 },
-              borderColor: "divider",
-              borderRadius: { xs: 4, md: 0 },
-              boxShadow: { xs: 3, md: "none" },
-              px: { xs: 1.5, md: 0 },
-              mt: { md: 1 },
-            }
-          : {
-              // The audio player's bar: one more line under it, full width.
-              bgcolor: { xs: "background.default", md: "transparent" },
-              borderBottom: { xs: 1, md: 0 },
-              borderColor: "divider",
-              px: { xs: 2, sm: 3, md: 0 },
-              mt: { md: 1 },
-            },
+        look === "bar" && {
+          bgcolor: "background.default",
+          borderBottom: { xs: 1, md: 0 },
+          borderColor: "divider",
+          px: { xs: 1.5, sm: 2.5, md: 0 },
+          pt: { md: 1 },
+        },
+        // Keeps the button's room in the page while it floats, so nothing jumps.
+        look !== "bar" && { mt: 1, minHeight: 32 },
       ]}
     >
-      <Button
-        size="small"
-        onClick={() => {
-          void copy();
-        }}
+      <Box
+        sx={[
+          { display: "flex", alignItems: "center", flexWrap: "wrap", columnGap: 1.5 },
+          look === "float" && {
+            position: "fixed",
+            left: "50%",
+            transform: "translateX(-50%)",
+            bottom: "calc(16px + env(safe-area-inset-bottom))",
+            zIndex: theme.zIndex.speedDial,
+            bgcolor: tokens.paper,
+            border: 1,
+            borderColor: "divider",
+            borderRadius: 999,
+            boxShadow: 3,
+            px: 0.5,
+            py: 0.25,
+          },
+        ]}
       >
-        Copy link to this time
-      </Button>
-      <Typography variant="body2" color="text.secondary" aria-live="polite">
-        {note}
-      </Typography>
-    </Stack>
+        <Button
+          size="small"
+          startIcon={copied ? <CheckIcon aria-hidden /> : <LinkIcon aria-hidden />}
+          onClick={() => {
+            void copy();
+          }}
+          sx={look === "float" ? { borderRadius: 999 } : undefined}
+        >
+          {copied ? "Link copied" : "Copy link to this time"}
+        </Button>
+        {state === "failed" ? (
+          <Typography variant="body2" color="text.secondary" role="alert" sx={{ px: 1 }}>
+            The link couldn&apos;t be copied. Copy it from the address bar.
+          </Typography>
+        ) : null}
+      </Box>
+      <Box component="span" aria-live="polite" sx={visuallyHidden}>
+        {announce}
+      </Box>
+    </Box>
   );
 }
 
@@ -632,6 +733,7 @@ function Transcript({
   highlightMs,
   playing,
   stickyTop,
+  scrollRoot,
 }: {
   segments: Segment[];
   translation: InterviewDetail["translation_status"];
@@ -643,6 +745,8 @@ function Transcript({
   playing: { seq: number | undefined } | null;
   /** On phones, how far below the top of the screen the find bar pins (the audio player). */
   stickyTop: number;
+  /** The panel the transcript scrolls in on wide screens; null where the page scrolls. */
+  scrollRoot: React.RefObject<HTMLElement | null> | null;
 }) {
   // Original and English together when there is a translation: reading them side by side is
   // the point of a bilingual archive.
@@ -710,7 +814,11 @@ function Transcript({
     lastPlaying.current = seq;
     if (!previous) return;
     const box = previous.getBoundingClientRect();
-    if (box.bottom > 0 && box.top < window.innerHeight) el.scrollIntoView({ block: "nearest" });
+    const view = scrollRoot?.current?.getBoundingClientRect() ?? {
+      top: 0,
+      bottom: window.innerHeight,
+    };
+    if (box.bottom > view.top && box.top < view.bottom) el.scrollIntoView({ block: "nearest" });
   };
   const mark = (text: string) =>
     splitMatches(text, re).map((part, i) =>
