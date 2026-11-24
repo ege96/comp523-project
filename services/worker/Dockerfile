@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # Image tags are written out in full (no ARGs) so Dependabot can read and bump them.
-FROM ghcr.io/astral-sh/uv:0.13.9 AS uv
-FROM mwader/static-ffmpeg:9.0.2-1 AS ffmpeg
+FROM ghcr.io/astral-sh/uv:0.13.10 AS uv
+FROM mwader/static-ffmpeg:9.1 AS ffmpeg
 
 # ---- model: the local embedding model (EMBEDDING_PROVIDER=local), baked in so pods never
 # download it. Lands in /opt/models/<EMBEDDING_MODEL> (LOCAL_MODEL_DIR's default). Build
