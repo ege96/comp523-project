@@ -1,0 +1,49 @@
+# The CloudApps pods' limits, for performance runs (see perf/README.md). Standalone: run it
+# from the repo root with its own project name so it never touches the dev stack's data.
+#
+#   docker compose -p perf -f perf/compose.perf.yaml up -d db
+#   docker compose -p perf -f perf/compose.perf.yaml up -d api     # applies migrations
+#
+# Limits copy deploy/cloudapps/app.yaml: db 0.5 CPU / 512 MiB, api 1 CPU / 768 MiB with the
+# local e5-small embedder on one thread. Each service is pinned to its own core (cpuset), and
+# the load generator should run on the others, so no two compete for a CPU. Change cpuset
+# on a machine with fewer than 4 cores.
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: swayambhu
+      POSTGRES_HOST_AUTH_METHOD: trust  # local-only: bound to localhost below
+      POSTGRES_DB: swayambhu_perf
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - ../db/init:/docker-entrypoint-initdb.d:ro
+      - perfdata:/var/lib/postgresql/data
+    cpus: 0.5
+    cpuset: "1"
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U swayambhu"]
+      interval: 5s
+      retries: 20
+
+  api:
+    image: ${API_IMAGE:-perf-api}
+    build: { context: .., dockerfile: services/api/Dockerfile }
+    environment:
+      DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu_perf
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: intfloat/multilingual-e5-small
+      EMBEDDING_QUERY_PREFIX: "query: "
+      EMBEDDING_PASSAGE_PREFIX: "passage: "
+      LOCAL_EMBEDDING_THREADS: "1"
+      LOG_LEVEL: WARNING
+    ports: ["127.0.0.1:8000:8080"]
+    cpus: 1
+    cpuset: "0"
+    mem_limit: 768m
+    depends_on:
+      db: { condition: service_healthy }
+
+volumes:
+  perfdata:

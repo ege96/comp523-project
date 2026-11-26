@@ -162,7 +162,7 @@ def fuse(ranked: dict[Source, list[Hit]], k: int) -> list[tuple[Hit, list[Source
     return [(anchors[key], sources[key]) for key in sorted(scores, key=lambda key: -scores[key])]
 
 
-def _keyword_hits(
+def keyword_hits(
     session: DbSession,
     viewer: CurrentViewer,
     q: str,
@@ -261,7 +261,7 @@ def _detail_matches(
     return found[:DETAIL_MATCHES], len(found) > DETAIL_MATCHES
 
 
-def _semantic_hits(
+def semantic_hits(
     session: DbSession,
     viewer: CurrentViewer,
     embedder: Embedder | None,
@@ -279,19 +279,46 @@ def _semantic_hits(
         # text can echo the request, and search terms are never logged.
         log.warning("Query embedding failed (retryable=%s); keyword results only", exc.retryable)
         return None
-    distance = func.min(ChunkEmbeddingRow.embedding.cosine_distance(vector))
-    rows = session.execute(
-        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
-        .join(ChunkEmbeddingRow, ChunkEmbeddingRow.chunk_id == SearchChunkRow.id)
+    distance = ChunkEmbeddingRow.embedding.cosine_distance(vector)
+    return nearest_chunks(session, viewer, where, embedder.name, distance, candidates)
+
+
+def nearest_chunks(
+    session: DbSession,
+    viewer: CurrentViewer,
+    where: list[ColumnElement[bool]],
+    model: str,
+    distance: ColumnElement[float],
+    candidates: int,
+) -> list[Hit]:
+    """The `candidates` chunks with the nearest embedding, nearest first.
+
+    The inner query keeps only the nearest 2 x candidates embeddings. A chunk has at most two
+    (original and English), so the k-th best chunk's best embedding ranks at most 2k - 1, and
+    the result is still exact. Sorting just (chunk id, distance) pairs this way is far cheaper
+    than grouping every 1.5 KB vector row by chunk first, which spilled to disk, and it is the
+    shape an HNSW index on `distance` could serve.
+    """
+    nearest = (
+        select(ChunkEmbeddingRow.chunk_id, distance.label("distance"))
+        .join(SearchChunkRow, SearchChunkRow.id == ChunkEmbeddingRow.chunk_id)
         .join(InterviewRow, InterviewRow.id == SearchChunkRow.interview_id)
         .where(
             visible_to(viewer.admin),
             *where,
             SearchChunkRow.chunker == CHUNKER,
-            ChunkEmbeddingRow.model == embedder.name,
+            ChunkEmbeddingRow.model == model,
         )
+        .order_by(distance)
+        .limit(2 * candidates)
+        .subquery()
+    )
+    best = func.min(nearest.c.distance)
+    rows = session.execute(
+        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
+        .join(nearest, nearest.c.chunk_id == SearchChunkRow.id)
         .group_by(SearchChunkRow.id)
-        .order_by(distance, SearchChunkRow.id)
+        .order_by(best, SearchChunkRow.id)
         .limit(candidates)
     ).all()
     return [Hit(i, c, s) for i, c, s in rows]
@@ -348,10 +375,10 @@ def search(
     SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
     them again."""
     n = settings.search_candidates
-    semantic = _semantic_hits(session, viewer, embedder, q, where, n)
+    semantic = semantic_hits(session, viewer, embedder, q, where, n)
     mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
     ranked = fuse(
-        {"keyword": _keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
+        {"keyword": keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
         settings.search_rrf_k,
     )
     page = ranked[offset : offset + limit]
