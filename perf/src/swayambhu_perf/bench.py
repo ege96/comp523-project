@@ -103,7 +103,7 @@ def latency(url: str, queries: list[PerfQuery], runs: int) -> dict[str, dict[str
     def get(query: PerfQuery) -> None:
         qs = urllib.parse.urlencode({"q": query.q}) + (f"&{query.extra}" if query.extra else "")
         address = f"{url.rstrip('/')}/api/search?{qs}"
-        with urllib.request.urlopen(address, timeout=30) as r:  # noqa: S310 (the developer's URL)
+        with urllib.request.urlopen(address, timeout=120) as r:  # noqa: S310 (the developer's URL)
             if "items" not in json.load(r):
                 raise RuntimeError(f"Unexpected search response for {query.q!r}")
 

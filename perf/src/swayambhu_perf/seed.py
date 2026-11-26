@@ -44,6 +44,7 @@ from swayambhu_api.db import get_engine
 from swayambhu_core.chunking import Timed, chunk_segments
 from swayambhu_core.models import CHUNKER
 from swayambhu_providers.factory import embedder_name
+from swayambhu_providers.identity import local_embedding_name
 
 from swayambhu_perf.corpus import load_vectors, read_corpus
 
@@ -323,11 +324,18 @@ def main(argv: list[str] | None = None) -> None:
     settings = Settings()
     check_database(settings.database_url)
     if args.corpus:
-        wanted = json.loads((args.corpus / "manifest.json").read_text())["model"]
-        if embedder_name(settings) != f"local:{wanted}":
+        manifest = json.loads((args.corpus / "manifest.json").read_text())
+        wanted = local_embedding_name(
+            manifest["model"],
+            None,
+            query_prefix=manifest["query_prefix"],
+            passage_prefix=manifest["passage_prefix"],
+            max_tokens=manifest.get("max_tokens", 512),
+        )
+        if embedder_name(settings) != wanted:
             raise SystemExit(
-                f"This corpus needs EMBEDDING_PROVIDER=local EMBEDDING_MODEL={wanted}, so the "
-                "API embeds queries with the same model"
+                f"This corpus needs EMBEDDING_PROVIDER=local EMBEDDING_MODEL={manifest['model']} "
+                f"with its prefixes ({wanted}), so the API embeds queries the same way"
             )
         began = time.monotonic()
         counts = seed_corpus(

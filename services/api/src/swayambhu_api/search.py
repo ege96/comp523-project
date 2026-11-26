@@ -374,6 +374,25 @@ def search(
     """Transcript moments most relevant to `q`, best first. Paging goes as deep as
     SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
     them again."""
+    try:
+        return _search(session, viewer, embedder, settings, q, where, limit, offset)
+    finally:
+        # Hand the connection back now. FastAPI validates the response on a worker thread;
+        # holding the connection while waiting for one let an overload park every
+        # connection behind requests that every thread was waiting on (perf/ load test).
+        session.close()
+
+
+def _search(
+    session: DbSession,
+    viewer: CurrentViewer,
+    embedder: Embedder | None,
+    settings: Settings,
+    q: str,
+    where: list[ColumnElement[bool]],
+    limit: int,
+    offset: int,
+) -> SearchResults:
     n = settings.search_candidates
     semantic = semantic_hits(session, viewer, embedder, q, where, n)
     mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"

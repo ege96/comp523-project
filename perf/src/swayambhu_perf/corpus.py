@@ -326,6 +326,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         "interviews": len(interviews),
         "query_prefix": "query: ",
         "passage_prefix": "passage: ",
+        "max_tokens": 512,
         "shard": SHARD,
         "sources": {
             "fleurs": str(args.fleurs),

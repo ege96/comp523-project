@@ -38,6 +38,9 @@ services:
       EMBEDDING_PASSAGE_PREFIX: "passage: "
       LOCAL_EMBEDDING_THREADS: "1"
       LOG_LEVEL: WARNING
+      MEDIA_ROOT: /data/media  # the worker's playback copies, for the media timing test
+    volumes:
+      - perfmedia:/data/media
     ports: ["127.0.0.1:8000:8080"]
     cpus: 1
     cpuset: "0"
@@ -45,5 +48,32 @@ services:
     depends_on:
       db: { condition: service_healthy }
 
+  # The worker at its CloudApps limits (2 CPU / 1 GiB, embedding on 2 threads), with offline
+  # transcription and translation so a run times our own processing, not a provider.
+  #   docker compose -p perf -f perf/compose.perf.yaml --profile worker up -d worker
+  worker:
+    profiles: [worker]
+    image: ${WORKER_IMAGE:-perf-worker}
+    build: { context: .., dockerfile: services/worker/Dockerfile }
+    environment:
+      DATABASE_URL: postgresql://swayambhu@db:5432/swayambhu_perf
+      TRANSCRIPTION_PROVIDER: fake
+      TRANSLATION_PROVIDER: fake
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: intfloat/multilingual-e5-small
+      EMBEDDING_QUERY_PREFIX: "query: "
+      EMBEDDING_PASSAGE_PREFIX: "passage: "
+      LOCAL_EMBEDDING_THREADS: "2"
+      POLL_INTERVAL_SECONDS: "1"
+      MEDIA_ROOT: /data/media
+    volumes:
+      - perfmedia:/data/media
+    cpus: 2
+    cpuset: "2,3"
+    mem_limit: 1g
+    depends_on:
+      db: { condition: service_healthy }
+
 volumes:
   perfdata:
+  perfmedia:
