@@ -1,4 +1,4 @@
-# Performance tests (Proposal)
+# Performance tests
 
 Development-only tools for measuring search, the worker and media playback under the CloudApps pods' limits. They are a separate project (`cd perf && uv sync`), so none of it ships in an image. Results are in [RESULTS.md](RESULTS.md).
 
@@ -45,6 +45,16 @@ uv run python -m swayambhu_perf.bench ann --corpus data/corpus --ef-search 40,10
 # Load: requests per second rising in one-minute steps; then per-step results
 k6 run -e API_URL=http://localhost:8000 -e PROFILE=ceiling -e MAX_RPS=30 --out csv=k6.csv search_load.js
 uv run python -m swayambhu_perf.bench k6 k6.csv
+```
+
+The worker and media playback (with `docker compose ... --profile worker up -d worker`, offline transcription and translation):
+
+```sh
+# Copy a recording into the worker and queue it; stage times are in the worker's "job N" log lines
+docker compose -p perf -f perf/compose.perf.yaml cp interview.mp3 worker:/tmp/in.mp3
+docker compose -p perf -f perf/compose.perf.yaml exec worker python -m swayambhu_worker.ingest /tmp/in.mp3 --title perf --language ne
+# Media start and seek on a Public interview, 10 cold runs, unthrottled (0) or 1.5 Mbit/s (1)
+node media_timing.js <interview id> audio 10 0
 ```
 
 Percentiles are computed over every timed request (`statistics.quantiles`, inclusive). Latency is measured by the client, so it includes HTTP and, for search, embedding the query on the API's one CPU.
