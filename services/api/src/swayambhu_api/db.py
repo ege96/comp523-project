@@ -7,10 +7,10 @@ through the `DbSession` dependency; nothing opens a connection until a query run
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from swayambhu_core.db import make_engine, sqlalchemy_url
@@ -21,12 +21,26 @@ __all__ = ["DbSession", "check_database", "get_engine", "new_session", "sqlalche
 
 
 @lru_cache
-def _engine(database_url: str, connect_timeout: int) -> Engine:
-    return make_engine(database_url, connect_timeout)
+def _engine(database_url: str, connect_timeout: int, ef_search: int) -> Engine:
+    engine = make_engine(database_url, connect_timeout)
+
+    @event.listens_for(engine, "connect")
+    def search_settings(dbapi_connection: Any, _record: object) -> None:
+        # Once per connection rather than per search, saving a round trip. relaxed_order
+        # lets an HNSW scan keep going until enough rows pass the visibility filter; the
+        # query sorts its result again (search.py).
+        with dbapi_connection.cursor() as cursor:
+            cursor.execute(f"SET hnsw.ef_search = {int(ef_search)}")
+            cursor.execute("SET hnsw.iterative_scan = relaxed_order")
+        dbapi_connection.commit()
+
+    return engine
 
 
 def get_engine(settings: Settings) -> Engine:
-    return _engine(settings.database_url, settings.db_connect_timeout_seconds)
+    return _engine(
+        settings.database_url, settings.db_connect_timeout_seconds, settings.search_ef_search
+    )
 
 
 def new_session(settings: Settings) -> Session:

@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 from swayambhu_core import jobs, transcripts
+from swayambhu_core.chunking import Timed, chunk_segments
 from swayambhu_core.languages import sync_interview_languages
 from swayambhu_core.models import (
     CHUNKER,
@@ -46,7 +47,6 @@ from swayambhu_providers import (
 )
 
 from swayambhu_worker import audio
-from swayambhu_worker.chunking import Timed, chunk_segments
 
 # Providers report languages as ISO 639-1 ("ne"), ISO 639-3 ("nep") or English names.
 _LANGUAGE_ALIASES = {

@@ -4,8 +4,9 @@ from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import Engine, delete, text
 from sqlalchemy.orm import Session
+from swayambhu_core import vector_index
 from swayambhu_core.models import (
     CHUNKER,
     ChunkEmbeddingRow,
@@ -19,9 +20,10 @@ from swayambhu_core.models import (
 from swayambhu_providers import EmbeddingKind, ProviderError
 from swayambhu_providers.fake_provider import FakeEmbedder
 
+from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.main import app
-from swayambhu_api.search import get_embedder
+from swayambhu_api.search import _semantic_query, get_embedder
 from tests.fakes import ADMIN, as_viewer
 
 pytestmark = pytest.mark.integration
@@ -307,3 +309,33 @@ def test_filtering_by_a_private_interviewee_finds_nothing_for_visitors(
     path = f"/api/search?q=butter lamp&interviewee={hidden.interviewee_id}"
     assert as_viewer(client).get(path).json()["items"] == []
     assert [m["interview"]["title"] for m in as_viewer(client, ADMIN).get(path).json()["items"]]
+
+
+def test_semantic_search_walks_the_hnsw_index_once_the_worker_builds_it(
+    client: TestClient, archive: dict[str, uuid.UUID], db_session: Session
+) -> None:
+    engine = db_session.get_bind()
+    assert isinstance(engine, Engine)
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text(vector_index.create_statement(8)))  # what the worker builds
+    try:
+        [vector] = EMBEDDER.embed(["prayer wheels"], "query")
+        query = _semantic_query(Viewer(admin=None), [], EMBEDDER.name, vector, 100)
+        compiled = query.compile(engine)
+        params = {
+            k: "[" + ",".join(map(str, v)) + "]" if isinstance(v, list) else v
+            for k, v in compiled.params.items()
+        }
+        with engine.connect() as connection:
+            # A table this small is otherwise scanned and sorted.
+            connection.exec_driver_sql("SET enable_seqscan = off")
+            connection.exec_driver_sql("SET enable_sort = off")
+            plan = connection.exec_driver_sql(f"EXPLAIN {compiled}", params).scalars().all()
+        assert any(vector_index.index_name(8) in line for line in plan), plan
+        # Same moments as without the index.
+        visitor = as_viewer(client)
+        assert moments(visitor, "prayer wheels")[0] == ("public", 40_000, (3,), ("semantic",))
+    finally:
+        with engine.connect() as connection:
+            connection.execute(text(f"DROP INDEX {vector_index.index_name(8)}"))
+            connection.commit()

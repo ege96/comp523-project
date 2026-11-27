@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 from swayambhu_providers.settings import ProviderSettings
 
@@ -42,6 +42,9 @@ class Settings(ProviderSettings):
     search_embedding_timeout_seconds: float = 5.0
     # Hits taken from each of keyword and semantic search before fusing; also the deepest page.
     search_candidates: int = 100
+    # Candidates the HNSW index examines per vector search (pgvector's hnsw.ef_search). At
+    # least 2 x SEARCH_CANDIDATES; 1000 found 99% of exact search's top 10 at 90,000 vectors.
+    search_ef_search: int = Field(default=1000, ge=1, le=1000)
     # Reciprocal rank fusion constant: larger flattens the gap between top and lower ranks.
     search_rrf_k: int = 60
     # Roughly how much transcript a result's excerpt shows.

@@ -10,6 +10,7 @@ Visitors search the interviews by meaning or by exact words, in English, Nepali 
 | Understand how search, sign-in, uploads and the database work | [docs/architecture.md](docs/architecture.md) |
 | Look up an environment variable | [docs/configuration.md](docs/configuration.md) |
 | Deploy it, add admins, back it up | [docs/deploy-cloudapps.md](docs/deploy-cloudapps.md) |
+| Measure search, worker and media performance | [perf/README.md](perf/README.md) |
 
 ## Layout
 
@@ -23,6 +24,7 @@ Visitors search the interviews by meaning or by exact words, in English, Nepali 
 | `db/init` | SQL run when a fresh local database starts (enables pgvector only; tables come from migrations) | PostgreSQL 16 + pgvector |
 | `deploy/cloudapps` | OpenShift templates that deploy the whole archive to CloudApps | OpenShift Template |
 | `docs` | Architecture, configuration, and the CloudApps deployment guide | Markdown |
+| `perf` | Development-only performance tests (seeders, benchmarks, k6 load test) | Python 3.12, k6 |
 
 Python projects use [uv](https://docs.astral.sh/uv/). Web tests use Vitest.
 
