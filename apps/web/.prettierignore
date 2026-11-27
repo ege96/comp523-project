@@ -5,3 +5,4 @@ security-headers.inc
 src/api/schema.gen.ts
 e2e/test-results
 e2e/playwright-report
+e2e/.auth

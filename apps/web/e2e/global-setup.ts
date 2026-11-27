@@ -1,11 +1,11 @@
 // Seeds the running stack once per run: an admin invite, then one Public and one Private
-// recording uploaded through the real tus API and processed by the worker's fake providers.
+// interview uploaded through the real tus API and processed by the worker's fake providers.
+// Tests that change data make their own (admin.spec.ts uploads and deletes one).
 import { execSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import path from "node:path";
 
-import { ADMIN, AUTH_DIR, ensureKeys, idToken } from "./support/auth";
-import { API_URL, type Seed } from "./support/seed";
+import { ADMIN, ensureKeys } from "./support/auth";
+import { adminApi, API_URL, SEED_FILE, toneWav, type Seed } from "./support/seed";
 
 // How to run a command in the API's environment. The default is the compose stack;
 // set E2E_API_EXEC="uv run --directory ../../services/api" to run against a local API.
@@ -13,52 +13,11 @@ const API_EXEC =
   process.env.E2E_API_EXEC ??
   "docker compose -f ../../compose.yaml -f ../../compose.e2e.yaml exec -T api";
 
-/** A mono 16 kHz WAV: 8 s tone, 2 s silence, repeated, so the worker cuts several lines. */
-function toneWav(seconds: number): Buffer {
-  const rate = 16_000;
-  const samples = seconds * rate;
-  const buf = Buffer.alloc(44 + samples * 2);
-  buf.write("RIFF", 0);
-  buf.writeUInt32LE(36 + samples * 2, 4);
-  buf.write("WAVEfmt ", 8);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20); // PCM
-  buf.writeUInt16LE(1, 22); // mono
-  buf.writeUInt32LE(rate, 24);
-  buf.writeUInt32LE(rate * 2, 28);
-  buf.writeUInt16LE(2, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write("data", 36);
-  buf.writeUInt32LE(samples * 2, 40);
-  for (let i = 0; i < samples; i++) {
-    const loud = (i / rate) % 10 < 8;
-    buf.writeInt16LE(
-      loud ? Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)) : 0,
-      44 + i * 2,
-    );
-  }
-  return buf;
-}
-
-async function api(
-  method: string,
-  url: string,
-  { headers = {}, body }: { headers?: Record<string, string>; body?: BodyInit } = {},
-): Promise<Response> {
-  const res = await fetch(`${API_URL}${url}`, {
-    method,
-    body,
-    headers: { Authorization: `Bearer ${idToken()}`, ...headers },
-  });
-  if (!res.ok) throw new Error(`${method} ${url}: HTTP ${String(res.status)} ${await res.text()}`);
-  return res;
-}
-
 /** The tus protocol by hand: one POST to create, one PATCH with the whole (small) file. */
 async function upload(title: string, file: Buffer): Promise<string> {
   const meta = { filename: "e2e-tone.wav", filetype: "audio/wav", title, language: "ne" };
   const tus = { "Tus-Resumable": "1.0.0" };
-  const created = await api("POST", "/api/uploads", {
+  const created = await adminApi("POST", "/api/uploads", {
     headers: {
       ...tus,
       "Upload-Length": String(file.length),
@@ -68,7 +27,7 @@ async function upload(title: string, file: Buffer): Promise<string> {
     },
   });
   const location = new URL(created.headers.get("Location") ?? "", API_URL).pathname;
-  const sent = await api("PATCH", location, {
+  const sent = await adminApi("PATCH", location, {
     headers: { ...tus, "Upload-Offset": "0", "Content-Type": "application/offset+octet-stream" },
     body: new Uint8Array(file),
   });
@@ -77,15 +36,21 @@ async function upload(title: string, file: Buffer): Promise<string> {
   return id;
 }
 
+/** Polls until every processing job (including indexing for search) has finished. */
 async function waitUntilDone(id: string): Promise<void> {
   for (let i = 0; i < 120; i++) {
-    const res = await api("GET", `/api/interviews/${id}`);
-    const { status, status_detail } = (await res.json()) as {
+    const interview = (await (await adminApi("GET", `/api/interviews/${id}`)).json()) as {
       status: string;
       status_detail?: string;
     };
-    if (status === "done") return;
-    if (status === "failed") throw new Error(`Interview ${id} failed: ${String(status_detail)}`);
+    if (interview.status === "failed")
+      throw new Error(`Interview ${id} failed: ${String(interview.status_detail)}`);
+    if (interview.status === "done") {
+      const jobs = (await (await adminApi("GET", `/api/interviews/${id}/jobs`)).json()) as {
+        items: { state: string }[];
+      };
+      if (jobs.items.every((j) => j.state === "done")) return;
+    }
     await new Promise((r) => setTimeout(r, 1000));
   }
   throw new Error(`Interview ${id} was not processed within 2 minutes`);
@@ -117,18 +82,17 @@ export default async function globalSetup(): Promise<void> {
   }
   const run = Date.now().toString(36);
   const wav = toneWav(40);
-  const seed: Seed = {
-    publicTitle: `E2E public recording ${run}`,
-    privateTitle: `E2E private recording ${run}`,
-    publicId: "",
-    privateId: "",
-  };
-  seed.publicId = await upload(seed.publicTitle, wav);
-  seed.privateId = await upload(seed.privateTitle, wav);
-  await Promise.all([waitUntilDone(seed.publicId), waitUntilDone(seed.privateId)]);
-  await api("PATCH", `/api/interviews/${seed.publicId}`, {
+  const publicTitle = `E2E public recording ${run}`;
+  const privateTitle = `E2E private recording ${run}`;
+  const [publicId, privateId] = await Promise.all([
+    upload(publicTitle, wav),
+    upload(privateTitle, wav),
+  ]);
+  await Promise.all([waitUntilDone(publicId), waitUntilDone(privateId)]);
+  await adminApi("PATCH", `/api/interviews/${publicId}`, {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ visibility: "public" }),
   });
-  writeFileSync(path.join(AUTH_DIR, "seed.json"), JSON.stringify(seed));
+  const seed: Seed = { publicId, publicTitle, privateId, privateTitle };
+  writeFileSync(SEED_FILE, JSON.stringify(seed));
 }
