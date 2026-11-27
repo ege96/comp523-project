@@ -48,6 +48,7 @@ The API and worker must use the same embedding settings, or search won't find th
 | `LIVE_STREAM_MAX_SECONDS` | `600` | | Longest an admin live-updates stream stays open before the page reconnects (re-checking the sign-in) |
 | `SEARCH_EMBEDDING_TIMEOUT_SECONDS` | `5` | | How long search waits to embed the query before going keyword-only (remote providers) |
 | `SEARCH_CANDIDATES` | `100` | | Hits taken from each of keyword and semantic search; also the deepest page |
+| `SEARCH_EF_SEARCH` | `1000` | | Candidates the HNSW index examines per semantic search (pgvector `hnsw.ef_search`); keep it at least 2 x `SEARCH_CANDIDATES` |
 | `SEARCH_RRF_K` | `60` | | Rank fusion constant; larger flattens the gap between ranks |
 | `SEARCH_EXCERPT_MS` | `30000` | | Roughly how much transcript an excerpt shows |
 | `LOG_FORMAT` | `json` | | `json` for OpenShift, `text` locally |

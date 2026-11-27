@@ -10,7 +10,7 @@ from datetime import timedelta
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
+from swayambhu_core import jobs, vector_index
 from swayambhu_core.storage import MediaStore
 from swayambhu_providers import ProviderError
 
@@ -38,9 +38,13 @@ class JobRunner:
         self._store = store
         self._lease = lease
         self._media_timeout = media_timeout
+        self._index_checked = False
 
     def handle_one(self) -> bool:
         """Run at most one job. Returns True if there was one."""
+        if not self._index_checked:  # once at startup, for embeddings stored before
+            self._index_checked = True
+            self._ensure_vector_index()
         with self._new_session() as session:
             for stale in jobs.reap_stale(session, self._lease):
                 log.warning("job %s (%s) abandoned by its worker", stale.id, stale.kind)
@@ -82,7 +86,19 @@ class JobRunner:
             self._failed(job, f"Unexpected error: {exc}", explain(job.kind, exc), retryable=True)
         else:
             log.info("job %s done", job.id)
+            if job.kind == "index":
+                self._ensure_vector_index()
         return True
+
+    def _ensure_vector_index(self) -> None:
+        """Search's HNSW index, once there are embeddings to size it by (a quick check when
+        it already exists). A failure leaves search scanning every embedding, still correct."""
+        try:
+            with self._new_session() as session:
+                engine = session.get_bind()
+            vector_index.ensure(engine, self._providers.embedder.name)  # type: ignore[arg-type]
+        except Exception:
+            log.exception("could not build the search index; search scans every embedding")
 
     def _beat(self, job: jobs.Job) -> Callable[[], None]:
         def beat() -> None:

@@ -35,10 +35,9 @@ from swayambhu_api.admins import Admin
 from swayambhu_api.auth import Viewer
 from swayambhu_api.config import Settings
 from swayambhu_api.db import new_session
-from swayambhu_api.search import nearest_chunks, semantic_hits
+from swayambhu_api.search import nearest_chunks
 from swayambhu_api.visibility import visible_to
 from swayambhu_core.models import CHUNKER, ChunkEmbeddingRow, InterviewRow, SearchChunkRow
-from swayambhu_providers import EmbeddingKind
 from swayambhu_providers.factory import build_embedder
 
 VISITOR = Viewer(admin=None)
@@ -78,15 +77,6 @@ class AnnResult:
     settings: dict[str, str]
     variants: list[Variant]
     notices: list[str]
-
-
-class _Fixed:
-    def __init__(self, name: str, vectors: dict[str, list[float]]) -> None:
-        self.name = name
-        self._vectors = vectors
-
-    def embed(self, texts: Sequence[str], kind: EmbeddingKind) -> list[list[float]]:
-        return [self._vectors[t] for t in texts]
 
 
 def ann_chunks(
@@ -161,7 +151,6 @@ def run(
         queries = plain + labelled
         unique = sorted({q.text for q in queries})
         vectors = dict(zip(unique, embedder.embed(unique, "query"), strict=True))
-        fixed = _Fixed(model, vectors)
 
         def time_all(
             search: Callable[[Query, Viewer], list[int]],
@@ -177,7 +166,9 @@ def run(
             return stats(times), results
 
         def exact(q: Query, viewer: Viewer) -> list[int]:
-            hits = semantic_hits(session, viewer, fixed, q.text, [], n) or []
+            # Full precision and no cast, so no index serves it (not even search's own).
+            distance = ChunkEmbeddingRow.embedding.cosine_distance(vectors[q.text])
+            hits = nearest_chunks(session, viewer, [], model, distance, n)
             return [h.chunk_id for h in hits if h.chunk_id is not None]
 
         size_sql = (

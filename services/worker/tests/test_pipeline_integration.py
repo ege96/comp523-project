@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 from audio_helpers import SPEECH_AND_PAUSES, make_audio
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
+from swayambhu_core import jobs, vector_index
 from swayambhu_core.models import (
     ChunkEmbeddingRow,
     InterviewLanguageRow,
@@ -423,6 +423,18 @@ def test_switching_embedder_adds_its_vectors_beside_the_old_ones(
             select(ChunkEmbeddingRow.model, func.count()).group_by(ChunkEmbeddingRow.model)
         ).all()
         assert sorted(models) == [("fake:hash@4", 2 * chunks), ("fake:hash@8", 2 * chunks)]
+        # Each vector size gets search's HNSW index, built by the worker after indexing.
+        valid = session.execute(
+            text(
+                "SELECT c.relname, i.indisvalid FROM pg_index i "
+                "JOIN pg_class c ON c.oid = i.indexrelid WHERE c.relname LIKE :p"
+            ),
+            {"p": vector_index.PREFIX + "%"},
+        ).all()
+        assert sorted(valid) == [
+            (vector_index.index_name(4), True),
+            (vector_index.index_name(8), True),
+        ]
 
 
 def test_a_step_queued_while_it_runs_waits_then_runs_again(

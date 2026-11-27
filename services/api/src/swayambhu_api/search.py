@@ -20,22 +20,28 @@ Every query joins `interviews` and filters with `visible_to`, like the rest of t
 
 import logging
 import uuid
+from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import (
     ColumnElement,
+    Row,
+    Select,
     and_,
     case,
     exists,
     func,
+    literal,
     literal_column,
     or_,
     select,
+    union_all,
 )
+from swayambhu_core import vector_index
 from swayambhu_core.models import (
     CHUNKER,
     ChunkEmbeddingRow,
@@ -169,6 +175,17 @@ def keyword_hits(
     where: list[ColumnElement[bool]],
     candidates: int,
 ) -> list[Hit]:
+    return _hits(session.execute(_keyword_query(viewer, q, where, candidates)))
+
+
+def _hits(rows: Iterable[Row[Any]]) -> list[Hit]:
+    return [Hit(r.interview_id, r.chunk_id, r.seq) for r in rows]
+
+
+def _keyword_query(
+    viewer: CurrentViewer, q: str, where: list[ColumnElement[bool]], candidates: int
+) -> Select[Any]:
+    """The `candidates` best keyword moments, best first, with their position (`pos`)."""
     english_q = func.websearch_to_tsquery(_ENGLISH, q)
     simple_q = func.websearch_to_tsquery(_SIMPLE, q)
     # English speech has no english_text, and neither has text whose translation failed.
@@ -221,13 +238,18 @@ def keyword_hits(
         )
         .subquery()
     )
-    rows = session.execute(
-        select(lines.c.interview_id, lines.c.chunk_id, lines.c.seq)
+    order = (lines.c.rank.desc(), lines.c.interview_id, lines.c.seq)
+    return (
+        select(
+            lines.c.interview_id,
+            lines.c.chunk_id,
+            lines.c.seq,
+            func.row_number().over(order_by=order).label("pos"),
+        )
         .where(lines.c.best_in_moment == 1)
-        .order_by(lines.c.rank.desc(), lines.c.interview_id, lines.c.seq)
+        .order_by(*order)
         .limit(candidates)
-    ).all()
-    return [Hit(i, c, s) for i, c, s in rows]
+    )
 
 
 def _detail_matches(
@@ -270,6 +292,14 @@ def semantic_hits(
     candidates: int,
 ) -> list[Hit] | None:
     """None when semantic search is unavailable."""
+    vector = _query_vector(embedder, q)
+    if embedder is None or vector is None:
+        return None
+    return _hits(session.execute(_semantic_query(viewer, where, embedder.name, vector, candidates)))
+
+
+def _query_vector(embedder: Embedder | None, q: str) -> list[float] | None:
+    """None when semantic search is unavailable."""
     if embedder is None:
         return None
     try:
@@ -279,8 +309,27 @@ def semantic_hits(
         # text can echo the request, and search terms are never logged.
         log.warning("Query embedding failed (retryable=%s); keyword results only", exc.retryable)
         return None
-    distance = ChunkEmbeddingRow.embedding.cosine_distance(vector)
-    return nearest_chunks(session, viewer, where, embedder.name, distance, candidates)
+    return vector
+
+
+def _semantic_query(
+    viewer: CurrentViewer,
+    where: list[ColumnElement[bool]],
+    model: str,
+    vector: list[float],
+    candidates: int,
+) -> Select[Any]:
+    """Nearest chunks through the HNSW index (`vector_index`): at half precision, and with
+    `hnsw.ef_search` set on every connection (db.py), it returns ~99% of exact search's top
+    10. Without the index it scans every embedding, exactly."""
+    dims = len(vector)
+    return _nearest_query(
+        viewer,
+        [*where, vector_index.same_size(dims)],
+        model,
+        vector_index.distance(dims, vector),
+        candidates,
+    )
 
 
 def nearest_chunks(
@@ -291,7 +340,18 @@ def nearest_chunks(
     distance: ColumnElement[float],
     candidates: int,
 ) -> list[Hit]:
-    """The `candidates` chunks with the nearest embedding, nearest first.
+    return _hits(session.execute(_nearest_query(viewer, where, model, distance, candidates)))
+
+
+def _nearest_query(
+    viewer: CurrentViewer,
+    where: list[ColumnElement[bool]],
+    model: str,
+    distance: ColumnElement[float],
+    candidates: int,
+) -> Select[Any]:
+    """The `candidates` chunks with the nearest embedding, nearest first, with their
+    position (`pos`).
 
     The inner query keeps only the nearest 2 x candidates embeddings. A chunk has at most two
     (original and English), so the k-th best chunk's best embedding ranks at most 2k - 1, and
@@ -313,26 +373,67 @@ def nearest_chunks(
         .limit(2 * candidates)
         .subquery()
     )
-    best = func.min(nearest.c.distance)
-    rows = session.execute(
-        select(SearchChunkRow.interview_id, SearchChunkRow.id, SearchChunkRow.first_seq)
+    order = (func.min(nearest.c.distance), SearchChunkRow.id)
+    return (
+        select(
+            SearchChunkRow.interview_id,
+            SearchChunkRow.id.label("chunk_id"),
+            SearchChunkRow.first_seq.label("seq"),
+            func.row_number().over(order_by=order).label("pos"),
+        )
         .join(nearest, nearest.c.chunk_id == SearchChunkRow.id)
         .group_by(SearchChunkRow.id)
-        .order_by(best, SearchChunkRow.id)
+        .order_by(*order)
         .limit(candidates)
-    ).all()
-    return [Hit(i, c, s) for i, c, s in rows]
+    )
+
+
+def _candidates(
+    session: DbSession,
+    viewer: CurrentViewer,
+    embedder: Embedder | None,
+    q: str,
+    where: list[ColumnElement[bool]],
+    candidates: int,
+) -> dict[Source, list[Hit]]:
+    """Keyword and semantic candidates in one round trip. "semantic" is missing when
+    semantic search is unavailable."""
+    vector = _query_vector(embedder, q)
+    queries: dict[Source, Select[Any]] = {"keyword": _keyword_query(viewer, q, where, candidates)}
+    if embedder is not None and vector is not None:
+        queries["semantic"] = _semantic_query(viewer, where, embedder.name, vector, candidates)
+    parts = []
+    for source, query in queries.items():
+        sub = query.subquery()
+        parts.append(
+            select(
+                literal(source).label("source"),
+                sub.c.interview_id,
+                sub.c.chunk_id,
+                sub.c.seq,
+                sub.c.pos,
+            )
+        )
+    combined = union_all(*parts).subquery()
+    rows = session.execute(select(combined).order_by(combined.c.source, combined.c.pos)).all()
+    found: dict[Source, list[Hit]] = {source: [] for source in queries}
+    for row in rows:
+        found[row.source].append(Hit(row.interview_id, row.chunk_id, row.seq))
+    return found
 
 
 def _excerpts(
     session: DbSession, viewer: CurrentViewer, hits: list[Hit], excerpt_ms: int
-) -> dict[tuple[uuid.UUID, int], list[Segment]]:
-    """For each hit, the lines from its anchor onward, about excerpt_ms long."""
-    rows = session.scalars(
-        select(SegmentRow)
-        .join(InterviewRow, InterviewRow.id == SegmentRow.interview_id)
+) -> tuple[dict[uuid.UUID, InterviewSummary], dict[tuple[uuid.UUID, int], list[Segment]]]:
+    """Each hit's interview summary and its lines from the anchor onward, about excerpt_ms
+    long, in one query."""
+    summaries: dict[uuid.UUID, InterviewSummary] = {}
+    by_interview: dict[uuid.UUID, list[SegmentRow]] = {}
+    rows = session.execute(
+        summary_query(viewer)
+        .add_columns(SegmentRow)
+        .join(SegmentRow, SegmentRow.interview_id == InterviewRow.id)
         .where(
-            visible_to(viewer.admin),
             or_(
                 *(
                     and_(
@@ -345,9 +446,12 @@ def _excerpts(
         )
         .order_by(SegmentRow.interview_id, SegmentRow.seq)
     ).all()
-    by_interview: dict[uuid.UUID, list[SegmentRow]] = {}
-    for row in rows:
-        by_interview.setdefault(row.interview_id, []).append(row)
+    for interview, person, language, segment in rows:
+        if interview.id not in summaries:
+            summaries[interview.id] = InterviewSummary.model_validate(
+                to_summary(interview, person, language)
+            )
+        by_interview.setdefault(interview.id, []).append(segment)
     excerpts: dict[tuple[uuid.UUID, int], list[Segment]] = {}
     for h in hits:
         lines = [s for s in by_interview.get(h.interview_id, []) if s.seq >= h.seq]
@@ -357,7 +461,7 @@ def _excerpts(
                 break
             excerpt.append(line)
         excerpts[(h.interview_id, h.seq)] = [to_segment(s) for s in excerpt]
-    return excerpts
+    return summaries, excerpts
 
 
 @router.get("/api/search", response_model=SearchResults)
@@ -393,13 +497,9 @@ def _search(
     limit: int,
     offset: int,
 ) -> SearchResults:
-    n = settings.search_candidates
-    semantic = semantic_hits(session, viewer, embedder, q, where, n)
-    mode: Literal["hybrid", "keyword_only"] = "keyword_only" if semantic is None else "hybrid"
-    ranked = fuse(
-        {"keyword": keyword_hits(session, viewer, q, where, n), "semantic": semantic or []},
-        settings.search_rrf_k,
-    )
+    found = _candidates(session, viewer, embedder, q, where, settings.search_candidates)
+    mode: Literal["hybrid", "keyword_only"] = "hybrid" if "semantic" in found else "keyword_only"
+    ranked = fuse(found, settings.search_rrf_k)
     page = ranked[offset : offset + limit]
     interviews, more_interviews = (
         _detail_matches(session, viewer, q, where) if offset == 0 else ([], False)
@@ -413,13 +513,9 @@ def _search(
             search_mode=mode,
         )
 
-    summaries = {
-        row.id: InterviewSummary.model_validate(to_summary(row, person, lang))
-        for row, person, lang in session.execute(
-            summary_query(viewer).where(InterviewRow.id.in_({h.interview_id for h, _ in page}))
-        )
-    }
-    excerpts = _excerpts(session, viewer, [h for h, _ in page], settings.search_excerpt_ms)
+    summaries, excerpts = _excerpts(
+        session, viewer, [h for h, _ in page], settings.search_excerpt_ms
+    )
     items = []
     for hit, matched_by in page:
         excerpt = excerpts.get((hit.interview_id, hit.seq))
