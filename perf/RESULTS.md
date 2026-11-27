@@ -1,6 +1,6 @@
 # Results
 
-Measured on 2026-11-26 with the tools in this folder (see [README.md](README.md)). These are **local** numbers: one machine running containers with the CloudApps pods' CPU and memory limits, not the live site. "Before" is `main` at 25a5df6. "After" is this branch, with its two search fixes, the keyword index and the vector query, plus the connection fix where noted.
+Measured on 2026-11-26 and 27 with the tools in this folder (see [README.md](README.md)). These are **local** numbers: one machine running containers with the CloudApps pods' CPU and memory limits, not the live site. "Before" is `main` at 25a5df6. "After" is this branch, with its two search fixes (the keyword index and the vector query), plus the connection fix where noted. The last section adds the HNSW index and fewer round trips, measured against the branch without them.
 
 ## Environment
 
@@ -44,12 +44,12 @@ At 30x the 1 GB database no longer fits in the db pod's 512 MiB (its memory reac
 
 | | p50 / p95 | Overlap with exact @10 | Task recall@10 | Index size | Build time |
 |---|---|---|---|---|---|
-| Exact (current) | 368 / 494 ms | 1.000 | 0.761 | | |
+| Exact | 368 / 494 ms | 1.000 | 0.761 | | |
 | HNSW halfvec, ef_search 1000 | 23 / 71 ms | 0.990 | 0.751 | 100.5 MB | 190 s |
 | HNSW halfvec, ef_search 40-200 | 14 / 58 ms | 0.957-0.963 | 0.680 | 100.5 MB | 190 s |
 | HNSW vector, ef_search 1000 | 33 / 81 ms | 0.989 | 0.751 | 175.8 MB | 226 s |
 
-An HNSW halfvec index makes the vector query about 16x faster at 30x for a 1-point drop in task recall. The build ran with `maintenance_work_mem` 64MB, which the graph outgrew. Exact search is still fine at 10x, so the index is a later step, not part of this change.
+An HNSW halfvec index makes the vector query about 16x faster at 30x for a 1-point drop in task recall. The build ran with `maintenance_work_mem` 64MB, which the graph outgrew. Search now uses this index with `ef_search` 1000 (see the last section).
 
 ## Load: how much one api pod serves (10x)
 
@@ -93,6 +93,19 @@ So, apart from the provider's own transcription time, an hour of audio is ready 
 | 720p video | 1.5 Mbit/s, 300 ms RTT | 20.8 / 20.8 s | 0.86 / 1.33 s |
 
 Seeking stays near a second even on the slow link, because playback copies are written with `+faststart` and served with range requests. The slow video start comes from the test pattern's bitrate being above the link speed.
+
+## HNSW index and fewer round trips
+
+Search now walks the HNSW halfvec index with `hnsw.ef_search` 1000, which the worker builds. Each search makes three queries instead of five: both candidate searches run as one query, and a page's interviews and excerpts come from one more. Measured on 2026-11-27 in one session, against this branch without those two changes ("before"), with the full 953 queries, 2 passes and 2 fresh starts each.
+
+| Size | Before p50 / p95 | After p50 / p95 | Index build |
+|---|---|---|---|
+| 10x (30,012 vectors) | 111 / 184 ms | 97 / 162 ms | 25 s, 34 MB |
+| 30x (90,000 vectors) | 641 / 855 ms | 238 / 420 ms | 221 s, 100 MB |
+
+At 30x, p95 is now under 500 ms. At 10x the gain is small, because the vector query was already only about a fifth of a search. In process at 10x, a search spends about this long on each step (medians): embedding the query 20 ms, the candidates query 20 ms (its vector part went from 80 to 19 ms), matching interview details 23 ms, and excerpts 5 ms.
+
+**Load at 10x is unchanged:** about 6 searches/s within the bar and 7.5-8/s flat out, before and after, with 0 failures and immediate recovery. The api's one CPU is the limit, mostly spent embedding queries and running Python, not waiting on Postgres. So the next gains are in the api: profiling it, adding a second replica (within the quota), and indexing interview details, which are matched on the fly today.
 
 ## What is not covered
 
