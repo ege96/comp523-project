@@ -1,31 +1,37 @@
-"""Resumable recording uploads over the tus protocol (Proposal; https://tus.io), served by
+"""Resumable recording uploads using the tus protocol (https://tus.io), served by
 tuspyserver.
 
 An admin's browser (tus-js-client) or script (tuspy, or curl) creates an upload at
 `POST /api/uploads` with the interview's metadata, then sends the file in chunks with
 `PATCH /api/uploads/{id}`. A dropped connection resumes from the last byte the server holds
 (`HEAD` reports it). Partial uploads live in `<MEDIA_ROOT>/uploads`, on the same volume as
-the media, so a finished one is moved into place rather than copied. Only then is the
+the media, so a finished one is hard-linked into place rather than copied. Only then is the
 interview created and its processing queued, so an abandoned upload leaves no interview
 behind; the worker deletes abandoned uploads after `UPLOAD_RETENTION_DAYS`.
 
-Every tus route is admin-only (D-005). The final PATCH's response carries the new interview's
+Finishing is retryable: the interview's id is derived from the upload's id, and the upload
+is deleted only after the interview is committed. If that commit fails, the client sends
+an empty PATCH at the final offset and the same interview is created again.
+
+Every tus route is admin-only. The final PATCH's response carries the new interview's
 id in `Upload-Interview-Id`.
 """
 
 import mimetypes
 import re
+import shutil
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import date
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal
+from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
+from swayambhu_core.languages import sync_interview_languages
 from swayambhu_core.models import IntervieweeRow, InterviewRow, LanguageRow
 from swayambhu_core.recordings import add_original, original_key
 from swayambhu_core.storage import LocalMediaStore
@@ -36,15 +42,17 @@ from swayambhu_api.admins import Admin
 from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DbSession
+from swayambhu_api.recording_dates import DATE_PATTERN, recorded_date
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 INTERVIEW_ID_HEADER = "Upload-Interview-Id"
-_DATE = re.compile(r"\d{4}(-\d{2}(-\d{2})?)?")
+CHUNK_CONTENT_TYPE = "application/offset+octet-stream"
+# Interview ids are uuid5(UPLOAD_NAMESPACE, upload id), so a retried finish finds its interview.
+UPLOAD_NAMESPACE = uuid.UUID("5f0c1e8e-6d0a-4b1e-9a57-3c2f4e7d8b10")
 
 
 class UploadMetadata(BaseModel):
-    """What the admin knows about a recording, sent as tus `Upload-Metadata` (D-004: only the
-    title is required). tus sends every value as a string."""
+    """Recording metadata received as strings in the tus Upload-Metadata header."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -61,7 +69,7 @@ class UploadMetadata(BaseModel):
     interviewee_id: int | None = None
     interviewee_name: str | None = Field(default=None, min_length=1, max_length=500)
     # YYYY, YYYY-MM or YYYY-MM-DD: as much of the date as is known.
-    recorded_on: str | None = Field(default=None, pattern=_DATE.pattern)
+    recorded_on: str | None = Field(default=None, pattern=DATE_PATTERN)
 
     @model_validator(mode="after")
     def _consistent(self) -> "UploadMetadata":
@@ -78,13 +86,6 @@ class UploadMetadata(BaseModel):
         if re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
             return suffix
         return mimetypes.guess_extension(self.filetype) or ""
-
-
-def recorded_date(value: str) -> tuple[date, Literal["year", "month", "day"]]:
-    """'2019' -> (2019-01-01, 'year'): the first day of the period, and how much is real."""
-    parts = [int(p) for p in value.split("-")]
-    precision: Literal["year", "month", "day"] = ("year", "month", "day")[len(parts) - 1]
-    return date(*parts, *[1] * (3 - len(parts))), precision
 
 
 def _parse(metadata: dict[str, str]) -> UploadMetadata:
@@ -105,25 +106,52 @@ def _check_references(session: Session, metadata: UploadMetadata) -> None:
 
 
 def require_upload_admin(request: Request, admin: CurrentAdmin, settings: SettingsDep) -> Admin:
-    """The admin check on every tus route, plus the limits that keep a pod's memory bounded.
+    """The admin check on every tus route, plus the request checks that must come first.
 
-    tuspyserver holds one PATCH body in memory before writing it, so each chunk is capped.
-    Its creation-with-upload and concatenation extensions read whole bodies at once, so
-    they're refused: create empty, then PATCH.
+    As a router dependency (see main.py) this runs before tuspyserver's PATCH dependency,
+    which writes the body to storage and advances the offset before its route checks any
+    headers. So everything that can refuse a PATCH is checked here, and a refused one leaves
+    the upload exactly as it was.
+
+    tuspyserver streams a PATCH body to disk in chunks; the per-request cap keeps each
+    PATCH short, so it finishes within proxy timeouts and holds the upload's lock briefly.
+    Its creation-with-upload and concatenation extensions read whole bodies into memory,
+    so they're refused: create empty, then PATCH.
     """
-    if "upload-concat" in request.headers:
+    headers = request.headers
+    if "upload-concat" in headers:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Concatenated uploads aren't supported")
-    length = int(request.headers.get("content-length") or 0)
-    if request.method == "POST" and length > 0:
+    if request.method == "POST" and int(headers.get("content-length") or 0) > 0:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Create the upload without a body, then PATCH it"
         )
-    if request.method == "PATCH" and length > settings.upload_chunk_max_bytes:
+    if request.method == "PATCH":
+        _check_chunk_headers(request, settings)
+    return admin
+
+
+def _check_chunk_headers(request: Request, settings: Settings) -> None:
+    headers = request.headers
+    if headers.get("tus-resumable") != "1.0.0":
+        raise HTTPException(
+            status.HTTP_412_PRECONDITION_FAILED,
+            "Unsupported tus version. Expected 1.0.0",
+            headers={"Tus-Version": "1.0.0"},
+        )
+    if headers.get("content-type") != CHUNK_CONTENT_TYPE:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"Content-Type must be {CHUNK_CONTENT_TYPE}"
+        )
+    if not re.fullmatch(r"\d+", headers.get("upload-offset", "")):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Upload-Offset is required")
+    length = headers.get("content-length", "")
+    if not re.fullmatch(r"\d+", length):
+        raise HTTPException(status.HTTP_411_LENGTH_REQUIRED, "Content-Length is required")
+    if int(length) > settings.upload_chunk_max_bytes:
         raise HTTPException(
             status.HTTP_413_CONTENT_TOO_LARGE,
             f"Send chunks of at most {settings.upload_chunk_max_bytes} bytes",
         )
-    return admin
 
 
 PreCreate = Callable[[dict[str, str], dict[str, object]], Awaitable[None]]
@@ -144,16 +172,41 @@ def check_new_upload(session: DbSession, settings: SettingsDep) -> PreCreate:
                 status.HTTP_413_CONTENT_TOO_LARGE,
                 f"Recordings can be at most {settings.max_upload_bytes} bytes",
             )
+        if size > usable_bytes(settings):
+            raise HTTPException(
+                status.HTTP_507_INSUFFICIENT_STORAGE,
+                "There isn't enough storage space left for this recording. "
+                "Ask the archive's operator to add storage.",
+            )
         await run_in_threadpool(_check_references, session, parsed)
         await run_in_threadpool(session.rollback)  # don't hold a connection between requests
 
     return check
 
 
-def _create_interview(
+def _finish(
     session: Session, admin: Admin, settings: Settings, metadata: UploadMetadata, upload: Path
 ) -> uuid.UUID:
-    """Move the finished upload into media storage and create its interview and jobs."""
+    """Create the finished upload's interview, unless a previous attempt already committed
+    it, then delete the upload."""
+    interview_id = uuid.uuid5(UPLOAD_NAMESPACE, upload.name)
+    if session.get(InterviewRow, interview_id) is None:
+        _create_interview(session, admin, settings, metadata, upload, interview_id)
+    upload.unlink(missing_ok=True)
+    upload.with_name(upload.name + ".info").unlink(missing_ok=True)
+    return interview_id
+
+
+def _create_interview(
+    session: Session,
+    admin: Admin,
+    settings: Settings,
+    metadata: UploadMetadata,
+    upload: Path,
+    interview_id: uuid.UUID,
+) -> None:
+    """Store the upload as the interview's original and commit its interview and jobs. The
+    upload itself stays, so a failed commit can be retried."""
     _check_references(session, metadata)  # an interviewee may have gone since creation
     interviewee_id = metadata.interviewee_id
     if metadata.interviewee_name is not None:
@@ -165,7 +218,7 @@ def _create_interview(
         recorded_date(metadata.recorded_on) if metadata.recorded_on else (None, None)
     )
     interview = InterviewRow(
-        id=uuid.uuid4(),
+        id=interview_id,
         title=metadata.title,
         language_confirmed=metadata.language,
         interviewee_id=interviewee_id,
@@ -174,7 +227,7 @@ def _create_interview(
         created_by=admin.id,
     )
     session.add(interview)
-    session.flush()
+    sync_interview_languages(session, interview.id)  # filed under its confirmed language
     key = original_key(interview.id, metadata.suffix)
     size = upload.stat().st_size
     # Hashing a multi-GB file here would outlast the router's request timeout.
@@ -183,14 +236,23 @@ def _create_interview(
         sha256=None,
     )  # fmt: skip
     store = LocalMediaStore(settings.media_root)
-    store.put(key, upload, move=True)
+    store.put_keeping_source(key, upload)
     try:
         session.commit()
     except BaseException:
-        store.delete(key)
+        _discard_uncommitted(session, store, interview_id, key)
         raise
-    upload.with_name(upload.name + ".info").unlink(missing_ok=True)
-    return interview.id
+
+
+def _discard_uncommitted(
+    session: Session, store: LocalMediaStore, interview_id: uuid.UUID, key: str
+) -> None:
+    """Delete the stored original of an interview whose commit failed, unless a concurrent
+    attempt committed that interview. A retry stores the same key again."""
+    with suppress(Exception):  # the database may be unreachable; a retry replaces the file
+        session.rollback()
+        if session.get(InterviewRow, interview_id) is None:
+            store.delete(key)
 
 
 Complete = Callable[[str, dict[str, str]], Awaitable[None]]
@@ -201,7 +263,7 @@ def finish_upload(
 ) -> Complete:
     async def finish(path: str, metadata: dict[str, str]) -> None:
         interview_id = await run_in_threadpool(
-            _create_interview, session, admin, settings, _parse(metadata), Path(path)
+            _finish, session, admin, settings, _parse(metadata), Path(path)
         )
         response.headers[INTERVIEW_ID_HEADER] = str(interview_id)
 
@@ -210,6 +272,41 @@ def finish_upload(
 
 def uploads_dir(settings: Settings) -> Path:
     return settings.media_root / "uploads"
+
+
+def free_bytes(settings: Settings) -> int:
+    """Free space on the volume that holds the media (and the uploads in progress)."""
+    path = settings.media_root
+    while not path.exists() and path != path.parent:
+        path = path.parent  # nothing uploaded yet: the volume is mounted further up
+    return shutil.disk_usage(path).free
+
+
+def usable_bytes(settings: Settings) -> int:
+    """How much a new upload may take: free space less the margin kept for playback copies.
+
+    Checked when each upload is created. Two admins uploading at once could still overfill
+    the volume, since neither upload counts the bytes the other has yet to send.
+    """
+    return max(0, free_bytes(settings) - settings.upload_free_space_margin_bytes)
+
+
+class StorageSpace(BaseModel):
+    # What a new upload may take now; a batch larger than this won't all fit.
+    usable_bytes: int
+    # The largest single recording the API accepts.
+    max_upload_bytes: int
+
+
+space_router = APIRouter(tags=["uploads"])
+
+
+@space_router.get("/api/storage", response_model=StorageSpace)
+def storage_space(_admin: CurrentAdmin, settings: SettingsDep) -> StorageSpace:
+    """Room for uploads, so the upload page can warn before a batch starts."""
+    return StorageSpace(
+        usable_bytes=usable_bytes(settings), max_upload_bytes=settings.max_upload_bytes
+    )
 
 
 # Built once at import: tuspyserver fixes its directory and size limit when the router is

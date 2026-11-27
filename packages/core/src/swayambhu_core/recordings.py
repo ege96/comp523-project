@@ -8,10 +8,19 @@ from sqlalchemy.orm import Session
 from swayambhu_core import jobs
 from swayambhu_core.models import MediaFileRow
 
+# Every stored file of an interview lives under `interviews/<id>/`, so deleting the interview
+# removes that one prefix, and a sweep can tell leftovers by their folder name.
+INTERVIEWS_PREFIX = "interviews"
+
+
+def interview_prefix(interview_id: uuid.UUID) -> str:
+    """The storage prefix holding all of one interview's files."""
+    return f"{INTERVIEWS_PREFIX}/{interview_id}"
+
 
 def original_key(interview_id: uuid.UUID, suffix: str) -> str:
     """Where an interview's original recording is stored. `suffix` is like `.mp3`, or empty."""
-    return f"interviews/{interview_id}/original{suffix.lower()}"
+    return f"{interview_prefix(interview_id)}/original{suffix.lower()}"
 
 
 def add_original(
@@ -36,5 +45,6 @@ def add_original(
             sha256=sha256,
         )
     )
-    jobs.enqueue(session, "transcribe", interview_id)
-    jobs.enqueue(session, "playback", interview_id)
+    # Behind admins' work and interviews already started, so a batch finishes one by one.
+    jobs.enqueue(session, "transcribe", interview_id, jobs.Priority.NEW)
+    jobs.enqueue(session, "playback", interview_id, jobs.Priority.NEW)

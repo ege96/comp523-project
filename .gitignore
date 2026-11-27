@@ -13,3 +13,9 @@ coverage/
 media/
 .env.local
 .env.*.local
+# CloudApps parameter files (secrets.env holds API keys)
+deploy/cloudapps/*.env
+
+# Downloaded corpus sources and built corpora (perf/download_corpus_sources.sh)
+/data/
+/perf/data/

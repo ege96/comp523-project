@@ -6,9 +6,9 @@ After:
 
 ## How
 
-## Decisions log
+## Design decisions
 
-<!-- Does this PR implement or depend on a decision (D-###) or a Proposal that needs a P-### row? -->
+<!-- Any choice reviewers should know about (a new setting, route, table or dependency), and why. The repository is the record, so put lasting rules in the docs too. -->
 
 ## Checklist
 

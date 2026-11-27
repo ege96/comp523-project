@@ -26,6 +26,18 @@ repos:
         language: system
         files: ^services/api/.*\.py$
         pass_filenames: false
+      - id: ruff-perf
+        name: ruff (perf)
+        entry: uv run --directory perf ruff check --fix
+        language: system
+        files: ^perf/.*\.py$
+        pass_filenames: false
+      - id: ruff-format-perf
+        name: ruff format (perf)
+        entry: uv run --directory perf ruff format
+        language: system
+        files: ^perf/.*\.py$
+        pass_filenames: false
       - id: ruff-worker
         name: ruff (worker)
         entry: uv run --directory services/worker ruff check --fix

@@ -2,6 +2,7 @@ import CircularProgress from "@mui/material/CircularProgress";
 import Container from "@mui/material/Container";
 import { Navigate, Outlet } from "@tanstack/react-router";
 
+import { useLiveAdminUpdates } from "../admin/live";
 import { useAuth } from "../auth/useAuth";
 
 /**
@@ -19,5 +20,16 @@ export function AdminGate() {
   }
   if (state.status !== "signedIn" || state.role !== "admin")
     return <Navigate to="/signin" replace />;
-  return <Outlet />;
+  return (
+    <>
+      <LiveAdminUpdates />
+      <Outlet />
+    </>
+  );
+}
+
+/** One live-updates connection for every admin page, kept across page changes. */
+function LiveAdminUpdates() {
+  useLiveAdminUpdates();
+  return null;
 }

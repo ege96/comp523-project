@@ -1,0 +1,379 @@
+# The whole archive on CloudApps (OpenShift): builds, deployments, services and routes.
+# Safe to re-run; it changes only what differs. Needs setup.yaml's Secrets and volumes.
+#
+#   oc process -f deploy/cloudapps/app.yaml --param-file=deploy/cloudapps/app.env | oc apply -f -
+#
+# See docs/deploy-cloudapps.md.
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: swayambhu
+  annotations:
+    description: Swayambhu Stories archive (web, api, worker, PostgreSQL with pgvector).
+parameters:
+  - name: WEB_HOSTNAME
+    description: Public hostname for the site; the API is served at /api on it.
+    required: true
+  - name: TRANSCRIPTION_PROVIDER
+    description: openai or mai (Microsoft MAI-Transcribe via Azure Speech; needs AZURE_SPEECH_KEY in ai-providers).
+    value: openai
+  - name: TRANSCRIPTION_MODEL
+    description: Transcription model id for that provider, e.g. gpt-transcribe or MAI-Transcribe-2 (verify before use).
+    required: true
+  - name: AZURE_SPEECH_ENDPOINT
+    description: mai only. The Speech resource's endpoint, e.g. https://<resource>.cognitiveservices.azure.com.
+    value: ""
+  - name: TRANSCRIPTION_LANGUAGES
+    description: Languages OpenAI should expect when an upload has none confirmed (codes, comma separated).
+    value: ne,en
+  - name: GIT_URL
+    value: https://github.com/ege96/comp523-project
+  - name: GIT_REF
+    value: main
+  - name: FIREBASE_PROJECT_ID
+    description: Must match the web build's VITE_FIREBASE_PROJECT_ID (apps/web/.env.production).
+    value: comp523
+  - name: EMBEDDING_MODEL
+    description: Baked into the api and worker images; changing it needs a reindex.
+    value: intfloat/multilingual-e5-small
+  - name: POSTGRES_IMAGE
+    description: Imported into the db ImageStream, so pods pull it from the cluster's registry.
+    value: docker.io/pgvector/pgvector:pg16
+  - name: DB_VOLUME_CLAIM
+    description: The database volume (setup.yaml creates db-data). Only for projects set up before the templates.
+    value: db-data
+  - name: GIT_SOURCE_SECRET
+    description: Secret holding the GitHub token builds clone with (setup.yaml creates github-read).
+    value: github-read
+objects:
+  # ---------- settings shared by api and worker ----------
+  # One ConfigMap for both, so search always compares vectors from the same model.
+  # Pods read it at start: after changing it, oc rollout restart deploy/api deploy/worker.
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: app-settings
+      labels: { app.kubernetes.io/part-of: swayambhu }
+    data:
+      MEDIA_ROOT: /data/media
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER}
+      TRANSCRIPTION_MODEL: ${TRANSCRIPTION_MODEL}
+      TRANSCRIPTION_LANGUAGES: ${TRANSCRIPTION_LANGUAGES}
+      AZURE_SPEECH_ENDPOINT: ${AZURE_SPEECH_ENDPOINT}
+      TRANSLATION_PROVIDER: google_nmt
+      EMBEDDING_PROVIDER: local
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      EMBEDDING_QUERY_PREFIX: "query: "
+      EMBEDDING_PASSAGE_PREFIX: "passage: "
+      # Matches the api's 1 CPU limit (the code's default of 4 oversubscribes it).
+      LOCAL_EMBEDDING_THREADS: "1"
+
+  # ---------- database ----------
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: db
+      labels: { app: db, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      lookupPolicy: { local: true }
+      tags:
+        - name: pg16
+          from: { kind: DockerImage, name: "${POSTGRES_IMAGE}" }
+          referencePolicy: { type: Local }
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: db
+      labels: { app: db, app.kubernetes.io/part-of: swayambhu }
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"db:pg16"},"fieldPath":"spec.template.spec.containers[?(@.name==\"db\")].image"}]
+    spec:
+      replicas: 1
+      # Recreate: a rolling update would start a second PostgreSQL on the same volume.
+      strategy: { type: Recreate }
+      selector:
+        matchLabels: { app: db }
+      template:
+        metadata:
+          labels: { app: db, deployment: db }
+        spec:
+          containers:
+            - name: db
+              image: "db:pg16"
+              ports: [{ containerPort: 5432, protocol: TCP }]
+              env:
+                - name: PGDATA
+                  value: /var/lib/postgresql/data/pgdata
+              envFrom:
+                - secretRef: { name: db-credentials }
+              resources:
+                limits: { cpu: 500m, memory: 512Mi }
+                requests: { cpu: 100m, memory: 512Mi }
+              readinessProbe:
+                exec:
+                  command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+                periodSeconds: 10
+              volumeMounts:
+                - { name: data, mountPath: /var/lib/postgresql/data }
+          volumes:
+            - name: data
+              persistentVolumeClaim: { claimName: "${DB_VOLUME_CLAIM}" }
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: db
+      labels: { app: db, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      selector: { app: db, deployment: db }
+      ports:
+        - { name: 5432-tcp, port: 5432, targetPort: 5432, protocol: TCP }
+
+  # ---------- images built from the repository ----------
+  # lookupPolicy.local lets the Deployments below name images as "<app>:latest".
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: api
+      labels: { app: api, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      lookupPolicy: { local: true }
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: worker
+      labels: { app: worker, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      lookupPolicy: { local: true }
+  - apiVersion: image.openshift.io/v1
+    kind: ImageStream
+    metadata:
+      name: web
+      labels: { app: web, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      lookupPolicy: { local: true }
+
+  # The first build of each app starts when its BuildConfig is created (ConfigChange).
+  # Later builds: the Generic webhook, called by .github/workflows/cloudapps-build.yml.
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: api
+      labels: { app: api, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      runPolicy: Serial
+      source:
+        type: Git
+        git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
+        contextDir: /
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
+      strategy:
+        type: Docker
+        dockerStrategy: { dockerfilePath: services/api/Dockerfile }
+      output:
+        to: { kind: ImageStreamTag, name: "api:latest" }
+      triggers:
+        - type: Generic
+          generic:
+            secretReference: { name: api-generic-webhook-secret }
+        - type: ConfigChange
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: worker
+      labels: { app: worker, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      runPolicy: Serial
+      source:
+        type: Git
+        git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
+        contextDir: /
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
+      strategy:
+        type: Docker
+        dockerStrategy: { dockerfilePath: services/worker/Dockerfile }
+      output:
+        to: { kind: ImageStreamTag, name: "worker:latest" }
+      triggers:
+        - type: Generic
+          generic:
+            secretReference: { name: worker-generic-webhook-secret }
+        - type: ConfigChange
+  - apiVersion: build.openshift.io/v1
+    kind: BuildConfig
+    metadata:
+      name: web
+      labels: { app: web, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      runPolicy: Serial
+      source:
+        type: Git
+        git: { uri: "${GIT_URL}", ref: "${GIT_REF}" }
+        contextDir: /apps/web
+        sourceSecret: { name: "${GIT_SOURCE_SECRET}" }
+      strategy:
+        type: Docker
+        dockerStrategy: { dockerfilePath: Dockerfile }
+      output:
+        to: { kind: ImageStreamTag, name: "web:latest" }
+      triggers:
+        - type: Generic
+          generic:
+            secretReference: { name: web-generic-webhook-secret }
+        - type: ConfigChange
+
+  # ---------- api ----------
+  # The image trigger annotation rolls out each finished build. The API runs database
+  # migrations (and CREATE EXTENSION vector) itself when it starts.
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: api
+      labels: { app: api, app.kubernetes.io/part-of: swayambhu }
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"api:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"api\")].image"}]
+    spec:
+      replicas: 1
+      # Recreate: the quota has no room for a second api pod during a rollout.
+      strategy: { type: Recreate }
+      selector:
+        matchLabels: { app: api }
+      template:
+        metadata:
+          labels: { app: api, deployment: api }
+        spec:
+          containers:
+            - name: api
+              image: "api:latest"
+              ports: [{ containerPort: 8080, protocol: TCP }]
+              env:
+                - { name: FIREBASE_PROJECT_ID, value: "${FIREBASE_PROJECT_ID}" }
+              envFrom:
+                - secretRef: { name: db-credentials }
+                - secretRef: { name: ai-providers }
+                - configMapRef: { name: app-settings }
+              resources:
+                limits: { cpu: "1", memory: 768Mi }
+                requests: { cpu: 250m, memory: 768Mi }
+              readinessProbe:
+                httpGet: { path: /api/health/ready, port: 8080 }
+                periodSeconds: 10
+              livenessProbe:
+                httpGet: { path: /api/health, port: 8080 }
+                # Loading the search model and running migrations takes a while.
+                initialDelaySeconds: 60
+                periodSeconds: 20
+              volumeMounts:
+                - { name: media, mountPath: /data/media }
+          volumes:
+            - name: media
+              persistentVolumeClaim: { claimName: media }
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: api
+      labels: { app: api, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      selector: { app: api, deployment: api }
+      ports:
+        - { name: 8080-tcp, port: 8080, targetPort: 8080, protocol: TCP }
+
+  # ---------- worker ----------
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: worker
+      labels: { app: worker, app.kubernetes.io/part-of: swayambhu }
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"worker:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"worker\")].image"}]
+    spec:
+      replicas: 1
+      strategy: { type: Recreate }
+      selector:
+        matchLabels: { app: worker }
+      template:
+        metadata:
+          labels: { app: worker, deployment: worker }
+        spec:
+          containers:
+            - name: worker
+              image: "worker:latest"
+              env:
+                # Overrides app-settings: the worker has 2 CPUs, the api 1.
+                - { name: LOCAL_EMBEDDING_THREADS, value: "2" }
+              envFrom:
+                - secretRef: { name: db-credentials }
+                - secretRef: { name: ai-providers }
+                - configMapRef: { name: app-settings }
+              # The worker gets the spare quota: FFmpeg and batch embedding are its peaks.
+              # Long-running total: 2,432Mi of 2,560Mi and 3.8 of 4 CPU.
+              resources:
+                limits: { cpu: "2", memory: 1Gi }
+                requests: { cpu: 250m, memory: 1Gi }
+              volumeMounts:
+                - { name: media, mountPath: /data/media }
+          volumes:
+            - name: media
+              persistentVolumeClaim: { claimName: media }
+
+  # ---------- website ----------
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: web
+      labels: { app: web, app.kubernetes.io/part-of: swayambhu }
+      annotations:
+        image.openshift.io/triggers: >-
+          [{"from":{"kind":"ImageStreamTag","name":"web:latest"},"fieldPath":"spec.template.spec.containers[?(@.name==\"web\")].image"}]
+    spec:
+      replicas: 1
+      selector:
+        matchLabels: { app: web }
+      template:
+        metadata:
+          labels: { app: web, deployment: web }
+        spec:
+          containers:
+            - name: web
+              image: "web:latest"
+              ports: [{ containerPort: 8080, protocol: TCP }]
+              resources:
+                limits: { cpu: 300m, memory: 128Mi }
+                requests: { cpu: 60m, memory: 128Mi }
+              readinessProbe:
+                httpGet: { path: /, port: 8080 }
+                periodSeconds: 10
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: web
+      labels: { app: web, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      selector: { app: web, deployment: web }
+      ports:
+        - { name: 8080-tcp, port: 8080, targetPort: 8080, protocol: TCP }
+
+  # ---------- routes: one hostname, the API under /api ----------
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: web
+      labels: { app: web, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      host: ${WEB_HOSTNAME}
+      to: { kind: Service, name: web }
+      port: { targetPort: 8080-tcp }
+      tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: api
+      labels: { app: api, app.kubernetes.io/part-of: swayambhu }
+    spec:
+      host: ${WEB_HOSTNAME}
+      path: /api
+      to: { kind: Service, name: api }
+      port: { targetPort: 8080-tcp }
+      tls: { termination: edge, insecureEdgeTerminationPolicy: Redirect }

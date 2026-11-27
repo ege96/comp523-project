@@ -1,4 +1,4 @@
-"""Run Alembic database migrations against DATABASE_URL (Proposal P-011).
+"""Run Alembic database migrations against DATABASE_URL.
 
     python -m swayambhu_api.migrate upgrade head
     python -m swayambhu_api.migrate current

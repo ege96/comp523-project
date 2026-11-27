@@ -5,8 +5,10 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
+from starlette.responses import FileResponse
+from starlette.types import Receive, Scope, Send
 from swayambhu_core.models import (
     IntervieweeRow,
     InterviewLanguageRow,
@@ -17,6 +19,7 @@ from swayambhu_core.models import (
 
 from swayambhu_api import media_urls
 from swayambhu_api.config import Settings
+from swayambhu_api.db import get_engine
 from tests.fakes import ADMIN, as_viewer
 
 pytestmark = pytest.mark.integration
@@ -41,6 +44,7 @@ def interviews(db_session: Session, settings: Settings) -> Iterator[dict[str, In
             interviewee_id=person.id,
             language_confirmed="ne",
             status_detail="Translating",
+            consent_note="Consent recorded on paper",
             duration_ms=20_000,
         )
         db_session.add(interview)
@@ -106,10 +110,15 @@ def test_detail_and_transcript_of_a_public_interview(
 ) -> None:
     path = f"/api/interviews/{interviews['public'].id}"
     detail = as_viewer(client).get(path).json()
-    assert detail["status_detail"] is None  # admins only
+    admin_only = ("status_detail", "consent_note", "language_detected", "language_confirmed")
+    assert [detail[k] for k in admin_only] == [None, None, None, None]
+    assert detail["interviewee_id"] == interviews["public"].interviewee_id
     assert detail["languages"] == [{"code": "ne", "name": "Nepali"}]
     assert detail["media"]["content_type"] == "audio/mp4"
-    assert as_viewer(client, ADMIN).get(path).json()["status_detail"] == "Translating"
+    as_admin = as_viewer(client, ADMIN).get(path).json()
+    assert [as_admin[k] for k in admin_only] == [
+        "Translating", "Consent recorded on paper", None, "ne",
+    ]  # fmt: skip
 
     segments = as_viewer(client).get(f"{path}/segments").json()["items"]
     assert [
@@ -130,18 +139,92 @@ def test_media_links_stream_with_ranges_and_refuse_tampering(
     assert (res.status_code, res.content) == (206, PLAYBACK[10:20])
 
     media_id = int(urlsplit(url).path.rsplit("/", 1)[1])
-    expires, sig = (v[0] for v in parse_qs(urlsplit(url).query).values())
+    query = {k: v[0] for k, v in parse_qs(urlsplit(url).query).items()}
+    expires, sig = query["expires"], query["sig"]
+    assert query["scope"] == "public"
 
-    def status(media: int, exp: int | str, signature: str | None = None) -> int:
-        signature = signature or media_urls._signature(settings, media, int(exp))
-        return anonymous.get(f"/api/media/{media}?expires={exp}&sig={signature}").status_code
+    def status(
+        media: int, exp: int | str, signature: str | None = None, scope: str = "public"
+    ) -> int:
+        signature = signature or media_urls._signature(settings, media, int(exp), scope)  # type: ignore[arg-type]
+        path = f"/api/media/{media}?expires={exp}&scope={scope}&sig={signature}"
+        return anonymous.get(path).status_code
 
     assert status(media_id + 1, expires, sig) == 403  # another file
     assert status(media_id, int(expires) + 3600, sig) == 403  # a later expiry
+    assert status(media_id, expires, sig, scope="admin") == 403  # an admin's link
     assert status(media_id, expires, "0" * 64) == 403
-    assert status(media_id, media_urls.signed_url(settings, media_id, now=0)[1]) == 403  # expired
+    expired = media_urls.signed_url(settings, media_id, "public", now=0)[1]
+    assert status(media_id, expired) == 403
     assert status(media_id + 10**6, expires) == 404  # no such media
     assert anonymous.get(f"/api/media/{media_id}").status_code == 422
     for path in settings.media_root.rglob("*.m4a"):
         path.unlink()
     assert anonymous.get(url).status_code == 404  # file gone from the volume
+
+
+def test_media_is_sent_after_its_database_connection_is_returned(
+    client: TestClient,
+    interviews: dict[str, InterviewRow],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = get_engine(settings).pool
+    in_use: list[int] = []
+    send_file = FileResponse.__call__
+
+    async def record(self: FileResponse, scope: Scope, receive: Receive, send: Send) -> None:
+        in_use.append(pool.checkedout())
+        await send_file(self, scope, receive, send)
+
+    monkeypatch.setattr(FileResponse, "__call__", record)
+    anonymous = as_viewer(client)
+    url = anonymous.get(f"/api/interviews/{interviews['public'].id}").json()["media"]["url"]
+    assert anonymous.get(url).content == PLAYBACK
+    assert in_use == [0]
+
+
+def test_hiding_an_interview_stops_visitor_media_links_at_once(
+    client: TestClient, interviews: dict[str, InterviewRow], db_session: Session
+) -> None:
+    path = f"/api/interviews/{interviews['public'].id}"
+    visitor_url = as_viewer(client).get(path).json()["media"]["url"]
+    admin_url = as_viewer(client, ADMIN).get(path).json()["media"]["url"]
+    assert "scope=admin" in admin_url
+
+    interviews["public"].visibility = "private"
+    db_session.commit()
+    anonymous = as_viewer(client)
+    assert anonymous.get(visitor_url).status_code == 404  # same answer as no such media
+    assert anonymous.get(admin_url).status_code == 200  # admins can play Private interviews
+
+
+def test_a_visitor_link_to_a_private_interviews_media_is_refused(
+    client: TestClient, interviews: dict[str, InterviewRow], db_session: Session, settings: Settings
+) -> None:
+    """Even a correctly signed visitor link can't reach a Private interview's media."""
+    media_id = db_session.scalar(
+        select(MediaFileRow.id).where(MediaFileRow.interview_id == interviews["private"].id)
+    )
+    assert media_id is not None
+    url, _ = media_urls.signed_url(settings, media_id, "public")
+    assert as_viewer(client).get(url).status_code == 404
+
+
+def test_visibility_filter_never_shows_visitors_private_interviews(
+    client: TestClient, interviews: dict[str, InterviewRow]
+) -> None:
+    body = as_viewer(client).get("/api/interviews?visibility=private").json()
+    assert (body["items"], body["total"]) == ([], 0)
+    public = as_viewer(client).get("/api/interviews?visibility=public").json()
+    assert str(interviews["private"].id) not in {i["id"] for i in public["items"]}
+    assert as_viewer(client).get("/api/interviews?visibility=restricted").status_code == 422
+
+
+def test_status_filter_never_shows_visitors_private_interviews(
+    client: TestClient, interviews: dict[str, InterviewRow]
+) -> None:
+    for state in ("processing", "done", "failed"):
+        body = as_viewer(client).get(f"/api/interviews?status={state}").json()
+        assert str(interviews["private"].id) not in {i["id"] for i in body["items"]}
+        assert body["total"] <= 1

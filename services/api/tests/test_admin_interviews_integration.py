@@ -1,6 +1,7 @@
 import base64
+import shutil
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import date
 from pathlib import Path
 
@@ -76,6 +77,8 @@ def send(client: TestClient, location: str, offset: int, chunk: bytes) -> Respon
         ("DELETE", "/api/uploads/0123456789abcdef0123456789abcdef"),
         ("PATCH", f"/api/interviews/{uuid.uuid4()}"),
         ("GET", f"/api/interviews/{uuid.uuid4()}/jobs"),
+        ("GET", "/api/storage"),
+        ("GET", "/api/admin/interview-counts"),
     ],
 )
 def test_anonymous_visitors_are_refused(
@@ -155,10 +158,12 @@ def test_resumed_upload_queues_processing_and_publishing_shows_it_to_visitors(
     ]  # fmt: skip
     assert client.get(f"/api/interviews/{uuid.uuid4()}/jobs").status_code == 404
 
-    # Admins can list what's processing; visitors see nothing until it's published (D-008).
+    # Admins can list what's processing; visitors see nothing until it's published.
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=admin)
     assert client.get("/api/interviews?status=processing").json()["total"] == 1
     assert client.get("/api/interviews?status=done").json()["total"] == 0
+    assert client.get("/api/interviews?status=processing&visibility=private").json()["total"] == 1
+    assert client.get("/api/interviews?visibility=public").json()["total"] == 0
     app.dependency_overrides[get_viewer] = lambda: Viewer(admin=None)
     path = f"/api/interviews/{interview_id}"
     assert client.get(path).status_code == 404
@@ -207,6 +212,25 @@ def test_bad_uploads_are_refused_before_any_bytes_arrive(
 
 
 @pytest.mark.integration
+def test_uploads_that_would_fill_the_volume_are_refused(
+    client: TestClient, admin: Admin, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    margin = settings.upload_free_space_margin_bytes
+    free = margin + len(RECORDING) - 1
+    usage = shutil.disk_usage(settings.media_root)._replace(free=free)
+    monkeypatch.setattr(uploads.shutil, "disk_usage", lambda _path: usage)
+
+    space = client.get("/api/storage")
+    assert space.json() == {
+        "usable_bytes": len(RECORDING) - 1, "max_upload_bytes": settings.max_upload_bytes,
+    }  # fmt: skip
+    res = create(client)
+    assert res.status_code == 507
+    assert "storage space" in res.json()["detail"]
+    assert not uploads.uploads_dir(settings).exists()
+
+
+@pytest.mark.integration
 def test_oversized_chunks_and_bodies_on_create_are_refused(
     client: TestClient, admin: Admin, db_session: Session
 ) -> None:
@@ -218,7 +242,100 @@ def test_oversized_chunks_and_bodies_on_create_are_refused(
     )  # fmt: skip
     assert with_body.status_code == 400  # creation-with-upload would read it all into memory
     location = create(client).headers["location"]
-    assert send(client, location, 0, RECORDING[:70_000]).status_code == 413  # over 60 000
-    assert client.head(location, headers=TUS).headers["upload-offset"] == "0"
     assert client.delete(location, headers=TUS).status_code == 204
     assert db_session.scalars(select(JobRow)).all() == []
+
+
+def _chunked(data: bytes) -> Iterator[bytes]:
+    yield data  # a streamed body, so no Content-Length is sent
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("headers", "body", "expected"),
+    [
+        ({}, _chunked, 411),  # no Content-Length
+        ({"Content-Type": "application/octet-stream"}, bytes, 415),
+        ({"Tus-Resumable": "0.2.2"}, bytes, 412),
+        ({}, lambda data: data + RECORDING[: 70_000 - len(data)], 413),  # over 60 000
+    ],
+)
+def test_refused_chunks_leave_the_offset_and_stored_bytes_unchanged(
+    client: TestClient,
+    admin: Admin,
+    settings: Settings,
+    headers: dict[str, str],
+    body: Callable[[bytes], bytes | Iterator[bytes]],
+    expected: int,
+) -> None:
+    location = create(client).headers["location"]
+    assert send(client, location, 0, RECORDING[:1000]).status_code == 204
+    res = client.patch(
+        location,
+        content=body(RECORDING[1000:2000]),
+        headers={**TUS, "Upload-Offset": "1000",
+                 "Content-Type": "application/offset+octet-stream", **headers},
+    )  # fmt: skip
+    assert res.status_code == expected, res.text
+    assert client.head(location, headers=TUS).headers["upload-offset"] == "1000"
+    staged = uploads.uploads_dir(settings) / location.rsplit("/", 1)[1]
+    assert staged.read_bytes() == RECORDING[:1000]
+
+
+@pytest.mark.integration
+def test_finishing_is_retried_after_a_failed_commit_without_losing_the_upload(
+    client: TestClient,
+    admin: Admin,
+    settings: Settings,
+    db_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    location = create(client).headers["location"]
+    staged = uploads.uploads_dir(settings) / location.rsplit("/", 1)[1]
+    commit = Session.commit
+
+    def fail_once(session: Session) -> None:
+        monkeypatch.setattr(Session, "commit", commit)
+        raise OSError("database went away")
+
+    assert send(client, location, 0, RECORDING[:50_000]).status_code == 204
+    monkeypatch.setattr(Session, "commit", fail_once)
+    failing = TestClient(app, raise_server_exceptions=False)
+    assert send(failing, location, 50_000, RECORDING[50_000:]).status_code == 500
+    assert staged.read_bytes() == RECORDING  # still there to retry
+    assert db_session.scalars(select(InterviewRow)).all() == []
+    assert not (settings.media_root / "interviews").exists() or not any(
+        (settings.media_root / "interviews").rglob("*.mp3")
+    )
+
+    res = send(client, location, len(RECORDING), b"")  # the client's retry
+    assert res.status_code == 204, res.text
+    interview_id = uuid.UUID(res.headers[uploads.INTERVIEW_ID_HEADER])
+    media = db_session.scalars(select(MediaFileRow)).one()
+    assert media.interview_id == interview_id
+    assert (settings.media_root / media.storage_key).read_bytes() == RECORDING
+    assert not staged.exists()
+
+
+@pytest.mark.integration
+def test_counts_by_status_and_visibility_include_private_interviews(
+    client: TestClient, admin: Admin, db_session: Session
+) -> None:
+    db_session.add_all(
+        [
+            InterviewRow(title="a", status="done", visibility="public"),
+            InterviewRow(title="b", status="done", visibility="private"),
+            InterviewRow(title="c", status="done", visibility="private"),
+            InterviewRow(title="d", status="failed", visibility="public"),
+        ]
+    )
+    db_session.commit()
+    res = client.get("/api/admin/interview-counts")
+    assert res.status_code == 200
+    assert res.json() == {
+        "items": [
+            {"status": "done", "visibility": "private", "count": 2},
+            {"status": "done", "visibility": "public", "count": 1},
+            {"status": "failed", "visibility": "public", "count": 1},
+        ]
+    }

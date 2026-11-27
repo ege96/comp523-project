@@ -43,12 +43,14 @@ def build_runner(settings: WorkerSettings) -> JobRunner:
         transcriber=build_transcriber(settings),
         translator=build_translator(settings),
         embedder=build_embedder(settings),
+        transcription_concurrency=settings.transcription_concurrency,
     )
     return JobRunner(
         session_factory(settings),
         providers,
         LocalMediaStore(settings.media_root),
         timedelta(seconds=settings.job_lease_seconds),
+        media_timeout=timedelta(seconds=settings.media_timeout_seconds),
     )
 
 

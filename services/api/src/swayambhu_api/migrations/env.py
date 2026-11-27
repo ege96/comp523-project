@@ -2,6 +2,7 @@
 
 from alembic import context
 from sqlalchemy import create_engine, pool, text
+from swayambhu_core import vector_index
 from swayambhu_core.models import Base
 
 from swayambhu_api.db import sqlalchemy_url
@@ -11,17 +12,30 @@ from swayambhu_api.db import sqlalchemy_url
 # both applying the same migration. The second one then finds the database at head.
 MIGRATION_LOCK_KEY = 523_000_001
 
+
+def include_object(
+    obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
+) -> bool:
+    """The worker builds the search's HNSW index itself (its size depends on the model), so
+    autogenerate and `migrate check` leave it alone."""
+    return not (type_ == "index" and name is not None and name.startswith(vector_index.PREFIX))
+
+
 config = context.config
 url = sqlalchemy_url(config.attributes["database_url"])
 
 if context.is_offline_mode():
-    context.configure(url=url, target_metadata=Base.metadata, literal_binds=True)
+    context.configure(
+        url=url, target_metadata=Base.metadata, literal_binds=True, include_object=include_object
+    )
     with context.begin_transaction():
         context.run_migrations()
 else:
     engine = create_engine(url, poolclass=pool.NullPool)
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=Base.metadata)
+        context.configure(
+            connection=connection, target_metadata=Base.metadata, include_object=include_object
+        )
         with context.begin_transaction():
             # Held until this transaction ends, so it is released even if a migration fails.
             connection.execute(

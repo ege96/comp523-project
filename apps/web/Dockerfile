@@ -3,11 +3,12 @@
 # ---- build: compile the SPA ----
 FROM node:26-slim AS build
 WORKDIR /app
-# Dependencies only. This layer is reused until the lockfile changes,
-# and the cache mount keeps npm's download cache between builds.
+# Dependencies only. This layer is reused until the lockfile changes, and the cache mount
+# keeps npm's download cache between builds. No install scripts, as in CI: blocks the usual
+# npm supply-chain attack, and the build doesn't need them.
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --no-audit --no-fund
+    npm ci --no-audit --no-fund --ignore-scripts
 COPY . .
 # The Firebase web config comes from .env.production. A build arg overrides it, e.g. to point a
 # staging build at another Firebase project. No defaults: an empty ARG would override the file.

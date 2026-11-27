@@ -6,6 +6,8 @@ from swayambhu_providers import Embedder, Transcriber, Translator
 from swayambhu_providers.elevenlabs_provider import ElevenLabsTranscriber, elevenlabs_client
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber, FakeTranslator
 from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.identity import local_embedding_name
+from swayambhu_providers.mai_provider import MaiTranscriber, azure_speech_client
 from swayambhu_providers.openai_provider import (
     OpenAIEmbedder,
     OpenAITranscriber,
@@ -33,7 +35,14 @@ def build_transcriber(settings: ProviderSettings) -> Transcriber:
     timeout = settings.provider_timeout_seconds
     if provider == "openai":
         key = _required(settings.openai_api_key, "OPENAI_API_KEY", provider)
-        return OpenAITranscriber(openai_client(key, timeout=timeout), model)
+        languages = [c.strip().lower() for c in settings.transcription_languages.split(",")]
+        return OpenAITranscriber(
+            openai_client(key, timeout=timeout), model, [c for c in languages if c]
+        )
+    if provider == "mai":
+        key = _required(settings.azure_speech_key, "AZURE_SPEECH_KEY", provider)
+        endpoint = _required(settings.azure_speech_endpoint, "AZURE_SPEECH_ENDPOINT", provider)
+        return MaiTranscriber(azure_speech_client(key, endpoint, timeout=timeout), model)
     key = _required(settings.elevenlabs_api_key, "ELEVENLABS_API_KEY", provider)
     return ElevenLabsTranscriber(elevenlabs_client(key, timeout=timeout), model)
 
@@ -65,7 +74,13 @@ def embedder_name(settings: ProviderSettings) -> str:
         return f"fake:hash@{settings.embedding_dimensions or 8}"
     model = _required(settings.embedding_model, "EMBEDDING_MODEL", provider)
     if provider == "local":
-        return f"local:{model}"
+        return local_embedding_name(
+            model,
+            settings.embedding_model_revision,
+            query_prefix=settings.embedding_query_prefix,
+            passage_prefix=settings.embedding_passage_prefix,
+            max_tokens=settings.local_embedding_max_tokens,
+        )
     dimensions = settings.embedding_dimensions
     return f"openai:{model}" + (f"@{dimensions}" if dimensions else "")
 
@@ -86,6 +101,7 @@ def _build_local_embedder(settings: ProviderSettings, model: str) -> Embedder:
     return LocalOnnxEmbedder(
         model,
         model_dir,
+        revision=settings.embedding_model_revision,
         query_prefix=settings.embedding_query_prefix,
         passage_prefix=settings.embedding_passage_prefix,
         max_tokens=settings.local_embedding_max_tokens,

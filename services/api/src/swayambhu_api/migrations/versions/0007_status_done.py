@@ -1,7 +1,7 @@
 """Statuses become processing / done / failed: there's no manual review step any more.
 
 Needs review and Reviewed both become Done. Visitors see every finished transcript labelled
-as machine-generated, with corrected lines marked (amends D-008, Eric 2026-11-05).
+as machine-generated, with corrected lines marked.
 
 Revision ID: 0007
 Revises: 0006

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ProviderSettings(BaseSettings):
-    """AI provider settings shared by the API and the worker (D-011..D-013).
+    """AI provider settings shared by the API and the worker.
 
     Each service's settings class inherits these, so both read the same environment
     variables. That matters for embeddings: the API embeds search queries with the model the
@@ -18,12 +18,18 @@ class ProviderSettings(BaseSettings):
     # Subclasses' model_config is merged with this.
     model_config = SettingsConfigDict(env_ignore_empty=True)
 
-    transcription_provider: Literal["openai", "elevenlabs", "fake"] = "openai"
+    transcription_provider: Literal["openai", "elevenlabs", "mai", "fake"] = "openai"
     transcription_model: str | None = None
+    # OpenAI only: languages to expect when no admin confirmed one, comma separated. Verify
+    # codes against OpenAI's supported list; an unsupported code fails every request.
+    transcription_languages: str = "ne,en"
     translation_provider: Literal["google_nmt", "fake"] = "google_nmt"
     embedding_provider: Literal["openai", "local", "fake"] = "openai"
     embedding_model: str | None = None
     embedding_dimensions: int | None = None
+    # `local` provider: the model's revision (e.g. a Hugging Face commit hash). It is part of
+    # the stored embedding identity, so changing it re-embeds on the next reindex.
+    embedding_model_revision: str | None = None
     # Prepended to every query or passage. multilingual-E5 needs "query: " and "passage: ".
     embedding_query_prefix: str = ""
     embedding_passage_prefix: str = ""
@@ -37,4 +43,8 @@ class ProviderSettings(BaseSettings):
 
     openai_api_key: SecretStr | None = None
     elevenlabs_api_key: SecretStr | None = None
+    # `mai` provider: the Azure Speech resource's key and endpoint
+    # (https://<resource>.cognitiveservices.azure.com), in a region that serves the model.
+    azure_speech_key: SecretStr | None = None
+    azure_speech_endpoint: str | None = None
     google_translate_api_key: SecretStr | None = None

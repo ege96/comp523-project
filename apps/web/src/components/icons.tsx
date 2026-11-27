@@ -43,3 +43,61 @@ export function StopIcon(props: SvgIconProps) {
     </SvgIcon>
   );
 }
+
+export function ChevronIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M7.41 8.59 12 13.17l4.59-4.58L18 10l-6 6-6-6z" />
+    </SvgIcon>
+  );
+}
+
+export function CheckIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
+    </SvgIcon>
+  );
+}
+
+/** Two chain links, for copying a link. */
+export function LinkIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1M8 13h8v-2H8zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5" />
+    </SvgIcon>
+  );
+}
+
+/** An exclamation mark, for a step that didn't work. */
+export function AlertIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M11 4h2v11h-2zm0 13h2v2h-2z" />
+    </SvgIcon>
+  );
+}
+
+export function ArrowBackIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z" />
+    </SvgIcon>
+  );
+}
+
+export function UploadIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96M19 18H6c-2.21 0-4-1.79-4-4 0-2.05 1.53-3.76 3.56-3.97l1.07-.11.5-.95A5.47 5.47 0 0 1 12 6c2.62 0 4.88 1.86 5.39 4.43l.3 1.5 1.53.11A2.98 2.98 0 0 1 22 15c0 1.65-1.35 3-3 3M8 13h2.55v3h2.9v-3H16l-4-4z" />
+    </SvgIcon>
+  );
+}
+
+export function EditIcon(props: SvgIconProps) {
+  return (
+    <SvgIcon {...props}>
+      <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75z" />
+    </SvgIcon>
+  );
+}

@@ -1,4 +1,4 @@
-"""Admins correcting transcripts (Proposal: paths and shapes).
+"""Admins correcting transcripts.
 
 An edit goes into `segments.original_edited` / `english_edited`; the machine output stays
 untouched beside it, so an edit can always be undone by sending `null`. Saving queues the
@@ -22,8 +22,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, StringConstraints, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs
-from swayambhu_core.models import AdminRow, InterviewRow, JobRow, SegmentRow
+from swayambhu_core import jobs, transcripts
+from swayambhu_core.models import AdminRow, InterviewRow, SegmentRow
 from swayambhu_core.text import english_edit_is_stale, english_is_stale, translation_fingerprint
 
 from swayambhu_api.auth import CurrentAdmin
@@ -127,14 +127,11 @@ def _merged(machine: str | None, edit: str | None) -> str | None:
 
 
 def _refuse_while_transcribing(session: Session, interview_id: uuid.UUID) -> None:
-    transcribing = session.scalar(
-        select(JobRow.id).where(
-            JobRow.interview_id == interview_id,
-            JobRow.kind == "transcribe",
-            JobRow.state.in_(("queued", "running")),
-        )
-    )
-    if transcribing is not None:
+    """Refuse a change to the lines while a transcription that replaces them all is waiting
+    or running. Locks the interview row first, so the change and an approved transcription
+    are decided one after the other (`swayambhu_core.transcripts`)."""
+    transcripts.lock_interview(session, interview_id)
+    if transcripts.transcription_waiting(session, interview_id):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "This interview is being transcribed, which replaces every line. "
@@ -196,11 +193,11 @@ def edit_segment(
             segment.edited_by = admin.id
             segment.edited_at = func.now()
         # Search must find the corrected words: re-embed (only) the changed chunk.
-        jobs.enqueue(session, "index", interview_id)
+        jobs.enqueue(session, "index", interview_id, jobs.Priority.ADMIN)
         if english_is_stale(segment):
             # Each edit pushes this back, so a run of edits is translated in one batch.
             delay = timedelta(seconds=settings.retranslate_delay_seconds)
-            jobs.schedule(session, "retranslate", interview_id, delay)
+            jobs.schedule(session, "retranslate", interview_id, delay, jobs.Priority.ADMIN)
         session.commit()
         log.info("admin %s edited segment %s of interview %s", admin.id, seq, interview_id)
         session.refresh(segment)
@@ -228,6 +225,6 @@ def retranslate_now(
     segments = session.scalars(select(SegmentRow).where(SegmentRow.interview_id == interview_id))
     stale = sum(1 for s in segments if english_is_stale(s))
     if stale:
-        jobs.schedule(session, "retranslate", interview_id, timedelta(0))
+        jobs.schedule(session, "retranslate", interview_id, timedelta(0), jobs.Priority.ADMIN)
         session.commit()
     return RetranslateResult(stale_lines=stale)

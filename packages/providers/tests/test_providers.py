@@ -16,6 +16,7 @@ from swayambhu_providers.factory import (
 )
 from swayambhu_providers.fake_provider import FakeEmbedder, FakeTranscriber
 from swayambhu_providers.google_provider import GoogleNmtTranslator
+from swayambhu_providers.mai_provider import MaiTranscriber, azure_speech_client
 from swayambhu_providers.openai_provider import OpenAIEmbedder, OpenAITranscriber
 from swayambhu_providers.settings import ProviderSettings
 
@@ -31,33 +32,69 @@ def clip(tmp_path: Path) -> AudioClip:
     return AudioClip(path=path, duration_ms=12_000)
 
 
+def _sent_languages(body: bytes) -> list[str]:
+    parts = body.split(b'name="languages[]"')[1:]
+    return [part.split(b"\r\n\r\n", 1)[1].split(b"\r\n", 1)[0].decode() for part in parts]
+
+
 def test_openai_transcriber_spans_the_clip(clip: AudioClip) -> None:
     seen: dict[str, bytes] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/audio/transcriptions"
         seen["body"] = request.read()
-        return httpx.Response(200, json={"text": " नमस्ते ", "language": "ne"})
+        return httpx.Response(200, json={"text": " नमस्ते ", "languages": [{"code": "ne"}]})
 
-    transcriber = OpenAITranscriber(client(handler), "some-transcribe-model")
-    segments = transcriber.transcribe(clip, ["ne"])
+    transcriber = OpenAITranscriber(client(handler), "some-transcribe-model", ["ne", "en"])
+    segments = transcriber.transcribe(clip, ["en"])
     assert [(s.start_ms, s.end_ms, s.text, s.language) for s in segments] == [
         (0, 12_000, "नमस्ते", "ne")
     ]
-    assert b'name="language"' in seen["body"]
+    # The confirmed language goes first; the API rejects `language` sent with `languages`.
+    assert _sent_languages(seen["body"]) == ["en", "ne"]
+    assert b'name="language"' not in seen["body"]
     assert transcriber.name == "openai:some-transcribe-model"
 
 
-def test_openai_transcriber_omits_language_without_a_two_letter_code(clip: AudioClip) -> None:
-    """Nepal Bhasa ("new") has no ISO 639-1 code, so the model has to detect it."""
+@pytest.mark.parametrize(
+    ("hints", "sent"),
+    [
+        ([], ["ne", "en"]),  # nothing confirmed: the default list
+        (["ne"], ["ne", "en"]),
+        (["new"], []),  # Nepal Bhasa has no code the API accepts, and ne,en would mislead
+    ],
+)
+def test_openai_transcriber_expected_languages(
+    clip: AudioClip, hints: list[str], sent: list[str]
+) -> None:
     bodies: list[bytes] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         bodies.append(request.read())
         return httpx.Response(200, json={"text": ""})
 
-    assert OpenAITranscriber(client(handler), "m").transcribe(clip, ["new"]) == []
-    assert b'name="language"' not in bodies[0]
+    assert OpenAITranscriber(client(handler), "m", ["ne", "en"]).transcribe(clip, hints) == []
+    assert _sent_languages(bodies[0]) == sent
+
+
+@pytest.mark.parametrize(
+    ("languages", "expected"),
+    [
+        ([{"code": "en"}], "en"),
+        ([], None),  # the model couldn't tell
+        ([{"code": "ne"}, {"code": "en"}], None),  # mixed speech: the translator decides
+        (None, None),
+    ],
+)
+def test_openai_transcriber_reads_the_detected_language(
+    clip: AudioClip, languages: object, expected: str | None
+) -> None:
+    body: dict[str, object] = {"text": "x"}
+    if languages is not None:
+        body["languages"] = languages
+    transcriber = OpenAITranscriber(client(lambda _: httpx.Response(200, json=body)), "m")
+    [segment] = transcriber.transcribe(clip, [])
+    assert segment.language == expected
 
 
 @pytest.mark.parametrize(("status", "retryable"), [(429, True), (503, True), (400, False)])
@@ -65,7 +102,7 @@ def test_http_errors_say_whether_to_retry(clip: AudioClip, status: int, retryabl
     transcriber = OpenAITranscriber(client(lambda _: httpx.Response(status, text="nope")), "m")
     with pytest.raises(ProviderError) as info:
         transcriber.transcribe(clip, [])
-    assert info.value.retryable is retryable
+    assert (info.value.retryable, info.value.status_code) == (retryable, status)
 
 
 def test_timeouts_are_retryable(clip: AudioClip) -> None:
@@ -75,6 +112,7 @@ def test_timeouts_are_retryable(clip: AudioClip) -> None:
     with pytest.raises(ProviderError) as info:
         OpenAITranscriber(client(handler), "m").transcribe(clip, [])
     assert info.value.retryable
+    assert info.value.status_code is None
 
 
 def test_openai_embedder_batches_and_keeps_order() -> None:
@@ -83,14 +121,17 @@ def test_openai_embedder_batches_and_keeps_order() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.read())
         requests.append(body)
-        rows = [{"index": i, "embedding": [float(len(t))]} for i, t in enumerate(body["input"])]
+        rows = [
+            {"index": i, "embedding": [float(len(t))] * 256} for i, t in enumerate(body["input"])
+        ]
         return httpx.Response(200, json={"data": list(reversed(rows))})
 
     embedder = OpenAIEmbedder(client(handler), "embed-model", dimensions=256, batch_size=2)
-    assert embedder.embed(["a", "bb", "ccc"], "passage") == [[1.0], [2.0], [3.0]]
+    assert [v[0] for v in embedder.embed(["a", "bb", "ccc"], "passage")] == [1.0, 2.0, 3.0]
     assert [r["input"] for r in requests] == [["a", "bb"], ["ccc"]]
     assert all(r["dimensions"] == 256 for r in requests)
     assert embedder.name == "openai:embed-model@256"
+    assert len(embedder.embed(["a"], "passage")[0]) == 256
     assert OpenAIEmbedder(client(handler), "embed-model", None).name == "openai:embed-model"
 
 
@@ -115,6 +156,79 @@ def test_elevenlabs_uses_word_timings(clip: AudioClip) -> None:
     )
     [segment] = transcriber.transcribe(clip, ["ne"])
     assert (segment.start_ms, segment.end_ms, segment.language) == (400, 1250, "nep")
+
+
+def _mai(handler: object) -> MaiTranscriber:
+    configured = azure_speech_client("k", "https://example.test/")
+    mock = httpx.Client(
+        base_url=configured.base_url,
+        headers=configured.headers,
+        transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
+    )
+    return MaiTranscriber(mock, "MAI-Transcribe-2")
+
+
+def _definition(request: httpx.Request) -> dict[str, object]:
+    body = request.read()
+    part = body.split(b'name="definition"')[1].split(b"\r\n\r\n", 1)[1].split(b"\r\n--", 1)[0]
+    data: dict[str, object] = json.loads(part)
+    return data
+
+
+def test_mai_transcriber_uses_phrase_timings(clip: AudioClip) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Ocp-Apim-Subscription-Key"] == "k"
+        assert request.url.path == "/speechtotext/transcriptions:transcribe"
+        definition = _definition(request)
+        assert definition["enhancedMode"] == {"enabled": True, "model": "MAI-Transcribe-2"}
+        assert "locales" not in definition
+        phrases = [
+            {
+                "offsetMilliseconds": 400,
+                "durationMilliseconds": 900,
+                "text": "म",
+                "locale": "ne-NP",
+            },
+            {"offsetMilliseconds": 1500, "durationMilliseconds": 800, "text": "आएँ", "locale": "ne"},
+        ]
+        return httpx.Response(200, json={"combinedPhrases": [{"text": "म आएँ"}], "phrases": phrases})
+
+    transcriber = _mai(handler)
+    assert transcriber.name == "azure:MAI-Transcribe-2"
+    [segment] = transcriber.transcribe(clip, ["ne"])
+    assert (segment.start_ms, segment.end_ms, segment.text, segment.language) == (
+        400,
+        2300,
+        "म आएँ",
+        "ne",
+    )
+
+
+@pytest.mark.parametrize("hints", [[], ["ne"], ["new"], ["ne", "en"]])
+def test_mai_transcriber_never_forces_a_language(clip: AudioClip, hints: list[str]) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "locales" not in _definition(request)
+        phrases = [{"text": "a", "locale": "ne-NP"}, {"text": "b", "locale": "en-US"}]
+        return httpx.Response(200, json={"combinedPhrases": [{"text": "a b"}], "phrases": phrases})
+
+    [segment] = _mai(handler).transcribe(clip, hints)
+    # No timings: the clip is the segment. Mixed languages: the translator decides.
+    assert (segment.start_ms, segment.end_ms, segment.language) == (0, 12_000, None)
+
+
+def test_mai_transcriber_returns_nothing_for_silence_and_flags_retryable_errors(
+    clip: AudioClip,
+) -> None:
+    assert (
+        _mai(lambda request: httpx.Response(200, json={"combinedPhrases": []})).transcribe(clip, [])
+        == []
+    )
+    with pytest.raises(ProviderError) as busy:
+        _mai(lambda request: httpx.Response(429, text="slow down")).transcribe(clip, [])
+    assert busy.value.retryable
+    with pytest.raises(ProviderError) as bad:
+        _mai(lambda request: httpx.Response(400, text="bad locale")).transcribe(clip, [])
+    assert not bad.value.retryable
 
 
 def test_google_translator_sends_key_in_header_and_keeps_order() -> None:
@@ -180,6 +294,21 @@ def test_factory_picks_providers_from_settings() -> None:
     unsized = settings.model_copy(update={"embedding_dimensions": None})
     assert build_embedder(unsized).name == embedder_name(unsized) == "openai:embed-model"
     assert build_translator(settings).name == "google:nmt"
+    openai = settings.model_copy(
+        update={"transcription_provider": "openai", "transcription_languages": " NE, ,en "}
+    )
+    transcriber = build_transcriber(openai)
+    assert isinstance(transcriber, OpenAITranscriber)
+    assert transcriber._languages == ["ne", "en"]
+    mai = settings.model_copy(
+        update={
+            "transcription_provider": "mai",
+            "transcription_model": "MAI-Transcribe-2",
+            "azure_speech_key": SecretStr("k"),
+            "azure_speech_endpoint": "https://example.test",
+        }
+    )
+    assert build_transcriber(mai).name == "azure:MAI-Transcribe-2"
 
     fake = ProviderSettings(
         transcription_provider="fake", translation_provider="fake", embedding_provider="fake"
@@ -194,6 +323,14 @@ def test_factory_picks_providers_from_settings() -> None:
     [
         (ProviderSettings(transcription_model=None), "TRANSCRIPTION_MODEL"),
         (ProviderSettings(transcription_model="m", openai_api_key=None), "OPENAI_API_KEY"),
+        (
+            ProviderSettings(
+                transcription_provider="mai",
+                transcription_model="m",
+                azure_speech_key=SecretStr("k"),
+            ),
+            "AZURE_SPEECH_ENDPOINT",
+        ),
     ],
 )
 def test_factory_names_the_missing_setting(settings: ProviderSettings, missing: str) -> None:
@@ -259,7 +396,8 @@ def test_local_embedder_mean_pools_with_prefixes(tmp_path: Path) -> None:
         local_embedding_batch_size=1,
     )
     embedder = build_embedder(settings)
-    assert embedder.name == embedder_name(settings) == "local:org/tiny"
+    assert embedder.name == embedder_name(settings)
+    assert embedder.name.startswith("local:org/tiny#")
 
     # "query: a" -> mean(x, x) = x. "query: a b b" -> mean(x, x, z, z) -> (1, 0, 1)/sqrt2.
     # Batch size 1 and different lengths also check that padding never enters the mean.
@@ -318,3 +456,96 @@ def test_prepare_model_moves_weights_out_and_keeps_vectors(tmp_path: Path) -> No
     assert path.stat().st_size < wide.nbytes
     [after] = LocalOnnxEmbedder("tiny", tmp_path / "tiny").embed(["a b"], "passage")
     assert after == pytest.approx(before)
+
+
+def test_local_embedding_identity_changes_with_revision_and_preprocessing(tmp_path: Path) -> None:
+    _tiny_local_model(tmp_path / "tiny")
+    base = ProviderSettings(
+        embedding_provider="local",
+        embedding_model="tiny",
+        local_model_dir=tmp_path,
+        embedding_passage_prefix="passage: ",
+    )
+    changes: list[dict[str, object]] = [
+        {"embedding_model_revision": "abc123"},
+        {"embedding_passage_prefix": ""},
+        {"embedding_query_prefix": "query: "},
+        {"local_embedding_max_tokens": 128},
+    ]
+    names = {build_embedder(base).name}
+    for change in changes:
+        settings = base.model_copy(update=change)
+        embedder = build_embedder(settings)
+        assert embedder.name == embedder_name(settings)
+        names.add(embedder.name)
+    assert len(names) == len(changes) + 1
+    assert build_embedder(base).name == build_embedder(base.model_copy()).name
+    revised = base.model_copy(update={"embedding_model_revision": "abc123"})
+    assert build_embedder(revised).name.startswith("local:tiny@abc123#")
+
+
+def _embedder_for(rows: object, dimensions: int | None = 2) -> OpenAIEmbedder:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": rows})
+
+    return OpenAIEmbedder(client(handler), "m", dimensions)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [{"index": 0, "embedding": [1, 2]}, {"index": 0, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 2, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 1, "embedding": [1, 2, 3]}],
+        [{"index": 0, "embedding": [1, 2]}, {"embedding": [1, 2]}],
+        [{"index": 0, "embedding": [1, 2]}, {"index": 1, "embedding": "xy"}],
+        [{"index": 0, "embedding": [1, 2]}, 5],
+    ],
+)
+def test_openai_embedder_rejects_malformed_responses(rows: object) -> None:
+    with pytest.raises(ProviderError) as info:
+        _embedder_for(rows).embed(["a", "b"], "passage")
+    assert not info.value.retryable
+
+
+@pytest.mark.parametrize("content", [b"not json", b"[1, 2]"])
+def test_openai_parsers_wrap_non_object_json(clip: AudioClip, content: bytes) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content)
+
+    with pytest.raises(ProviderError):
+        OpenAIEmbedder(client(handler), "m", None).embed(["a"], "passage")
+    with pytest.raises(ProviderError):
+        OpenAITranscriber(client(handler), "m").transcribe(clip, [])
+
+
+def test_google_translator_batches_by_encoded_size_and_keeps_order() -> None:
+    sizes: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        batch = json.loads(request.read())["q"]
+        sizes.append(sum(len(t.encode("utf-8")) for t in batch))
+        return httpx.Response(
+            200, json={"data": {"translations": [{"translatedText": t} for t in batch]}}
+        )
+
+    # Each text is 10 characters but 31 UTF-8 bytes, so only two fit in 70 bytes.
+    texts = ["न" * 10 + str(i) for i in range(5)] + ["x" * 200]
+    translator = GoogleNmtTranslator(
+        client(handler), "k", url="https://example.test/t", max_batch_bytes=70
+    )
+    result = translator.translate_to_english(texts, "ne")
+    assert [t.text for t in result] == texts
+    assert len(sizes) == 4
+    assert all(size <= 70 for size in sizes[:-1])
+    assert sizes[-1] == 200
+
+
+def test_google_translator_rejects_malformed_json() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"<html>")
+
+    translator = GoogleNmtTranslator(client(handler), "k", url="https://example.test/t")
+    with pytest.raises(ProviderError):
+        translator.translate_to_english(["a"], "ne")

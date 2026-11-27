@@ -8,6 +8,7 @@ import { SignInError, type AuthClient, type AuthUser } from "../auth/authClient"
 import { AuthProvider } from "../auth/AuthProvider";
 import { createAppRouter } from "../router";
 
+/** A route's body can depend on the request URL (for example its offset). */
 type Routes = Record<string, { status?: number; body?: unknown }>;
 
 /** Fake API: answers by path, records the Authorization header of every request. */
@@ -21,8 +22,12 @@ export function stubApi(routes: Routes) {
       calls.push({ path, auth: headers.get("Authorization") });
       const route = routes[path] ?? { status: 404, body: { detail: "Not Found" } };
       const status = route.status ?? 200;
+      const body =
+        typeof route.body === "function"
+          ? (route.body as (u: string) => unknown)(input)
+          : route.body;
       return Promise.resolve(
-        status === 204 ? new Response(null, { status }) : Response.json(route.body, { status }),
+        status === 204 ? new Response(null, { status }) : Response.json(body, { status }),
       );
     }),
   );

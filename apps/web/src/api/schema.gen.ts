@@ -14,7 +14,10 @@ export interface paths {
         /**
          * List Interviews
          * @description Interviews the viewer may see, most recently added first, optionally only those with
-         *     one status (for the admin's processing queue).
+         *     one status and/or visibility (for the admin's work queue: "not published" is done and
+         *     private) and matching the same metadata filters as search. The filters only narrow
+         *     what `summary_query` already allows, so a visitor asking for private interviews gets
+         *     none.
          */
         get: operations["list_interviews_api_interviews_get"];
         put?: never;
@@ -36,12 +39,29 @@ export interface paths {
         get: operations["get_interview_api_interviews__interview_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Interview
+         * @description Delete an interview for good: its recording and playback copy, transcript, corrections,
+         *     English, search entries and processing jobs, and its interviewee if no other interview
+         *     names them. There is no undo.
+         *
+         *     A published interview is refused, so deleting takes two deliberate steps and never removes
+         *     a page a visitor may have open. The rows go in one transaction (the foreign keys cascade);
+         *     the files go after it commits, so a failed commit never leaves rows pointing at missing
+         *     files. A file that can't be removed is logged and left for the worker's `sweep_media`
+         *     command. A step the worker is running for the interview loses its job row, so it finds
+         *     its claim gone and writes nothing more.
+         */
+        delete: operations["delete_interview_api_interviews__interview_id__delete"];
         options?: never;
         head?: never;
         /**
          * Update Interview
-         * @description Publish (Public) or hide (Private) an interview. Takes effect on the next request.
+         * @description Publish or hide an interview, or correct its details. Takes effect on the next request.
+         *
+         *     Changing the language doesn't redo the transcript or the English on its own: both cost
+         *     provider calls, and transcribing again would replace corrections. The admin page offers
+         *     those as separate actions.
          */
         patch: operations["update_interview_api_interviews__interview_id__patch"];
         trace?: never;
@@ -77,7 +97,10 @@ export interface paths {
         /**
          * Get Media
          * @description Stream a media file from a link made by the interview detail route. Supports HTTP
-         *     Range requests, so players can seek without downloading the whole file (NF5).
+         *     Range requests, so players can seek without downloading the whole file.
+         *
+         *     A visitor's link stops working as soon as its interview is made Private. The database
+         *     session is closed before the file is sent, so a long download holds no connection.
          */
         get: operations["get_media_api_media__media_id__get"];
         put?: never;
@@ -98,7 +121,8 @@ export interface paths {
         /**
          * Search
          * @description Transcript moments most relevant to `q`, best first. Paging goes as deep as
-         *     SEARCH_CANDIDATES hits from each search.
+         *     SEARCH_CANDIDATES moments from each search; every page embeds the query and ranks
+         *     them again.
          */
         get: operations["search_api_search_get"];
         put?: never;
@@ -126,6 +150,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/interview-counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Counts
+         * @description How many interviews there are of each status and visibility, Private included, in
+         *     one request instead of one per tab.
+         */
+        get: operations["interview_counts_api_admin_interview_counts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/interviews/{interview_id}/jobs": {
         parameters: {
             query?: never;
@@ -140,6 +185,30 @@ export interface paths {
         get: operations["list_jobs_api_interviews__interview_id__jobs_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/interviews/{interview_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun
+         * @description Run a processing step again: to retry one that failed, or to redo the transcript or
+         *     English after the language was corrected. The later steps follow, as after an upload.
+         *
+         *     Transcribing again replaces every line, so when admins have corrected any it is refused
+         *     (409, with `corrected_lines`) unless `replace_corrections` says to go ahead.
+         */
+        post: operations["rerun_api_interviews__interview_id__rerun_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -280,6 +349,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Storage Space
+         * @description Room for uploads, so the upload page can warn before a batch starts.
+         */
+        get: operations["storage_space_api_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Interview Changes
+         * @description Which interviews change, as they change. Admin-only.
+         *
+         *     Events: `ready` once listening (fetch what's shown now, so nothing between page load and
+         *     this point is missed), `change` with `{"interview_id": ...}`, and `resync` (refresh
+         *     everything). FastAPI adds a keep-alive comment after 15 s of quiet, inside the router's
+         *     idle timeout. The stream ends after `live_stream_max_seconds`, so a reconnect re-checks
+         *     the sign-in (Firebase ID tokens last an hour) and a redeploy isn't held up for long.
+         */
+        get: operations["interview_changes_api_admin_changes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -411,6 +526,26 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** InterviewCount */
+        InterviewCount: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "processing" | "done" | "failed";
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "public" | "private";
+            /** Count */
+            count: number;
+        };
+        /** InterviewCounts */
+        InterviewCounts: {
+            /** Items */
+            items: components["schemas"]["InterviewCount"][];
+        };
         /** InterviewDetail */
         InterviewDetail: {
             /**
@@ -422,6 +557,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -462,6 +599,12 @@ export interface components {
             media: components["schemas"]["Media"] | null;
             /** Status Detail */
             status_detail: string | null;
+            /** Language Detected */
+            language_detected: string | null;
+            /** Language Detected Confidence */
+            language_detected_confidence: number | null;
+            /** Language Confirmed */
+            language_confirmed: string | null;
         };
         /** InterviewList */
         InterviewList: {
@@ -481,6 +624,8 @@ export interface components {
             title: string;
             /** Interviewee */
             interviewee: string | null;
+            /** Interviewee Id */
+            interviewee_id: number | null;
             primary_language: components["schemas"]["Language"] | null;
             /** Duration Ms */
             duration_ms: number | null;
@@ -509,13 +654,23 @@ export interface components {
              */
             created_at: string;
         };
-        /** InterviewUpdate */
+        /**
+         * InterviewUpdate
+         * @description Only the fields sent change. For the optional details, null means unknown.
+         */
         InterviewUpdate: {
-            /**
-             * Visibility
-             * @enum {string}
-             */
-            visibility: "public" | "private";
+            /** Visibility */
+            visibility?: ("public" | "private") | null;
+            /** Title */
+            title?: string | null;
+            /** Interviewee Id */
+            interviewee_id?: number | null;
+            /** Interviewee Name */
+            interviewee_name?: string | null;
+            /** Recorded On */
+            recorded_on?: string | null;
+            /** Language */
+            language?: string | null;
         };
         /** Interviewee */
         Interviewee: {
@@ -610,6 +765,19 @@ export interface components {
             /** Skipped */
             skipped: number;
         };
+        /** Rerun */
+        Rerun: {
+            /**
+             * Step
+             * @enum {string}
+             */
+            step: "transcribe" | "translate" | "index" | "playback";
+            /**
+             * Replace Corrections
+             * @default false
+             */
+            replace_corrections: boolean;
+        };
         /** RetranslateResult */
         RetranslateResult: {
             /** Stale Lines */
@@ -630,6 +798,13 @@ export interface components {
         SearchResults: {
             /** Items */
             items: components["schemas"]["Moment"][];
+            /** Interviews */
+            interviews: components["schemas"]["InterviewSummary"][];
+            /**
+             * More Metadata Matches
+             * @default false
+             */
+            more_metadata_matches: boolean;
             /** Has More */
             has_more: boolean;
             /**
@@ -673,6 +848,13 @@ export interface components {
             /** Items */
             items: components["schemas"]["Segment"][];
         };
+        /** StorageSpace */
+        StorageSpace: {
+            /** Usable Bytes */
+            usable_bytes: number;
+            /** Max Upload Bytes */
+            max_upload_bytes: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -701,6 +883,17 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 status?: ("processing" | "done" | "failed") | null;
+                visibility?: ("public" | "private") | null;
+                /** @description Any language heard, e.g. ne */
+                language?: string | null;
+                /** @description An interviewee id, or unknown */
+                interviewee?: number | "unknown" | null;
+                recorded_from?: string | null;
+                recorded_to?: string | null;
+                /** @description With a date range, also include undated interviews */
+                undated?: boolean;
+                /** @description audio or video, from the uploaded file's type */
+                media?: ("audio" | "video") | null;
             };
             header?: never;
             path?: never;
@@ -747,6 +940,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InterviewDetail"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_interview_api_interviews__interview_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The interview is published; unpublish it first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -828,6 +1057,7 @@ export interface operations {
             query: {
                 expires: number;
                 sig: string;
+                scope?: "public" | "admin";
             };
             header?: never;
             path: {
@@ -866,6 +1096,8 @@ export interface operations {
         parameters: {
             query: {
                 q: string;
+                limit?: number;
+                offset?: number;
                 /** @description Any language heard, e.g. ne */
                 language?: string | null;
                 /** @description An interviewee id, or unknown */
@@ -874,8 +1106,8 @@ export interface operations {
                 recorded_to?: string | null;
                 /** @description With a date range, also include undated interviews */
                 undated?: boolean;
-                limit?: number;
-                offset?: number;
+                /** @description audio or video, from the uploaded file's type */
+                media?: ("audio" | "video") | null;
             };
             header?: never;
             path?: never;
@@ -923,6 +1155,26 @@ export interface operations {
             };
         };
     };
+    interview_counts_api_admin_interview_counts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InterviewCounts"];
+                };
+            };
+        };
+    };
     list_jobs_api_interviews__interview_id__jobs_get: {
         parameters: {
             query?: never;
@@ -942,6 +1194,48 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["JobList"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_api_interviews__interview_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                interview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Rerun"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Already queued or running, or would replace corrections */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -1283,6 +1577,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    storage_space_api_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSpace"];
+                };
+            };
+        };
+    };
+    interview_changes_api_admin_changes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
                 };
             };
         };

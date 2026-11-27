@@ -2,14 +2,17 @@ version: 2
 
 # Every ecosystem below is part of one multi-ecosystem group, so a week's version updates
 # arrive as a single PR (Python locks, npm, Actions, base images and compose together)
-# instead of one per directory. Security updates still come as their own PRs.
+# instead of one per directory. Security updates come as their own PRs, but only while
+# Dependabot alerts and security updates are on in the repo's Settings > Advanced Security.
+# Version updates only bump packages named in a manifest; vulnerable indirect packages are
+# left to security updates, with pip-audit and npm audit in CI as the backstop.
 multi-ecosystem-groups:
   weekly:
     schedule: { interval: weekly }
 
 updates:
   - package-ecosystem: uv
-    directories: [/services/api, /services/worker, /packages/core, /packages/providers]
+    directories: [/services/api, /services/worker, /packages/core, /packages/providers, /perf]
     patterns: ["*"]
     multi-ecosystem-group: weekly
   - package-ecosystem: npm

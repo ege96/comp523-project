@@ -21,7 +21,7 @@ export function currentText(
 
 /**
  * Plain-text matcher for `find`, the way the API matches it: trimmed, no pattern characters,
- * case-insensitive unless asked. Null when there's nothing to find.
+ * case-insensitive (by Unicode case rules) unless asked. Null when there's nothing to find.
  */
 export function matcher(find: string, matchCase: boolean): RegExp | null {
   const text = find.trim();
@@ -58,4 +58,39 @@ export function splitMatches(text: string, re: RegExp | null): { text: string; m
   }
   if (last < text.length) parts.push({ text: text.slice(last), match: false });
   return parts;
+}
+
+export type ReplaceExample = { seq: number; startMs: number; before: string; after: string };
+
+/**
+ * The text after replacing every match, as the API stores it: the replacement is taken
+ * literally (`$&` or `$1` stay as typed) and the result is trimmed.
+ */
+export function replaceAll(text: string, re: RegExp, replacement: string): string {
+  return text.replace(new RegExp(re), () => replacement).trim();
+}
+
+/** A few lines as they are and as they would be after replacing, to check before saving. */
+export function previewReplace(
+  lines: AdminSegment[],
+  field: Field,
+  re: RegExp | null,
+  replacement: string,
+  interview: EditorInterview,
+  limit = 3,
+): ReplaceExample[] {
+  if (!re) return [];
+  const examples: ReplaceExample[] = [];
+  for (const line of lines) {
+    const text = currentText(line, field, interview);
+    if (text === null || text.search(re) === -1) continue;
+    examples.push({
+      seq: line.seq,
+      startMs: line.start_ms,
+      before: text,
+      after: replaceAll(text, re, replacement),
+    });
+    if (examples.length === limit) break;
+  }
+  return examples;
 }

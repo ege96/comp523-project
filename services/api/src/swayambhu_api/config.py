@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import SettingsConfigDict
 from swayambhu_providers.settings import ProviderSettings
 
@@ -13,8 +13,9 @@ FIREBASE_JWKS_URL = (
 
 
 class Settings(ProviderSettings):
-    """API settings, read from environment variables, then `.env` in the working directory
-    (Proposal: names not yet agreed). AI provider settings come from ProviderSettings; the API
+    """API settings, read from environment variables, then `.env` in the working directory.
+
+    AI provider settings come from ProviderSettings; the API
     uses only the embedding ones, to embed search queries."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -30,32 +31,43 @@ class Settings(ProviderSettings):
     # Unset means sign-in is not configured: every authenticated request gets a 503.
     firebase_project_id: str | None = None
     firebase_jwks_url: str = FIREBASE_JWKS_URL
-    # Where LocalMediaStore keeps recordings: the same directory the worker writes (D-007).
+    # Where LocalMediaStore keeps recordings: the same directory the worker writes.
     media_root: Path = Path("/data/media")
     # Signs the expiring media links the player uses. Unset: a random key per process, which
     # only works with one API pod; set the same value on every pod before scaling out.
     media_url_secret: SecretStr | None = None
     media_url_ttl_seconds: int = 6 * 3600
-    # Search (Proposal P-025/P-026): starting points for the evaluation harness to tune.
+    # Search: starting points for the evaluation harness to tune.
     # How long a search waits to embed the query before answering with keyword hits only.
     search_embedding_timeout_seconds: float = 5.0
     # Hits taken from each of keyword and semantic search before fusing; also the deepest page.
     search_candidates: int = 100
+    # Candidates the HNSW index examines per vector search (pgvector's hnsw.ef_search). At
+    # least 2 x SEARCH_CANDIDATES; 1000 found 99% of exact search's top 10 at 90,000 vectors.
+    search_ef_search: int = Field(default=1000, ge=1, le=1000)
     # Reciprocal rank fusion constant: larger flattens the gap between top and lower ranks.
     search_rrf_k: int = 60
     # Roughly how much transcript a result's excerpt shows.
     search_excerpt_ms: int = 30_000
-    # Largest recording an admin may upload. Q-19 sets no hard cap; this guards the volume.
+    # Largest recording an admin may upload, bounded to protect media storage.
     max_upload_bytes: int = 10 * 1024**3
-    # Largest single tus PATCH. The server holds one in memory, so this bounds a pod's RAM per
-    # concurrent upload; clients send smaller chunks (tus-js-client `chunkSize`).
+    # Largest Content-Length a tus PATCH may declare. The body is streamed to disk, not held
+    # in memory; the cap keeps each request short enough to finish within proxy timeouts
+    # and to hold the upload's lock only briefly. Clients send smaller chunks (tus-js-client
+    # `chunkSize`).
     upload_chunk_max_bytes: int = 64 * 1024**2
+    # Space a new upload must leave free on the media volume, so the worker still has room
+    # for the recording's playback copy. An upload that would leave less is refused.
+    upload_free_space_margin_bytes: int = 1024**3
     # How long an unfinished upload can be resumed before it is deleted. Keep the worker's
     # UPLOAD_RETENTION_DAYS the same: the worker does the deleting.
     upload_retention_days: int = 3
     # After an admin edits a line's original text, wait this long after their last edit
     # before re-translating the edited lines, so a burst of edits is one translation batch.
     retranslate_delay_seconds: int = 300
+    # Longest a live-updates stream stays open before the page reconnects, which re-checks the
+    # sign-in and keeps redeploys from waiting on open streams.
+    live_stream_max_seconds: int = 600
 
 
 @lru_cache

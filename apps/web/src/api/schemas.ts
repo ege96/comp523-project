@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { components } from "./schema.gen";
 
-// Runtime checks for API responses (D-009). Each schema `satisfies` the type generated from the
+// Runtime checks for API responses. Each schema `satisfies` the type generated from the
 // API's OpenAPI document, so `npm run gen:api` after an API change makes tsc flag any drift.
 type Schemas = components["schemas"];
 
@@ -12,6 +12,7 @@ const InterviewSummary = z.object({
   id: z.string(),
   title: z.string(),
   interviewee: z.string().nullable(),
+  interviewee_id: z.number().int().nullable(),
   primary_language: Language.nullable(),
   duration_ms: z.number().int().nullable(),
   recorded_on: z.iso.date().nullable(),
@@ -35,6 +36,10 @@ export const InterviewDetailSchema = InterviewSummary.extend({
   languages: z.array(Language),
   media: z.object({ url: z.string(), content_type: z.string(), expires_at: z.string() }).nullable(),
   status_detail: z.string().nullable(),
+  // Admins only (null for visitors): what primary_language is made of.
+  language_detected: z.string().nullable(),
+  language_detected_confidence: z.number().nullable(),
+  language_confirmed: z.string().nullable(),
 }) satisfies z.ZodType<Schemas["InterviewDetail"]>;
 
 const Segment = z.object({
@@ -62,6 +67,9 @@ export const SearchResultsSchema = z.object({
       matched_by: z.array(z.enum(["keyword", "semantic"])),
     }),
   ),
+  interviews: z.array(InterviewSummary),
+  // True when more interviews match than the few listed (first page only).
+  more_metadata_matches: z.boolean().default(false),
   has_more: z.boolean(),
   search_mode: z.enum(["hybrid", "keyword_only"]),
 }) satisfies z.ZodType<Schemas["SearchResults"]>;
@@ -70,6 +78,21 @@ export const SearchFiltersSchema = z.object({
   languages: z.array(Language),
   interviewees: z.array(z.object({ id: z.number().int(), name: z.string() })),
 }) satisfies z.ZodType<Schemas["SearchFilters"]>;
+
+export const StorageSpaceSchema = z.object({
+  usable_bytes: z.number().int(),
+  max_upload_bytes: z.number().int(),
+}) satisfies z.ZodType<Schemas["StorageSpace"]>;
+
+export const InterviewCountsSchema = z.object({
+  items: z.array(
+    z.object({
+      status: z.enum(["processing", "done", "failed"]),
+      visibility: z.enum(["public", "private"]),
+      count: z.number().int(),
+    }),
+  ),
+}) satisfies z.ZodType<Schemas["InterviewCounts"]>;
 
 export const AdminSchema = z.object({
   id: z.number().int(),
@@ -130,5 +153,13 @@ export type AdminSegment = z.infer<typeof AdminSegmentSchema>;
 export type InterviewSummary = z.infer<typeof InterviewSummary>;
 export type InterviewDetail = z.infer<typeof InterviewDetailSchema>;
 export type Segment = z.infer<typeof Segment>;
+export type RerunStep = Schemas["Rerun"]["step"];
+
+// The 409 a re-transcription gets when admins have corrected lines.
+export const RerunConflictSchema = z.object({
+  detail: z.object({ message: z.string(), corrected_lines: z.number().int() }),
+});
+
 export type Job = z.infer<typeof JobListSchema>["items"][number];
+export type InterviewCounts = z.infer<typeof InterviewCountsSchema>;
 export type Moment = z.infer<typeof SearchResultsSchema>["items"][number];

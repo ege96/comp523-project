@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminSegment } from "../api/schemas";
 import { interviewDetail } from "../test/fixtures";
 import { fakeAuthClient, renderApp, stubApi } from "../test/renderApp";
-import { buildEdit } from "./segmentEdit";
+import { matcher, replaceAll } from "./findReplace";
+import { buildEdit, rebase, type LineText } from "./segmentEdit";
 
 // The admin pages load on demand, which can be slow on a busy CI runner.
 const SLOW = { timeout: 5000 };
@@ -19,7 +20,6 @@ afterEach(() => {
 const id = interviewDetail.id;
 const base = `/api/interviews/${id}`;
 
-// Obviously made-up lines (project rule: no mockup text).
 const nepali: AdminSegment = {
   seq: 0,
   start_ms: 0,
@@ -73,6 +73,67 @@ function patches(method = "PATCH") {
 }
 
 describe("transcript editor", () => {
+  const edited = { ...english, original_edited: "Corrected speech B" };
+  const late = {
+    ...untranslated,
+    seq: 3,
+    start_ms: 620_000,
+    end_ms: 625_000,
+    original_machine: "Machine original D",
+  };
+
+  it("follows the recording and opens the line playing", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
+    stubApi(api([nepali, edited, untranslated, late], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    expect(await screen.findByText("Machine original A", {}, SLOW)).toBeTruthy();
+    const audio = screen.getByLabelText<HTMLAudioElement>("Recording");
+    expect(screen.getByRole("button", { name: "Edit the line playing" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    // Playing at 1:12 marks the third line (and scrolls the transcript box to it).
+    fireEvent.play(audio);
+    audio.currentTime = 72;
+    fireEvent.timeUpdate(audio);
+    const playing = await screen.findByText("Machine original C");
+    expect(playing.closest("[aria-current=time]")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Edit the line playing" }));
+    expect(screen.getByRole("form", { name: "Edit line at 1:10" })).toBeTruthy();
+    expect(pause).toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+
+  it("plays from a line's time and jumps by five minutes", async () => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockReturnValue(undefined);
+    stubApi(api([nepali, edited, untranslated, late], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Play from 1:05" }, SLOW));
+    const audio = screen.getByLabelText<HTMLAudioElement>("Recording");
+    expect(audio.currentTime).toBe(65);
+    const jumps = screen.getByRole("navigation", { name: "Jump to a time" });
+    await userEvent.click(within(jumps).getByRole("button", { name: "10:00" }));
+    expect(audio.currentTime).toBe(600);
+    vi.restoreAllMocks();
+  });
+
+  it("filters corrected lines and lines missing English", async () => {
+    stubApi(api([nepali, edited, untranslated, late], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Corrected 1" }, SLOW));
+    expect(screen.getByText("Corrected speech B")).toBeTruthy();
+    expect(screen.queryByText("Machine original A")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "No English 2" }));
+    expect(screen.getAllByText("No English translation")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "All 4" }));
+    expect(screen.getByText("Machine original A")).toBeTruthy();
+  });
+
   it("saves a correction, keeps the machine text and shows the line as edited", async () => {
     const saved = { ...nepali, english_edited: "Corrected english A", edited_by: "a@example.org" };
     const routes = api([nepali, english, untranslated], { body: saved });
@@ -88,7 +149,8 @@ describe("transcript editor", () => {
     const form = screen.getByRole("form", { name: "Edit line at 0:00" });
     const englishBox = within(form).getByRole("textbox", { name: "English" });
     fireEvent.change(englishBox, { target: { value: "  Corrected english A " } });
-    expect(within(form).getByText("Machine: Machine english A")).toBeTruthy();
+    // The machine text stays visible under the box, marked with its language.
+    expect(within(form).getByText("Machine english A").getAttribute("lang")).toBe("en");
 
     routes[`${base}/transcript`] = { body: { items: [saved, english, untranslated] } };
     await userEvent.click(within(form).getByRole("button", { name: "Save" }));
@@ -98,8 +160,7 @@ describe("transcript editor", () => {
       { url: `${base}/segments/0`, body: { english_text: "Corrected english A" } },
     ]);
     expect(screen.getByText("Corrected english A")).toBeTruthy();
-    expect(screen.getByText("Edited")).toBeTruthy();
-    expect(screen.getByText("by a@example.org")).toBeTruthy();
+    expect(screen.getByText("Corrected by a@example.org")).toBeTruthy();
   });
 
   it("undoes an edit with the machine text and refuses empty text", async () => {
@@ -199,8 +260,9 @@ describe("out-of-date English", () => {
     const posts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts.map(([url]) => url)).toEqual([`${base}/retranslate`]);
 
-    // Saving a flagged English edit unchanged confirms it was checked.
+    // Saving a flagged English edit unchanged confirms it only when marked as checked.
     await userEvent.click(screen.getByRole("button", { name: "Edit line at 1:10" }));
+    await userEvent.click(screen.getByRole("checkbox", { name: /English still matches/ }));
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByRole("status")).toBeTruthy();
     expect(patches()).toEqual([
@@ -245,7 +307,7 @@ describe("faster editing", () => {
     pause.mockRestore();
   });
 
-  it("opens a line by clicking its text, saves with Enter and moves on with Tab", async () => {
+  it("opens a line by clicking its text, saves with Enter and moves on with Alt+Enter", async () => {
     const saved = { ...nepali, original_edited: "Machine original A fixed" };
     const routes = api([nepali, english, untranslated], { body: saved });
     routes[`${base}/segments/1`] = { body: english };
@@ -264,15 +326,109 @@ describe("faster editing", () => {
     ]);
     expect(screen.queryByRole("form", { name: "Edit line at 0:00" })).toBeNull();
 
-    // Tab from the last box saves (nothing changed here) and opens the next line.
+    // Tab moves between the boxes and buttons without saving.
     await userEvent.click(screen.getByText("Machine original A fixed"));
     await userEvent.click(screen.getByRole("textbox", { name: "English" }));
     await userEvent.tab();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Save" }));
+    expect(patches()).toHaveLength(1);
+    // Alt+Enter saves (nothing changed here) and opens the next line.
+    await userEvent.click(screen.getByRole("textbox", { name: "English" }));
+    await userEvent.keyboard("{Alt>}{Enter}{/Alt}");
     const next = await screen.findByRole("form", { name: "Edit line at 1:05" });
     expect(document.activeElement).toBe(within(next).getByRole("textbox", { name: "Original" }));
+    // Escape closes it and gives focus back to the line's Edit button.
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("form", { name: "Edit line at 1:05" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Edit line at 1:05" }));
     expect(patches()).toHaveLength(1);
+  });
+
+  it("keeps typed text when another line is opened, and marks the passage language", async () => {
+    stubApi(api([nepali, english], {}));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    expect((await screen.findByText("Machine original A", {}, SLOW)).getAttribute("lang")).toBe(
+      "ne",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
+    const original = screen.getByRole("textbox", { name: "Original" });
+    expect(original.getAttribute("lang")).toBe("ne");
+    await userEvent.type(original, " draft");
+    // Opening another line keeps the draft and says so on the first line.
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 1:05" }));
+    expect(screen.getByText(/Unsaved changes/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
+    expect(screen.getByRole("textbox", { name: "Original" })).toHaveProperty(
+      "value",
+      "Machine original A draft",
+    );
+    // Leaving the page with a draft asks first; saying no stays.
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await userEvent.click(screen.getByRole("link", { name: /All interviews/ }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringMatching(/didn't save will be lost/));
+    expect(screen.getByRole("textbox", { name: "Original" })).toBeTruthy();
+    // Cancel throws it away on purpose.
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Unsaved changes/)).toBeNull();
+    expect(patches()).toHaveLength(0);
+  });
+
+  it("saves an English draft without undoing a replacement made in the original meanwhile", async () => {
+    const replaced = { ...nepali, original_edited: "Fixed original A", edited_by: "a@example.org" };
+    const routes = {
+      ...api([nepali, english], { body: { ...replaced, english_edited: "Machine english A ok" } }),
+      [`${base}/transcript/replace`]: { body: { items: [replaced], skipped: 0 } },
+    };
+    stubApi(routes);
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Edit line at 0:00" }, SLOW));
+    // Typed in one change, to keep this long sequence fast.
+    fireEvent.change(screen.getByRole("textbox", { name: "English" }), {
+      target: { value: "Machine english A ok" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 1:05" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Find and replace" }));
+    const panel = await screen.findByRole("form", { name: "Find and replace" });
+    fireEvent.change(within(panel).getByRole("textbox", { name: "Find" }), {
+      target: { value: "Machine original" },
+    });
+    fireEvent.change(within(panel).getByRole("textbox", { name: "Replace with" }), {
+      target: { value: "Fixed original" },
+    });
+    await userEvent.click(within(panel).getByRole("button", { name: /^Check 1 line/ }));
+    await userEvent.click(within(panel).getByRole("button", { name: /^Replace in 1 line/ }));
+    expect(await within(panel).findByRole("status")).toBeTruthy();
+
+    // The draft line opens on the replaced original, with the English typed before.
+    await userEvent.click(screen.getByRole("button", { name: "Edit line at 0:00" }));
+    const form = screen.getByRole("form", { name: "Edit line at 0:00" });
+    expect(within(form).getByRole("textbox", { name: "Original" })).toHaveProperty(
+      "value",
+      "Fixed original A",
+    );
+    await userEvent.click(within(form).getByRole("button", { name: "Save" }));
+    await vi.waitFor(() => {
+      expect(patches()).toEqual([
+        { url: `${base}/segments/0`, body: { english_text: "Machine english A ok" } },
+      ]);
+    });
+  });
+
+  it("saves only the original when the English was left alone, even if flagged", async () => {
+    const flagged = { ...nepali, english_edited: "Human english A", english_edit_stale: true };
+    stubApi(api([flagged], { body: { ...flagged, original_edited: "Machine original A fixed" } }));
+    renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Edit line at 0:00" }, SLOW));
+    await userEvent.type(screen.getByRole("textbox", { name: "Original" }), " fixed");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("status")).toBeTruthy();
+    expect(patches()).toEqual([
+      { url: `${base}/segments/0`, body: { original_text: "Machine original A fixed" } },
+    ]);
   });
 
   it("finds a misspelling, highlights it and replaces it in every line at once", async () => {
@@ -287,7 +443,8 @@ describe("faster editing", () => {
     stubApi(routes);
     renderApp(`/admin/interviews/${id}`, fakeAuthClient({ signedIn: true }));
 
-    const panel = await screen.findByRole("form", { name: "Find and replace" }, SLOW);
+    await userEvent.click(await screen.findByRole("button", { name: "Find and replace" }, SLOW));
+    const panel = await screen.findByRole("form", { name: "Find and replace" });
     await userEvent.type(within(panel).getByRole("textbox", { name: "Find" }), "SWAYAMBU");
     // Searches the original by default, where it doesn't appear.
     expect(within(panel).getByText("0 lines match")).toBeTruthy();
@@ -303,7 +460,13 @@ describe("faster editing", () => {
 
     await userEvent.type(within(panel).getByRole("textbox", { name: "Replace with" }), "Swayambhu");
     routes[`${base}/transcript`] = { body: { items: [fixedA, english, fixedC] } };
-    await userEvent.click(within(panel).getByRole("button", { name: "Replace in 2 lines" }));
+    // Nothing is saved until the before-and-after check is confirmed.
+    await userEvent.click(within(panel).getByRole("button", { name: "Check 2 lines" }));
+    const check = within(panel).getByRole("group", { name: /Replace “SWAYAMBU” with/ });
+    expect(within(check).getByText("Machine english Swayambu A").tagName).toBe("DEL");
+    expect(within(check).getByText("Machine english Swayambhu A").tagName).toBe("INS");
+    expect(patches("POST")).toEqual([]);
+    await userEvent.click(within(check).getByRole("button", { name: "Replace in 2 lines" }));
     expect((await within(panel).findByRole("status")).textContent).toMatch(/Replaced in 2 lines/);
     expect(patches("POST")).toEqual([
       {
@@ -316,22 +479,77 @@ describe("faster editing", () => {
 });
 
 describe("buildEdit", () => {
+  // A draft whose boxes started from the line's stored text.
+  const typed = (line: AdminSegment, value: LineText) => ({
+    value,
+    base: {
+      original: line.original_edited ?? line.original_machine,
+      english: line.english_edited ?? line.english_machine ?? "",
+    },
+  });
+
   it("sends only what changed, and null when it's back to the machine text", () => {
     const edited = { ...nepali, original_edited: "X", english_edited: "Y" };
     expect(
-      buildEdit(nepali, { original: "Machine original A", english: "Machine english A" }),
+      buildEdit(
+        nepali,
+        typed(nepali, { original: "Machine original A", english: "Machine english A" }),
+      ),
     ).toBe(null);
-    expect(buildEdit(edited, { original: "Machine original A ", english: "Y" })).toEqual({
-      original_text: null,
-    });
-    expect(buildEdit(untranslated, { original: "Machine original C", english: "New" })).toEqual({
-      english_text: "New",
-    });
-    expect(buildEdit(edited, { original: "X", english: "Machine english A" })).toEqual({
+    expect(
+      buildEdit(edited, typed(edited, { original: "Machine original A ", english: "Y" })),
+    ).toEqual({ original_text: null });
+    expect(
+      buildEdit(
+        untranslated,
+        typed(untranslated, { original: "Machine original C", english: "New" }),
+      ),
+    ).toEqual({ english_text: "New" });
+    expect(
+      buildEdit(edited, typed(edited, { original: "X", english: "Machine english A" })),
+    ).toEqual({
       english_text: null,
     });
-    expect(buildEdit(edited, { original: "X", english: "Y" }, { confirmEnglish: true })).toEqual({
-      english_text: "Y",
+    expect(
+      buildEdit(edited, typed(edited, { original: "X", english: "Y" }), { confirmEnglish: true }),
+    ).toEqual({ english_text: "Y" });
+  });
+
+  it("leaves out a box the admin didn't touch, even when the stored text moved on", () => {
+    const opened = { original: "Machine original A", english: "Machine english A" };
+    const draft = { value: { ...opened, english: "Better english A" }, base: opened };
+    // A replacement changed the original after the draft was started.
+    const replaced = { ...nepali, original_edited: "Replaced original A" };
+    expect(buildEdit(replaced, draft)).toEqual({ english_text: "Better english A" });
+    expect(
+      rebase(draft, { original: "Replaced original A", english: "Machine english A" }),
+    ).toEqual({
+      value: { original: "Replaced original A", english: "Better english A" },
+      base: { original: "Replaced original A", english: "Machine english A" },
     });
+  });
+
+  it("doesn't resend a flagged English edit when only the original changed", () => {
+    const flagged = {
+      ...nepali,
+      english_edited: "Human english A",
+      english_edit_stale: true,
+    };
+    const opened = { original: "Machine original A", english: "Human english A" };
+    expect(
+      buildEdit(flagged, { value: { ...opened, original: "New original A" }, base: opened }),
+    ).toEqual({ original_text: "New original A" });
+  });
+});
+
+describe("replaceAll", () => {
+  it("takes the replacement literally and matches case by Unicode rules, as the API does", () => {
+    const price = matcher("price", false);
+    if (!price) throw new Error("no matcher");
+    expect(replaceAll("The price", price, "$& and $1")).toBe("The $& and $1");
+    const school = matcher(" ÉCOLE ", false);
+    if (!school) throw new Error("no matcher");
+    expect(replaceAll("Une École, une école ", school, "maison")).toBe("Une maison, une maison");
+    expect(matcher("ÉCOLE", true)?.test("école")).toBe(false);
   });
 });

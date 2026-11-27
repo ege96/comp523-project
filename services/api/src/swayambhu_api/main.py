@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Response, status
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from swayambhu_api.admin_interviews import router as admin_interviews_router
@@ -10,26 +11,37 @@ from swayambhu_api.auth import CurrentAdmin
 from swayambhu_api.config import Settings, get_settings
 from swayambhu_api.db import DatabaseStatus, check_database
 from swayambhu_api.interviews import router as interviews_router
+from swayambhu_api.live import ChangeHub
+from swayambhu_api.live import router as live_router
 from swayambhu_api.logging_setup import install_request_context, setup_logging
 from swayambhu_api.search import get_embedder
 from swayambhu_api.search import router as search_router
 from swayambhu_api.transcript_edits import router as transcript_edits_router
 from swayambhu_api.transcript_replace import router as transcript_replace_router
-from swayambhu_api.uploads import require_upload_admin
+from swayambhu_api.uploads import require_upload_admin, space_router
 from swayambhu_api.uploads import router as uploads_router
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     setup_logging(settings.log_format, settings.log_level)
     # Builds the embedder now, so a local model loads at startup instead of on the first
     # search (and a misconfigured one is logged straight away).
     get_embedder()
-    yield
+    app.state.change_hub = ChangeHub(settings.database_url, settings.db_connect_timeout_seconds)
+    try:
+        yield
+    finally:
+        await app.state.change_hub.aclose()
 
 
 app = FastAPI(title="Swayambhu Stories API", version="0.1.0", lifespan=lifespan)
+# /api is routed straight here, past nginx's gzip. Transcripts and search pages are JSON that
+# compresses about 4x. Starlette leaves event streams, audio and video uncompressed, so live
+# updates aren't buffered and Range requests for media still work. Added before the request
+# context, so it sits inside it and sees whole responses (and their size) from the routes.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 install_request_context(app)
 app.include_router(interviews_router)
 app.include_router(search_router)
@@ -39,6 +51,8 @@ app.include_router(transcript_replace_router)
 # Router-level, so the admin check runs before tuspyserver's PATCH dependency starts reading
 # the body; its own `auth` dependency runs after that one.
 app.include_router(uploads_router, dependencies=[Depends(require_upload_admin)])
+app.include_router(space_router)
+app.include_router(live_router)
 
 
 class LivenessResponse(BaseModel):

@@ -18,6 +18,7 @@ import onnxruntime as ort  # type: ignore[import-untyped]
 from tokenizers import Tokenizer
 
 from swayambhu_providers import EmbeddingKind, ProviderError
+from swayambhu_providers.identity import local_embedding_name
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +36,7 @@ class LocalOnnxEmbedder:
         model: str,
         model_dir: Path,
         *,
+        revision: str | None = None,
         query_prefix: str = "",
         passage_prefix: str = "",
         max_tokens: int = 512,
@@ -44,7 +46,13 @@ class LocalOnnxEmbedder:
         model_file = find_model_file(model_dir)
         if model_file is None:
             raise FileNotFoundError(f"no model.onnx under {model_dir}")
-        self._model = model
+        self._name = local_embedding_name(
+            model,
+            revision,
+            query_prefix=query_prefix,
+            passage_prefix=passage_prefix,
+            max_tokens=max_tokens,
+        )
         self._prefixes: dict[EmbeddingKind, str] = {
             "query": query_prefix,
             "passage": passage_prefix,
@@ -69,8 +77,8 @@ class LocalOnnxEmbedder:
 
     @property
     def name(self) -> str:
-        # The dimension is fixed by the model, so the model id alone identifies the vectors.
-        return f"local:{self._model}"
+        # The dimension is fixed by the model; revision and preprocessing are in the name.
+        return self._name
 
     def embed(self, texts: Sequence[str], kind: EmbeddingKind) -> list[list[float]]:
         prefix = self._prefixes[kind]

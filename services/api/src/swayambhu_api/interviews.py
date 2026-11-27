@@ -1,9 +1,9 @@
-"""Reading interviews, their transcripts and their media (Proposal: paths and shapes).
+"""Reading interviews, their transcripts and their media.
 
 Anonymous visitors and admins use the same routes. What each may see is decided only by
 `visibility.visible_to`: a Private interview is a 404 for visitors, exactly like one that
 doesn't exist, so its existence isn't revealed. Visitors see Public interviews whatever their
-status (D-008), with the status and translation state to label them.
+status, with the status and translation state to label them.
 """
 
 import uuid
@@ -28,7 +28,8 @@ from swayambhu_core.storage import LocalMediaStore
 from swayambhu_api import media_urls
 from swayambhu_api.auth import CurrentViewer
 from swayambhu_api.config import Settings, get_settings
-from swayambhu_api.db import DbSession
+from swayambhu_api.db import DbSession, new_session
+from swayambhu_api.filters import InterviewFilters
 from swayambhu_api.visibility import visible_to
 
 router = APIRouter()
@@ -47,6 +48,7 @@ class InterviewSummary(BaseModel):
     id: uuid.UUID
     title: str
     interviewee: str | None
+    interviewee_id: int | None
     primary_language: Language | None
     duration_ms: int | None
     recorded_on: date | None
@@ -72,12 +74,19 @@ class InterviewDetail(InterviewSummary):
     interviewer: str | None
     location: str | None
     description: str | None
+    # Record-keeping for admins; always None for visitors.
     consent_note: str | None
     languages: list[Language]
     # None until the worker has made the browser-playable copy.
     media: Media | None
     # Which step is running or why it failed. Admins only; always None for visitors.
     status_detail: str | None
+    # What primary_language is made of, for the admin's language correction.
+    # Admins only; always None for visitors.
+    language_detected: str | None
+    # The detected language's share of the speech whose language is known, 0 to 1.
+    language_detected_confidence: float | None
+    language_confirmed: str | None
 
 
 class Segment(BaseModel):
@@ -130,6 +139,7 @@ def to_summary(
         "id": row.id,
         "title": row.title,
         "interviewee": interviewee,
+        "interviewee_id": row.interviewee_id,
         "primary_language": (
             Language(code=row.primary_language, name=language or row.primary_language)
             if row.primary_language
@@ -149,15 +159,24 @@ def to_summary(
 def list_interviews(
     session: DbSession,
     viewer: CurrentViewer,
+    where: InterviewFilters,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
     status_filter: Annotated[Status | None, Query(alias="status")] = None,
+    visibility_filter: Annotated[
+        Literal["public", "private"] | None, Query(alias="visibility")
+    ] = None,
 ) -> InterviewList:
     """Interviews the viewer may see, most recently added first, optionally only those with
-    one status (for the admin's processing queue)."""
-    query = summary_query(viewer)
+    one status and/or visibility (for the admin's work queue: "not published" is done and
+    private) and matching the same metadata filters as search. The filters only narrow
+    what `summary_query` already allows, so a visitor asking for private interviews gets
+    none."""
+    query = summary_query(viewer).where(*where)
     if status_filter is not None:
         query = query.where(InterviewRow.status == status_filter)
+    if visibility_filter is not None:
+        query = query.where(InterviewRow.visibility == visibility_filter)
     total = session.scalar(select(func.count()).select_from(query.subquery())) or 0
     rows = session.execute(
         query.order_by(InterviewRow.created_at.desc(), InterviewRow.id).limit(limit).offset(offset)
@@ -198,7 +217,8 @@ def get_interview(
     )
     media = None
     if playback is not None:
-        url, expires = media_urls.signed_url(settings, playback.id)
+        scope: media_urls.Scope = "admin" if viewer.is_admin else "public"
+        url, expires = media_urls.signed_url(settings, playback.id, scope)
         media = Media(
             url=url,
             content_type=playback.content_type,
@@ -210,10 +230,18 @@ def get_interview(
             "interviewer": interview.interviewer,
             "location": interview.location,
             "description": interview.description,
-            "consent_note": interview.consent_note,
+            "consent_note": interview.consent_note if viewer.is_admin else None,
             "languages": [Language(code=c, name=n) for c, n in languages],
             "media": media,
-            "status_detail": interview.status_detail if viewer.is_admin else None,
+            **{
+                key: getattr(interview, key) if viewer.is_admin else None
+                for key in (
+                    "status_detail",
+                    "language_detected",
+                    "language_detected_confidence",
+                    "language_confirmed",
+                )
+            },
         }
     )
 
@@ -238,16 +266,25 @@ def list_segments(
 )
 def get_media(
     media_id: int,
-    session: DbSession,
     settings: SettingsDep,
     expires: Annotated[int, Query()],
     sig: Annotated[str, Query()],
+    scope: Annotated[media_urls.Scope, Query()] = "public",
 ) -> FileResponse:
     """Stream a media file from a link made by the interview detail route. Supports HTTP
-    Range requests, so players can seek without downloading the whole file (NF5)."""
-    if not media_urls.is_valid(settings, media_id, expires, sig):
+    Range requests, so players can seek without downloading the whole file.
+
+    A visitor's link stops working as soon as its interview is made Private. The database
+    session is closed before the file is sent, so a long download holds no connection."""
+    if not media_urls.is_valid(settings, media_id, expires, scope, sig):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This media link is invalid or expired")
-    media = session.get(MediaFileRow, media_id)
+    query = select(MediaFileRow).where(MediaFileRow.id == media_id)
+    if scope == "public":
+        query = query.join(InterviewRow, InterviewRow.id == MediaFileRow.interview_id).where(
+            visible_to(None)
+        )
+    with new_session(settings) as session:
+        media = session.scalar(query)
     if media is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Media not found")
     try:

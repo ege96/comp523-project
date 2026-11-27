@@ -1,3 +1,6 @@
+import "@fontsource/mukta/400.css";
+import "@fontsource/mukta/600.css";
+import "@fontsource/mukta/800.css";
 import CssBaseline from "@mui/material/CssBaseline";
 import { ThemeProvider } from "@mui/material/styles";
 import { QueryClientProvider } from "@tanstack/react-query";

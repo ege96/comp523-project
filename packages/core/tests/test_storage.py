@@ -47,3 +47,33 @@ def test_put_can_move_instead_of_copying(tmp_path: Path) -> None:
     assert not upload.exists()
     with store.local_copy("a/original.wav") as stored:
         assert stored.read_bytes() == b"audio"
+
+
+def test_put_keeping_source_leaves_the_source_for_the_caller_to_delete(tmp_path: Path) -> None:
+    upload = tmp_path / "uploads" / "abc"
+    upload.parent.mkdir()
+    upload.write_bytes(b"audio")
+    store = LocalMediaStore(tmp_path / "media")
+    store.put_keeping_source("a/original.wav", upload)
+    store.put_keeping_source("a/original.wav", upload)  # a retry replaces it
+    assert upload.read_bytes() == b"audio"
+    with store.local_copy("a/original.wav") as path:
+        assert path.read_bytes() == b"audio"
+    assert [p.name for p in path.parent.iterdir()] == ["original.wav"]  # no partials left
+
+
+def test_delete_prefix_removes_one_folder_only(tmp_path: Path) -> None:
+    source = tmp_path / "f"
+    source.write_bytes(b"audio")
+    store = LocalMediaStore(tmp_path / "media")
+    for key in ("interviews/a/original.wav", "interviews/a/playback.m4a", "interviews/ab/x"):
+        store.put(key, source)
+    store.delete_prefix("interviews/a")
+    store.delete_prefix("interviews/a")  # already gone: fine
+    assert [f.name for f in store.folders("interviews")] == ["ab"]
+    with pytest.raises(ValueError, match="Invalid storage key"):
+        store.delete_prefix("interviews/..")
+
+
+def test_folders_of_a_missing_prefix_is_empty(tmp_path: Path) -> None:
+    assert list(LocalMediaStore(tmp_path).folders("interviews")) == []

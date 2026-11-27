@@ -1,203 +1,197 @@
 import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
-import Checkbox from "@mui/material/Checkbox";
 import Container from "@mui/material/Container";
-import Divider from "@mui/material/Divider";
-import FormControlLabel from "@mui/material/FormControlLabel";
-import MenuItem from "@mui/material/MenuItem";
 import Skeleton from "@mui/material/Skeleton";
 import Stack from "@mui/material/Stack";
-import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import type { SubmitEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { searchQueries, type SearchParams } from "../api/client";
 import { useAuth } from "../auth/useAuth";
+import { TextLink } from "../components/links";
+import { FilterPanel, FilterSummary } from "../components/FilterPanel";
+import { isFiltered, pickFilters } from "../filters";
+import { InterviewList } from "../components/InterviewList";
 import { MomentCard } from "../components/MomentCard";
+import { Plate } from "../components/Plate";
 import { SearchBox } from "../components/SearchBox";
+import { visuallyHidden } from "../components/visuallyHidden";
 
 const route = getRouteApi("/search");
 
-// Show the "All …" choice (value "") as the selection rather than an empty box.
-const allOption = { select: { displayEmpty: true }, inputLabel: { shrink: true } } as const;
-
 export function SearchPage() {
-  const params = route.useSearch();
+  const { q, ...filters } = route.useSearch();
+  const params = { q, ...filters };
+  const navigate = useNavigate();
+  // One polite status line for the whole page, always mounted so screen readers hear changes.
+  const [status, setStatus] = useState("");
   return (
-    <Container sx={{ py: 6 }}>
-      <Stack spacing={4}>
-        <Typography variant="h1">Search the archive</Typography>
-        {/* key: a new query in the URL resets the uncontrolled field. */}
-        <SearchBox key={params.q} defaultValue={params.q} />
-        {params.q ? (
+    <>
+      <Plate>
+        <Stack spacing={2.5} sx={{ maxWidth: 820 }}>
+          <Typography variant="h1" sx={{ fontSize: { xs: "1.75rem", md: "2.25rem" } }}>
+            Search the archive
+          </Typography>
+          {/* key: a new query in the URL resets the uncontrolled field. */}
+          <SearchBox key={q} defaultValue={q} filters={filters} />
+        </Stack>
+      </Plate>
+      <Box role="status" aria-live="polite" sx={visuallyHidden}>
+        {q ? status : ""}
+      </Box>
+      <Container sx={{ pt: { xs: 3, md: 5 } }}>
+        {q ? (
           <Box
             sx={{
               display: "grid",
-              gap: { xs: 4, md: 5 },
-              gridTemplateColumns: { md: "260px 1fr" },
+              gap: { xs: 3, md: 6 },
+              gridTemplateColumns: { md: "15rem minmax(0, 1fr)" },
               alignItems: "start",
             }}
           >
             {/* key: going back or forward resets the uncontrolled filter fields to the URL. */}
-            <Filters key={JSON.stringify(params)} params={params} />
-            <Results params={params} />
+            <FilterPanel
+              key={JSON.stringify(params)}
+              filters={filters}
+              heading="Filter results"
+              onApply={(applied) => void navigate({ to: "/search", search: { q, ...applied } })}
+              onClear={() => void navigate({ to: "/search", search: { q } })}
+              note="Results are moments in transcripts. Several moments may come from the same interview."
+            />
+            <Results params={params} onStatus={setStatus} />
           </Box>
         ) : (
-          <Typography color="text.secondary">
-            Type a question or some words to find moments in the interview transcripts.
+          <Typography color="text.secondary" sx={{ maxWidth: "60ch" }}>
+            Search finds moments by meaning as well as by exact words, in the original transcripts
+            and their English translations. Or{" "}
+            <TextLink to="/interviews">browse all interviews</TextLink>.
           </Typography>
         )}
-      </Stack>
-    </Container>
+      </Container>
+    </>
   );
 }
 
-/** Uncontrolled: the choices only matter when applied, and then they go into the URL. */
-function Filters({ params }: { params: SearchParams }) {
+function Results({
+  params,
+  onStatus,
+}: {
+  params: SearchParams;
+  onStatus: (message: string) => void;
+}) {
   const { viewer } = useAuth();
   const navigate = useNavigate();
-  // Choices come only from interviews this viewer may see (the API filters them).
-  const { data, isError } = useQuery({ ...searchQueries.filters(viewer), enabled: viewer.ready });
-  const filtered =
-    params.language !== undefined ||
-    params.interviewee !== undefined ||
-    params.from !== undefined ||
-    params.to !== undefined;
+  const {
+    data,
+    isError,
+    isFetchNextPageError,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetching,
+  } = useInfiniteQuery({ ...searchQueries.moments(viewer, params), enabled: viewer.ready });
+  const filtered = isFiltered(params);
+  const clearFilters = () => void navigate({ to: "/search", search: { q: params.q } });
 
-  const apply = (event: SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const text = (name: string) => {
-      const value = form.get(name);
-      return typeof value === "string" && value ? value : undefined;
-    };
-    const interviewee = text("interviewee");
-    const from = text("from");
-    const to = text("to");
-    void navigate({
-      to: "/search",
-      search: {
-        q: params.q,
-        language: text("language"),
-        interviewee:
-          interviewee === undefined || interviewee === "unknown"
-            ? interviewee
-            : Number(interviewee),
-        from,
-        to,
-        undated: (from ?? to) && form.get("undated") ? true : undefined,
-      },
-    });
-  };
+  const moments = data?.pages.flatMap((page) => page.items) ?? [];
+  const pageCount = data?.pages.length ?? 0;
+  // Interviews whose title, description, people or place match come with the first page.
+  const interviews = data?.pages[0]?.interviews ?? [];
+  const moreInterviews = data?.pages[0]?.more_metadata_matches ?? false;
 
-  return (
-    <Stack component="form" spacing={2.5} onSubmit={apply} aria-label="Filter results">
-      <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600 }}>
-        Filter results
-      </Typography>
-      {isError ? <Alert severity="warning">Filter choices couldn&apos;t be loaded.</Alert> : null}
-      <TextField
-        select
-        name="language"
-        slotProps={allOption}
-        label="Language"
-        defaultValue={params.language ?? ""}
-        helperText="Any language heard in the interview"
-      >
-        <MenuItem value="">All languages</MenuItem>
-        {data?.languages.map((l) => (
-          <MenuItem key={l.code} value={l.code}>
-            {l.name}
-          </MenuItem>
-        ))}
-        {/* Keeps a value from a shared link selectable before (or without) the list. */}
-        {params.language && !data?.languages.some((l) => l.code === params.language) ? (
-          <MenuItem value={params.language}>{params.language}</MenuItem>
-        ) : null}
-      </TextField>
-      <TextField
-        select
-        name="interviewee"
-        slotProps={allOption}
-        label="Interviewee"
-        defaultValue={params.interviewee === undefined ? "" : String(params.interviewee)}
-      >
-        <MenuItem value="">All interviewees</MenuItem>
-        {data?.interviewees.map((p) => (
-          <MenuItem key={p.id} value={String(p.id)}>
-            {p.name}
-          </MenuItem>
-        ))}
-        <MenuItem value="unknown">Unknown</MenuItem>
-        {typeof params.interviewee === "number" &&
-        !data?.interviewees.some((p) => p.id === params.interviewee) ? (
-          <MenuItem value={String(params.interviewee)}>Interviewee {params.interviewee}</MenuItem>
-        ) : null}
-      </TextField>
-      <Stack spacing={1.5}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-          Recording date
-        </Typography>
-        <TextField
-          name="from"
-          type="date"
-          label="From"
-          defaultValue={params.from ?? ""}
-          slotProps={{ inputLabel: { shrink: true } }}
-        />
-        <TextField
-          name="to"
-          type="date"
-          label="To"
-          defaultValue={params.to ?? ""}
-          slotProps={{ inputLabel: { shrink: true } }}
-        />
-        <FormControlLabel
-          control={<Checkbox name="undated" defaultChecked={params.undated ?? false} />}
-          label="Also show undated interviews"
-          slotProps={{ typography: { variant: "body2" } }}
-        />
-      </Stack>
-      <Stack direction="row" spacing={1}>
-        <Button type="submit" variant="outlined">
-          Apply filters
-        </Button>
-        {filtered ? (
-          <Button onClick={() => void navigate({ to: "/search", search: { q: params.q } })}>
-            Clear
-          </Button>
-        ) : null}
-      </Stack>
-      <Divider />
-      <Typography variant="body2" color="text.secondary">
-        Results are moments in transcripts. Several moments may come from the same interview.
-      </Typography>
-    </Stack>
-  );
-}
+  // Never a count (product rule): just what changed.
+  const message =
+    data === undefined
+      ? isError
+        ? "" // The error Alert speaks for itself.
+        : "Searching transcripts…"
+      : moments.length === 0 && interviews.length === 0
+        ? "No interviews or moments matched"
+        : moments.length === 0
+          ? "Interviews matched, no transcript moments"
+          : pageCount > 1
+            ? "More moments loaded"
+            : "Results updated";
+  useEffect(() => {
+    onStatus(message);
+  }, [message, onStatus]);
 
-function Results({ params }: { params: SearchParams }) {
-  const { viewer } = useAuth();
-  const { data, isPending, isError, hasNextPage, fetchNextPage, isFetchingNextPage } =
-    useInfiniteQuery({ ...searchQueries.moments(viewer, params), enabled: viewer.ready });
+  // A new query or new filters move focus to the results heading, so keyboard users keep
+  // their place; the first search on arriving leaves focus where the browser put it.
+  const key = JSON.stringify(params);
+  const focusedFor = useRef(key);
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    if (focusedFor.current !== key && heading.current && !isFetching) {
+      focusedFor.current = key;
+      heading.current.focus();
+    }
+  });
 
-  if (isError)
-    return <Alert severity="error">Search isn&apos;t working right now. Please try again.</Alert>;
-  if (isPending) return <Skeleton variant="rounded" height={400} />;
+  // "Show more" keeps focus on its button; when it was the last page the button goes, so
+  // focus moves to the first new moment's link instead.
+  const list = useRef<HTMLDivElement>(null);
+  const loadedFrom = useRef<number | null>(null);
+  useEffect(() => {
+    const from = loadedFrom.current;
+    if (from === null || isFetchingNextPage) return;
+    loadedFrom.current = null;
+    if (!hasNextPage && from < moments.length)
+      list.current?.children[from]?.querySelector<HTMLElement>("a")?.focus();
+  });
 
-  const moments = data.pages.flatMap((page) => page.items);
+  if (data === undefined) {
+    return isError ? (
+      <Alert severity="error">Search isn&apos;t working right now. Please try again.</Alert>
+    ) : (
+      <Skeleton variant="rectangular" height={400} />
+    );
+  }
+
   const keywordOnly = data.pages.some((page) => page.search_mode === "keyword_only");
   return (
-    <Stack spacing={2.5} component="section" aria-label="Search results">
-      <Box>
-        <Typography variant="subtitle1" component="h2" sx={{ fontWeight: 600 }}>
+    <Stack spacing={2} component="section" aria-labelledby="results-heading">
+      <Typography
+        variant="h2"
+        sx={{ fontSize: "1.5rem" }}
+        id="results-heading"
+        ref={heading}
+        tabIndex={-1}
+      >
+        Search results
+      </Typography>
+      {/* With no results the button sits by that message instead, so there's only one. */}
+      <FilterSummary
+        filters={pickFilters(params)}
+        onClear={clearFilters}
+        showClear={moments.length > 0}
+      />
+      {interviews.length > 0 ? (
+        <Stack spacing={1} component="section" aria-labelledby="interview-matches-heading">
+          <Typography variant="subtitle1" component="h3" id="interview-matches-heading">
+            Top interviews matching your words
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Found in the title, description, interviewee, interviewer or place.
+          </Typography>
+          <InterviewList interviews={interviews} />
+          {moreInterviews ? (
+            <Typography variant="body2" color="text.secondary">
+              More interviews match than are shown here. Add words or filters to narrow them down.
+            </Typography>
+          ) : null}
+        </Stack>
+      ) : null}
+      <Box component="section" aria-labelledby="moments-heading">
+        <Typography variant="subtitle1" component="h3" id="moments-heading">
           Relevant transcript moments
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          English translations shown when available · Results are ranked by relevance.
+          Most relevant first. Each shows the original words, with the English below when there is a
+          translation. Transcribed and translated by machine; lines may contain errors.
         </Typography>
       </Box>
       {keywordOnly ? (
@@ -207,23 +201,50 @@ function Results({ params }: { params: SearchParams }) {
         </Alert>
       ) : null}
       {moments.length === 0 ? (
-        <Typography color="text.secondary">
-          No moments matched. Try different words, a question, or fewer filters.
-        </Typography>
+        <Stack spacing={1} sx={{ alignItems: "flex-start" }}>
+          <Typography color="text.secondary">
+            No transcript moments matched. Try different words, a question, or fewer filters.
+          </Typography>
+          {filtered ? (
+            <Button variant="outlined" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          ) : null}
+        </Stack>
       ) : (
         <>
-          {moments.map((moment) => (
-            <MomentCard key={`${moment.interview.id}:${String(moment.start_ms)}`} moment={moment} />
-          ))}
+          <Stack spacing={2} ref={list}>
+            {moments.map((moment) => (
+              <MomentCard
+                key={`${moment.interview.id}:${String(moment.start_ms)}`}
+                moment={moment}
+              />
+            ))}
+          </Stack>
           {hasNextPage ? (
-            <Button
-              variant="outlined"
-              disabled={isFetchingNextPage}
-              onClick={() => void fetchNextPage()}
-              sx={{ alignSelf: "center" }}
-            >
-              {isFetchingNextPage ? "Loading…" : "Show more moments"}
-            </Button>
+            <Stack spacing={1.5} sx={{ alignItems: "flex-start" }}>
+              {isFetchNextPageError ? (
+                <Alert severity="error">
+                  More moments couldn&apos;t be loaded. The ones above are still here.
+                </Alert>
+              ) : null}
+              {/* Not disabled while loading, so it keeps keyboard focus. */}
+              <Button
+                variant="outlined"
+                aria-busy={isFetchingNextPage}
+                onClick={() => {
+                  if (isFetchingNextPage) return;
+                  loadedFrom.current = moments.length;
+                  void fetchNextPage();
+                }}
+              >
+                {isFetchingNextPage
+                  ? "Loading…"
+                  : isFetchNextPageError
+                    ? "Try loading more again"
+                    : "Show more moments"}
+              </Button>
+            </Stack>
           ) : (
             <Typography variant="body2" color="text.secondary">
               End of results. Try a different question or broaden your filters.

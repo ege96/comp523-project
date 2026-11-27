@@ -46,7 +46,12 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "S", "N"]
 source = ["swayambhu_core"]
 branch = true
 # Need a database: covered by the api and worker integration tests instead.
-omit = ["*/swayambhu_core/models.py", "*/swayambhu_core/jobs.py"]
+omit = [
+    "*/swayambhu_core/models.py",
+    "*/swayambhu_core/jobs.py",
+    "*/swayambhu_core/languages.py",
+    "*/swayambhu_core/transcripts.py",
+]
 
 [tool.coverage.report]
 fail_under = 80

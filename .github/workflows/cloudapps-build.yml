@@ -1,9 +1,7 @@
 name: CloudApps build
 
-# Calls the CloudApps (OpenShift) Generic webhook of each app whose files changed on main.
-# Changes are counted from the commit the last successful run built, so a push that got
-# no run, or whose run failed, is caught up by the next one. A manual run rebuilds all.
-# Setup: cloudapps_deploy.md §8 A2.
+# Trigger changed-app build hooks since the last successful workflow.
+# Manual runs trigger all configured hooks.
 
 on:
   push:

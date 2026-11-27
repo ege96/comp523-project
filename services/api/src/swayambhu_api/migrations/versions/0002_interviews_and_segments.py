@@ -1,7 +1,6 @@
-"""Interviews, transcript segments, search chunks and embeddings (Proposals P-012..P-017).
+"""Interviews, transcript segments, search chunks and embeddings.
 
-Design and reasoning: notes/schema_proposal.md in the project files. All new tables, so the
-previous release keeps working while this runs (the API migrates on startup, PR #19).
+All new tables, so the previous release keeps working while this runs (the API migrates on startup).
 
 Revision ID: 0002
 Revises: 0001

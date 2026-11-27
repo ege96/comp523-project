@@ -1,4 +1,4 @@
-"""Admins table (D-005), moved here from db/init/002_admins.sql.
+"""Admins table, moved here from db/init/002_admins.sql.
 
 Revision ID: 0001
 Revises:

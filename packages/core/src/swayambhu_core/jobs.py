@@ -1,22 +1,45 @@
-"""The worker's job queue: a Postgres table (`jobs`) instead of a separate broker (Q-18).
+"""The worker's job queue: a Postgres table (`jobs`) instead of a separate broker.
 
 None of these functions commit; the caller owns the transaction. Commit right after `claim`
 so other workers see the job as taken.
+
+Each claim adds one to `attempts`, so `(id, attempts)` identifies one worker's claim. When a
+worker stops heartbeating and another reclaims the job, the first worker's heartbeat,
+failure, completion and output publication find the claim gone and raise `ClaimLostError`.
 """
 
 import uuid
 from dataclasses import dataclass
 from datetime import timedelta
+from enum import IntEnum
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from swayambhu_core.models import JobRow
 
 # Retry delay after the first, second, ... failed attempt.
 RETRY_BACKOFF = (timedelta(seconds=30), timedelta(minutes=2), timedelta(minutes=10))
+
+
+class Priority(IntEnum):
+    """Which due job a worker takes first: the highest priority, then the oldest.
+
+    An admin waiting on an edit or a retry shouldn't wait behind a batch of uploads, and an
+    interview that has started should finish before the next one starts, so a batch of
+    uploads comes back one interview at a time instead of all at the end.
+    """
+
+    NEW = 0  # a new recording's first steps, and bulk re-indexing
+    NEXT_STEP = 1  # the next step of an interview that is already being processed
+    ADMIN = 2  # something an admin did and is waiting for: an edit, a retry, a re-run
+
+
+class ClaimLostError(Exception):
+    """This worker's claim on the job ended: another worker reclaimed it, or it finished."""
 
 
 @dataclass(frozen=True)
@@ -28,22 +51,40 @@ class Job:
     max_attempts: int
 
 
-def enqueue(session: Session, kind: str, interview_id: uuid.UUID) -> None:
-    """Queue a step for an interview. A no-op if that step is already queued.
+def _raised_priority(priority: Priority) -> ColumnElement[int]:
+    """An already-queued job keeps the higher of its priority and the new one."""
+    return func.greatest(JobRow.priority, int(priority))
+
+
+def enqueue(
+    session: Session,
+    kind: str,
+    interview_id: uuid.UUID,
+    priority: Priority = Priority.NEXT_STEP,
+) -> None:
+    """Queue a step for an interview. If that step is already queued, only raise its priority.
 
     If the step is running, the new job waits for it to finish and then runs again, so a
     change made after the running job read its inputs (an admin's edit) isn't missed.
     """
     session.execute(
         insert(JobRow)
-        .values(kind=kind, interview_id=interview_id)
-        .on_conflict_do_nothing(
-            index_elements=["interview_id", "kind"], index_where=text("state = 'queued'")
+        .values(kind=kind, interview_id=interview_id, priority=int(priority))
+        .on_conflict_do_update(
+            index_elements=["interview_id", "kind"],
+            index_where=text("state = 'queued'"),
+            set_={"priority": _raised_priority(priority)},
         )
     )
 
 
-def schedule(session: Session, kind: str, interview_id: uuid.UUID, delay: timedelta) -> None:
+def schedule(
+    session: Session,
+    kind: str,
+    interview_id: uuid.UUID,
+    delay: timedelta,
+    priority: Priority = Priority.NEXT_STEP,
+) -> None:
     """Queue a step to run after `delay`, moving an already-queued one to that time.
 
     Used to batch bursts of edits: each save pushes the step back, so it runs once, `delay`
@@ -52,11 +93,11 @@ def schedule(session: Session, kind: str, interview_id: uuid.UUID, delay: timede
     run_after = func.now() + delay
     session.execute(
         insert(JobRow)
-        .values(kind=kind, interview_id=interview_id, run_after=run_after)
+        .values(kind=kind, interview_id=interview_id, run_after=run_after, priority=int(priority))
         .on_conflict_do_update(
             index_elements=["interview_id", "kind"],
             index_where=text("state = 'queued'"),
-            set_={"run_after": run_after},
+            set_={"run_after": run_after, "priority": _raised_priority(priority)},
         )
     )
 
@@ -66,7 +107,9 @@ def _to_job(row: JobRow) -> Job:
 
 
 def claim(session: Session, lease: timedelta) -> Job | None:
-    """Take the next due job, or a running one whose worker stopped heartbeating."""
+    """Take the next due job, or a running one whose worker stopped heartbeating.
+
+    Due jobs go highest priority first, then oldest first (see `Priority`)."""
     stale = (JobRow.state == "running") & (JobRow.heartbeat_at < func.now() - lease)
     running = aliased(JobRow)
     same_step_running = (
@@ -84,7 +127,7 @@ def claim(session: Session, lease: timedelta) -> Job | None:
             ((JobRow.state == "queued") & (JobRow.run_after <= func.now()) & ~same_step_running)
             | (stale & (JobRow.attempts < JobRow.max_attempts))
         )
-        .order_by(JobRow.run_after, JobRow.id)
+        .order_by(JobRow.priority.desc(), JobRow.run_after, JobRow.id)
         .limit(1)
         .with_for_update(skip_locked=True)
         .scalar_subquery()
@@ -117,14 +160,36 @@ def reap_stale(session: Session, lease: timedelta) -> list[Job]:
     return [_to_job(row) for row in rows]
 
 
+def _claimed(job: Job) -> ColumnElement[bool]:
+    """The job is still running under this claim."""
+    return (JobRow.id == job.id) & (JobRow.state == "running") & (JobRow.attempts == job.attempts)
+
+
+def _update_claimed(session: Session, job: Job, **values: object) -> None:
+    updated = session.scalar(
+        update(JobRow).where(_claimed(job)).values(**values).returning(JobRow.id)
+    )
+    if updated is None:
+        raise ClaimLostError(f"job {job.id} attempt {job.attempts} is no longer this worker's")
+
+
+def hold_claim(session: Session, job: Job) -> None:
+    """Check that this worker still holds the job, and lock its row until the transaction
+    ends so no other worker can reclaim it before the caller commits. Call it in the
+    transaction that publishes the step's output. Raises ClaimLostError otherwise."""
+    held = session.scalar(select(JobRow.id).where(_claimed(job)).with_for_update())
+    if held is None:
+        raise ClaimLostError(f"job {job.id} attempt {job.attempts} is no longer this worker's")
+
+
 def heartbeat(session: Session, job: Job) -> None:
-    session.execute(update(JobRow).where(JobRow.id == job.id).values(heartbeat_at=func.now()))
+    """Renew the lease. Raises ClaimLostError if another worker took the job over."""
+    _update_claimed(session, job, heartbeat_at=func.now())
 
 
 def complete(session: Session, job: Job) -> None:
-    session.execute(
-        update(JobRow).where(JobRow.id == job.id).values(state="done", finished_at=func.now())
-    )
+    """Raises ClaimLostError if another worker took the job over; roll back then."""
+    _update_claimed(session, job, state="done", finished_at=func.now())
 
 
 def _queued_again(session: Session, job: Job) -> bool:
@@ -141,16 +206,13 @@ def _queued_again(session: Session, job: Job) -> bool:
 
 
 def _finish_failed(session: Session, job: Job, error: str) -> None:
-    session.execute(
-        update(JobRow)
-        .where(JobRow.id == job.id)
-        .values(state="failed", finished_at=func.now(), last_error=error)
-    )
+    _update_claimed(session, job, state="failed", finished_at=func.now(), last_error=error)
 
 
 def fail(session: Session, job: Job, error: str, *, retryable: bool) -> bool:
     """Record a failure. Returns True if the step will run again: as a later retry of this
-    job, or through a newer job for the same step that is already waiting."""
+    job, or through a newer job for the same step that is already waiting. Raises ClaimLostError
+    if another worker took the job over: that worker records the outcome."""
     if not retryable:
         _finish_failed(session, job, error)
         return False
@@ -158,15 +220,13 @@ def fail(session: Session, job: Job, error: str, *, retryable: bool) -> bool:
         delay = RETRY_BACKOFF[min(job.attempts, len(RETRY_BACKOFF)) - 1]
         try:
             with session.begin_nested():
-                session.execute(
-                    update(JobRow)
-                    .where(JobRow.id == job.id)
-                    .values(
-                        state="queued",
-                        run_after=func.now() + delay,
-                        heartbeat_at=None,
-                        last_error=error,
-                    )
+                _update_claimed(
+                    session,
+                    job,
+                    state="queued",
+                    run_after=func.now() + delay,
+                    heartbeat_at=None,
+                    last_error=error,
                 )
             return True
         except IntegrityError:
