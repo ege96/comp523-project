@@ -10,11 +10,11 @@ from datetime import timedelta
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
-from swayambhu_core import jobs, vector_index
+from swayambhu_core import jobs
 from swayambhu_core.storage import MediaStore
 from swayambhu_providers import ProviderError
 
-from swayambhu_worker import audio
+from swayambhu_worker import audio, search_index
 from swayambhu_worker.audio import AudioError
 from swayambhu_worker.messages import WORKER_STOPPED, explain
 from swayambhu_worker.steps import GIVE_UP, STEPS, Providers, StepError
@@ -96,7 +96,7 @@ class JobRunner:
         try:
             with self._new_session() as session:
                 engine = session.get_bind()
-            vector_index.ensure(engine, self._providers.embedder.name)  # type: ignore[arg-type]
+            search_index.ensure(engine, self._providers.embedder.name)  # type: ignore[arg-type]
         except Exception:
             log.exception("could not build the search index; search scans every embedding")
 

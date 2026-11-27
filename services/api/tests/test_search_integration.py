@@ -316,8 +316,8 @@ def test_semantic_search_walks_the_hnsw_index_once_the_worker_builds_it(
 ) -> None:
     engine = db_session.get_bind()
     assert isinstance(engine, Engine)
-    assert vector_index.ensure(engine, EMBEDDER.name)  # what the worker does after indexing
-    assert not vector_index.ensure(engine, EMBEDDER.name)  # already there
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(text(vector_index.create_statement(8)))  # what the worker builds
     try:
         [vector] = EMBEDDER.embed(["prayer wheels"], "query")
         query = _semantic_query(Viewer(admin=None), [], EMBEDDER.name, vector, 100)
@@ -327,9 +327,11 @@ def test_semantic_search_walks_the_hnsw_index_once_the_worker_builds_it(
             for k, v in compiled.params.items()
         }
         with engine.connect() as connection:
-            connection.exec_driver_sql("SET enable_seqscan = off")  # a tiny table is scanned
+            # A table this small is otherwise scanned and sorted.
+            connection.exec_driver_sql("SET enable_seqscan = off")
+            connection.exec_driver_sql("SET enable_sort = off")
             plan = connection.exec_driver_sql(f"EXPLAIN {compiled}", params).scalars().all()
-        assert any(vector_index.index_name(8) in line for line in plan)
+        assert any(vector_index.index_name(8) in line for line in plan), plan
         # Same moments as without the index.
         visitor = as_viewer(client)
         assert moments(visitor, "prayer wheels")[0] == ("public", 40_000, (3,), ("semantic",))
