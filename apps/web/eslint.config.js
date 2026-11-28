@@ -19,4 +19,7 @@ export default tseslint.config(
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },
   },
+  // Playwright tests: fixtures call `use` (not React's hook) and take `{}` when they need no
+  // other fixture.
+  { files: ["e2e/**"], rules: { "react-hooks/rules-of-hooks": "off", "no-empty-pattern": "off" } },
 );

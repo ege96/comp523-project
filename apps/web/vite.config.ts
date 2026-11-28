@@ -5,11 +5,15 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react()],
   server: {
-    // In dev, forward API calls to the FastAPI server so the browser sees one origin.
-    proxy: { "/api": "http://localhost:8000" },
+    // In dev, forward API calls to the FastAPI server so the browser sees one origin. The
+    // Host header is kept, so absolute URLs the API builds (tus upload Locations) point back
+    // at this server rather than straight at :8000, which the browser would block (CORS).
+    proxy: { "/api": { target: "http://localhost:8000", changeOrigin: false } },
   },
   test: {
     environment: "jsdom",
+    // e2e/ holds the Playwright browser tests (npm run e2e), not Vitest tests.
+    include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",
       include: ["src/**/*.{ts,tsx}"],
